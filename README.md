@@ -1,5 +1,7 @@
 # Rescened
 
+Repeatable local API/database performance tests and their interpretation are documented in [the benchmark guide](./benchmarks/README.md).
+
 Rescened is a community-curated album catalog. Albums, reviews, boards, and notifications receive domain-specific immutable UUIDs (`albumId`, `reviewId`, `boardId`, and `notificationId`); MongoDB `_id` values remain internal implementation details. Search, album detail, reviews, likes, profiles, activity, and boards use the local catalog only.
 
 Application, provider, and operator failures are cataloged in the [error and status code reference](./docs/ERROR_CODES.md), including HTTP meanings, rate-limit budgets, report reasons, workflow statuses, and command exit codes.

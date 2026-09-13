@@ -1,7 +1,9 @@
 node_modules/
+.benchmarks/
 dist/
 .cache/
 .migration/
 .env
 .DS_Store
 .agents/
+benchmarks/

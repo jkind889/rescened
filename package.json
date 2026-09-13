@@ -4,6 +4,10 @@
   "description": "",
   "main": "server.js",
   "scripts": {
+    "benchmark": "node benchmarks/run.cjs",
+    "benchmark:smoke": "node benchmarks/run.cjs --mode smoke --warmup 2",
+    "benchmark:explain": "node benchmarks/run.cjs --mode explain",
+    "benchmark:report": "node benchmarks/report.cjs",
     "test": "node --test",
     "test:integration": "node scripts/runIntegrationTests.js",
     "test:catalog-live": "RUN_LIVE_CATALOG_FETCH=true node --test tests/listenBrainzCatalog.live.test.js",
