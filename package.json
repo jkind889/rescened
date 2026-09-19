@@ -4,6 +4,7 @@
   "description": "",
   "main": "server.js",
   "scripts": {
+    "search:evaluate": "node benchmarks/search-quality/run.cjs",
     "benchmark": "node benchmarks/run.cjs",
     "benchmark:smoke": "node benchmarks/run.cjs --mode smoke --warmup 2",
     "benchmark:explain": "node benchmarks/run.cjs --mode explain",

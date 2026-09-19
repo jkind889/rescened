@@ -24,7 +24,7 @@ function filesIn(target) {
 
 const violations = [];
 for (const file of roots.flatMap(filesIn)) {
-  if (!/\.(js|jsx)$/.test(file)) continue;
+  if (!/\.(js|jsx|cjs)$/.test(file)) continue;
   const lines = fs.readFileSync(file, "utf8").split("\n");
   lines.forEach((line, index) => {
     if (allowed.some((token) => line.includes(token))) return;
