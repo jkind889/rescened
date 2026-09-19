@@ -1,7 +1,7 @@
 const express = require("express");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const { normalizeCatalogAlbum, toSearchResult } = require("./utils/albumCatalog");
-const { buildCatalogSearchQuery, escapeRegex } = require("./utils/catalogSearch");
+const { buildRankedCatalogSearchPipeline, escapeRegex } = require("./utils/catalogSearch");
 const {
   MusicBrainzSearchError,
   getSuggestionDraft,
@@ -92,11 +92,11 @@ function externalSearchUnavailable(res) {
 }
 
 async function findLocal(query, { skip = 0, limit, paginated = false }) {
-  const searchQuery = buildCatalogSearchQuery(query);
   // Search exposes only a next-page flag, not a total. One extra row answers
   // that question without counting every match across the catalog.
-  const albums = await AlbumCatalog.find(searchQuery)
-    .sort({ artistDisplayName: 1, title: 1 }).skip(skip).limit(limit + (paginated ? 1 : 0));
+  const albums = await AlbumCatalog.aggregate(buildRankedCatalogSearchPipeline(query, {
+    skip, limit: limit + (paginated ? 1 : 0),
+  }));
   return { albums: paginated ? albums.slice(0, limit) : albums, hasNextPage: paginated && albums.length > limit };
 }
 
