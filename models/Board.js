@@ -31,6 +31,7 @@ const boardSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    interactionRevision: { type: Number, default: 0, select: false },
   },
   { timestamps: true },
 );

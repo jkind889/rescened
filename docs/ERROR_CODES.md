@@ -49,6 +49,8 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `REVIEW_DELETION_UNAVAILABLE` | `503` | Review deletion cannot run because transaction-capable MongoDB is unavailable. No cascade write is attempted. |
 | `REVIEW_LIKE_UNAVAILABLE` | `503` | Review-like and notification mutation cannot run because transaction-capable MongoDB is unavailable. |
 | `REVIEW_PIN_UNAVAILABLE` | `503` | Pinning a review cannot run because transaction-capable MongoDB is unavailable. |
+| `DIARY_WRITE_UNAVAILABLE` | `503` | A diary or listen-membership mutation requires MongoDB transactions. No partial fallback writes are attempted. |
+| `BOARD_WRITE_UNAVAILABLE` | `503` | Board saves, album removals, deletion, or board pinning require MongoDB transactions. |
 
 ### Request validation and lookup
 
@@ -61,7 +63,20 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `INVALID_REVIEW_ID` | `400` | A review mutation received a malformed or client-supplied public UUID-v4 `reviewId`; Mongo ObjectIds are rejected. |
 | `INVALID_REVIEW_CURSOR` | `400` | A review-list pagination cursor could not be decrypted or does not match its list and sort. |
 | `INVALID_REVIEW_SORT` | `400` | A review list requested a sort other than `recent` or `popular`. |
-| `INVALID_IDEMPOTENCY_KEY` | `400` | A review creation request omitted or supplied a malformed UUID-v4 `Idempotency-Key`. |
+| `INVALID_IDEMPOTENCY_KEY` | `400` | A review or diary creation request omitted or supplied a malformed UUID-v4 `Idempotency-Key`. |
+| `INVALID_DIARY_REQUEST` | `400` | A diary/board mutation contains unsupported fields, or a diary filter, limit, or board list is invalid. |
+| `INVALID_LISTEN_ID` | `400` | A listen identifier is not a public UUID-v4. |
+| `INVALID_ALBUM_ID` | `400` | A diary album identifier is not a public UUID-v4. |
+| `INVALID_LISTEN_DATE` | `400` | A calendar date is invalid, a listen is in the future in the supplied timezone, or a date range is reversed. |
+| `INVALID_TIME_ZONE` | `400` | Creation or date correction omitted or supplied an invalid IANA timezone. |
+| `INVALID_DIARY_CURSOR` | `400` | A diary cursor is malformed, cannot be authenticated, or belongs to a different user/filter scope. |
+| `LISTEN_NOT_FOUND` | `404` | The requested listen does not exist or is not owned by the caller. Deletion instead returns a successful no-op to conceal ownership. |
+| `BOARD_NOT_FOUND` | `404` | A transactional board operation or diary filter targets a missing or unowned board. |
+| `ALBUM_NOT_FOUND` | `404` | A diary request references a catalog album that does not exist. |
+| `DEFAULT_BOARD_REQUIRED` | `400` | The default saved-albums board cannot be deleted. |
+| `IDEMPOTENCY_CONFLICT` | `409` | A diary creation key was already used with different canonical input. |
+| `LISTEN_DELETED` | `409` | A creation retry refers to a listen that was subsequently deleted; the retained receipt prevents resurrection. |
+| `DIARY_REQUEST_FAILED` | `500` | An unexpected diary route failure; internal database details are not exposed. |
 | `INVALID_PINNED_REVIEW` | `400` | A requested pinned review is malformed or is not owned by the profile being updated. |
 | `REVIEW_NOT_FOUND` | `404` | A review-like request targeted a review that no longer exists. |
 | `SUGGESTION_NOT_FOUND` | `404` | A moderator-visible submission does not exist. Contributor detail and mutation routes currently preserve a code-less `404` to conceal ownership. |
@@ -106,6 +121,7 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Local search | `GET /search/search` | IP | 90 requests per minute |
 | External search | `GET /search/external`, `GET /search/musicbrainz/release-group/:mbid` | IP | 30 requests per minute |
 | Album save | `POST /boards/:boardId/albums` | authenticated user | 30 attempts per 10 minutes |
+| Diary mutation | `POST /diary`, `PATCH`/`DELETE /diary/:listenId`, `PUT`/`DELETE /boards/:boardId/listens/:listenId` | authenticated user | 30 attempts per 10 minutes |
 | Review create | `POST /reviews/review` | authenticated user | 6 attempts per 10 minutes |
 | Review mutation | `PATCH` and `DELETE /reviews/review/user/:id` | authenticated user | 30 attempts per 10 minutes |
 | Like mutation | `PUT /likes/album/:albumId`, `PUT /likes/review/:reviewId` | authenticated user | 120 attempts per 10 minutes |

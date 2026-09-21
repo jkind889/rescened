@@ -37,6 +37,7 @@ test("startServer waits for MongoDB before binding the HTTP port", async (t) => 
       calls.push(["connect", uri]);
       await connected;
     },
+    initializeDiary: async () => { calls.push(["diaryIndexes"]); },
     listen: (port, callback) => {
       calls.push(["listen", port]);
       callback();
@@ -51,8 +52,20 @@ test("startServer waits for MongoDB before binding the HTTP port", async (t) => 
   await starting;
   assert.deepEqual(calls, [
     ["connect", "mongodb://example.test/rescened"],
+    ["diaryIndexes"],
     ["listen", 4100],
   ]);
+});
+
+test("startServer does not accept traffic when diary index initialization fails", async (t) => {
+  const { startServer } = loadServer(t);
+  let listenCalls = 0;
+  await assert.rejects(startServer({
+    connect: async () => {},
+    initializeDiary: async () => { throw new Error("Diary index creation failed"); },
+    listen: () => { listenCalls += 1; },
+  }), /Diary index creation failed/);
+  assert.equal(listenCalls, 0);
 });
 
 test("startServer does not bind a port when MongoDB connection fails", async (t) => {

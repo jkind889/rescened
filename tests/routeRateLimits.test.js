@@ -79,6 +79,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
   }
 
   const limiters = {
+    diaryMutationRateLimit: (req, res, next) => next(),
     albumSaveRateLimit: blocker("albumSave", 51),
     externalSearchRateLimit: (req, res, next) => next(),
     likeMutationRateLimit: blocker("likeMutation", 52),

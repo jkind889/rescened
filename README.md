@@ -2,7 +2,7 @@
 
 Repeatable local API/database performance tests and their interpretation are documented in [the benchmark guide](./benchmarks/README.md).
 
-Rescened is a community-curated album catalog. Albums, reviews, boards, and notifications receive domain-specific immutable UUIDs (`albumId`, `reviewId`, `boardId`, and `notificationId`); MongoDB `_id` values remain internal implementation details. Search, album detail, reviews, likes, profiles, activity, and boards use the local catalog only.
+Rescened is a community-curated album catalog. Albums, reviews, boards, listens, and notifications receive domain-specific immutable UUIDs (`albumId`, `reviewId`, `boardId`, `listenId`, and `notificationId`); MongoDB `_id` values remain internal implementation details. Search, album detail, reviews, likes, profiles, activity, boards, and the diary use the local catalog only.
 
 Application, provider, and operator failures are cataloged in the [error and status code reference](./docs/ERROR_CODES.md), including HTTP meanings, rate-limit budgets, report reasons, workflow statuses, and command exit codes.
 
@@ -23,6 +23,34 @@ Catalog responses expose `albumId`, `title`, `artistDisplayName`, `artistCredits
 Saved albums are the deduplicated union of every board a user owns. Removing an item from one board does not remove it from the saved shelf while another board still contains it; manage membership from board detail pages.
 
 Boards expose `boardId` and notifications expose `notificationId`. Board items and profile pins continue to store internal Board ObjectIds, which are resolved server-side and are never serialized. Because the pre-rollout board and notification datasets were very small, the UUID rollout intentionally deleted every existing board and notification instead of backfilling identifiers. It also deleted the associated board items and cleared every matching profile board pin. This was a one-time completed reset, not an automated migration procedure.
+
+## Listening diary backend
+
+A listen records an existing catalog album and a calendar date; ratings, reviews, notes, and listening activity feeds are outside this release. Multiple intentional listens on the same day are supported. Diary and board-date reads follow profile privacy: public profiles are readable anonymously; private profiles are readable only by their owner, including subsequent pages. Logging for the first time creates a profile if necessary without changing an existing privacy setting.
+
+| Method and endpoint | Contract |
+| --- | --- |
+| `POST /diary` | Authenticated creation with `{ albumId, listenedOn, timeZone, boardIds? }` and a UUID-v4 `Idempotency-Key` header. Returns a listen with `201`, or `200` for a matching retry. |
+| `GET /diary` | Authenticated owner's diary. |
+| `PATCH /diary/:listenId` | Owner corrects the date with `{ listenedOn, timeZone }`; returns the updated listen. Album identity is immutable. |
+| `DELETE /diary/:listenId` | Owner deletes the listen and all its board memberships. Repeating deletion is a successful no-op. |
+| `PUT /boards/:boardId/listens/:listenId` | Owner attaches an existing owned listen idempotently; no body fields. |
+| `DELETE /boards/:boardId/listens/:listenId` | Owner detaches a listen from this board; no body fields. Repeating detachment while both parents exist is a successful no-op. |
+| `GET /boards/:boardId/albums/:albumId/listens` | Owner reads dates for this album in this board only. |
+| `GET /profile/:userId/diary` | Diary read with profile privacy checks. |
+| `GET /profile/:userId/boards/:boardId/albums/:albumId/listens` | Board-specific dates with profile privacy checks. |
+
+`listenedOn` is a real `YYYY-MM-DD` calendar date, stored without UTC conversion. Creation and date edits require an IANA `timeZone`, used to reject future dates in that zone. Historical dates are allowed; the frontend should supply the user's local date and timezone explicitly. Creation accepts at most 100 board UUIDs, deduplicates them, and requires ownership of every board. Existing authenticated board paths retain the `default` alias. A standalone listen creates no default board or saved-album membership.
+
+Lists return `{ listens, nextCursor }`. Each listen contains `listenId`, `userId`, `albumId`, current normalized `album` metadata, `listenedOn`, `createdAt`, and `updatedAt`; neither internal Mongo IDs nor other board memberships are exposed. Lists accept `albumId`, `boardId`, inclusive `from`/`to` dates, `limit` (default 20, capped at 50), and an opaque `cursor`. Board/album route parameters fix those filters. Ordering is listening date descending, then creation time descending, then an internal tie-breaker. Cursors are encrypted with a diary-specific key derived from `CLERK_SECRET_KEY` and bound to the target user and filters; changing a filter requires starting a new page sequence. Edits to dates can change ordering, so reload the first page after editing. Missing catalog records are excluded before pagination and board counts.
+
+Boards combine explicit `BoardItem` saves with `BoardListen` memberships. Existing response fields remain, with `listenCount` added to board summaries and `listenCount`, `latestListenedOn` (or `null`), and `explicitlySaved` added to each album. `itemCount` still counts distinct albums; preview covers remain deduplicated. Explicit saves preserve their `savedAt`; listen-only album cards use the earliest remaining membership timestamp. The saved shelf remains the deduplicated union across all boards, using the latest board-level `savedAt`, and album save counts count each user once. Personal and public activity feeds continue to use explicit saves and reviews only.
+
+Removing a listen from one board leaves its diary entry and other memberships intact. Removing an album through `DELETE /boards/:boardId/albums/:albumId` removes both its explicit save and all its listening memberships in that board. Deleting a listen removes all of its memberships; an album cover disappears only when no linked listens or explicit save remain. Deleting a board clears its memberships and profile pin but preserves diary entries. The default board remains undeletable.
+
+Diary writes, board membership writes, board deletion, and board pinning require a transaction-capable MongoDB replica set or sharded deployment. Parent revision claims serialize overlapping edits, and unavailable transactions return `503 DIARY_WRITE_UNAVAILABLE` or `BOARD_WRITE_UNAVAILABLE` without partial writes. Creation receipts enforce one result per user/key; different canonical input returns `409 IDEMPOTENCY_CONFLICT`. Receipts retain only the user, key, input fingerprint, and resulting public listen ID after deletion; replay then returns `409 LISTEN_DELETED` rather than recreating the entry. New diary mutation routes share 30 attempts per user per 10 minutes and the existing `Retry-After` contract. Existing save limits are unchanged.
+
+Rollout is additive: start the backend before the future diary frontend, retaining every existing board and undated save. Startup waits for the new listen, membership, and receipt models/indexes to initialize before binding the HTTP port; deployments must keep index creation enabled or provision the declared indexes ahead of startup. No existing save is converted into a listening date. Verification is `npm test`, `npm run test:integration`, and `npm run check:catalog-contract`; the replica-set suite uses isolated fixtures and no live providers.
 
 ## Review discovery feeds
 
