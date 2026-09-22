@@ -7,6 +7,9 @@ const albumRouter = require("../routes/album");
 
 const ORIGINAL_COUNT_DOCUMENTS = AlbumCatalog.countDocuments;
 const ORIGINAL_FIND = AlbumCatalog.find;
+const ORIGINAL_AGGREGATE = AlbumCatalog.aggregate;
+const { buildRankedSearchPattern } = require("../routes/utils/catalogSearch");
+const { preferredArtistsForQuery } = require("../routes/utils/searchArtistAliases");
 const ALBUM_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 const ENDPOINTS = [
@@ -41,14 +44,18 @@ function fieldValues(album, field) {
 }
 
 function matchingAlbums(query, albums) {
-  return albums.filter((album) => query.$or.some((clause) => {
+  function matches(clause, album) {
+    if (clause.$or) return clause.$or.some((child) => matches(child, album));
+    if (clause.$and) return clause.$and.every((child) => matches(child, album));
     const [field, condition] = Object.entries(clause)[0];
     const regex = new RegExp(condition.$regex, condition.$options);
     return fieldValues(album, field).some((value) => regex.test(String(value || "")));
-  }));
+  }
+  return albums.filter((album) => matches(query, album));
 }
 
 function installCatalogMock(albums) {
+  AlbumCatalog.aggregate = async (pipeline) => matchingAlbums(pipeline[0].$match, albums);
   AlbumCatalog.countDocuments = async (query) => matchingAlbums(query, albums).length;
   AlbumCatalog.find = (query) => {
     let rows = matchingAlbums(query, albums);
@@ -79,6 +86,33 @@ function albumWithArtist(artistDisplayName) {
 test.afterEach(() => {
   AlbumCatalog.countDocuments = ORIGINAL_COUNT_DOCUMENTS;
   AlbumCatalog.find = ORIGINAL_FIND;
+  AlbumCatalog.aggregate = ORIGINAL_AGGREGATE;
+});
+
+test("ranked patterns fold Latin accents while preserving scripts and literal punctuation", () => {
+  for (const [query, matches, misses] of [
+    ["bjork", ["Björk", "Bjo\u0308rk"], ["Bjork Tribute!"]],
+    ["Björk", ["bjork", "Björk"], ["Bjoerk"]],
+    ["Cafe\u0301", ["Café", "Cafe\u0301", "Cafe"], ["Coffee"]],
+    ["Signals [Live]", ["Signals [Live]"], ["Signals Live"]],
+    [".*", [".*"], ["anything"]],
+    ["Daft Punk|Air", ["Daft Punk|Air"], ["Daft Punk", "Air"]],
+    ["宇多田ヒカル", ["宇多田ヒカル"], ["Utada Hikaru"]],
+  ]) {
+    const pattern = new RegExp(`^${buildRankedSearchPattern(query)}$`, "i");
+    for (const value of matches) assert.ok(pattern.test(value), `${query} matches ${value}`);
+    for (const value of misses) assert.ok(!pattern.test(value), `${query} excludes ${value}`);
+  }
+});
+
+test("artist aliases normalize whole queries without expanding unrelated words", () => {
+  assert.deepEqual(preferredArtistsForQuery("  yE  "), ["Kanye West", "Ye"]);
+  assert.deepEqual(preferredArtistsForQuery("PIERRE   BOURNE"), ["Pi'erre Bourne", "Pierre Bourne"]);
+  assert.deepEqual(preferredArtistsForQuery("Pi’erre"), ["Pi'erre Bourne", "Pierre Bourne"]);
+  assert.deepEqual(preferredArtistsForQuery("Travis"), ["Travis Scott"]);
+  for (const query of ["yellow", "yesterday", "ye.*", "Travis Barker", "Pierre Henry", "ye graduation"]) {
+    assert.deepEqual(preferredArtistsForQuery(query), [], query);
+  }
 });
 
 test("ASCII apostrophe queries match typographic apostrophes on both catalog endpoints", async () => {

@@ -11,6 +11,10 @@ const Notification = require("../models/Notification");
 const { findAlbumByPublicId, normalizeCatalogAlbum } = require("./utils/albumCatalog");
 const { runReviewTransaction, assertPinnedReview, isReviewId, persistedReviewId } = require("./utils/reviewInteractions");
 const { NETWORK_ACTIVITY_LIMIT, getNetworkActivity } = require("./utils/networkActivity");
+const { formatBoard: libraryBoard, savedAlbums: getSavedAlbums } = require("./utils/boardLibrary");
+const { transaction, claimBoard } = require("./utils/boardMutations");
+const { listListens } = require("./utils/listeningDiary");
+const { getListenActivity } = require("./utils/listenActivity");
 
 const router = express.Router();
 const MAX_FAVORITES = 5;
@@ -25,14 +29,6 @@ function author(userId, user) { return { userId, username: user?.username || DEF
 function publicBoardId(value) {
   const boardId = String(value || "").trim().toLowerCase();
   return Board.isBoardId(boardId) ? boardId : "";
-}
-function persistedBoardId(board) {
-  const boardId = publicBoardId(board?.boardId);
-  if (boardId) return boardId;
-  const error = new Error("Board is missing a valid public identifier");
-  error.status = 500;
-  error.code = "BOARD_ID_INTEGRITY_ERROR";
-  throw error;
 }
 async function authors(ids, options = {}) {
   const map = new Map([...new Set(ids.filter(Boolean))].map((id) => [id, author(id)]));
@@ -71,17 +67,14 @@ async function socialStats(userId, viewerId) {
   return { followerCount, followingCount, isFollowing: Boolean(isFollowing), isCurrentUser: viewerId === userId };
 }
 async function formatBoard(board) {
-  const source = plain(board);
-  const items = await BoardItem.find({ boardId: source._id }).populate("albumCatalogId").sort({ savedAt: -1 });
-  const albums = items.map(formatItem).filter(Boolean);
-  return { boardId: persistedBoardId(source), userId: source.userId, title: source.title, isDefault: Boolean(source.isDefault), itemCount: items.length, previewAlbums: albums.slice(0, 4), albums };
+  return libraryBoard(board, true);
 }
 function formatItem(item) {
   const source = plain(item); const album = source.albumCatalogId;
   const normalized = album && typeof album === "object" ? normalizeCatalogAlbum(album) : null;
   return normalized?.albumId ? { ...normalized, savedAt: source.savedAt, userId: source.userId } : null;
 }
-async function getSavedAlbums(userId) {
+async function getExplicitSavedAlbums(userId) {
   const items = await BoardItem.find({ userId }).populate("albumCatalogId").sort({ savedAt: -1 });
   const seen = new Set();
   return items.map(formatItem).filter(Boolean).filter((album) => { if (!album.albumId || seen.has(album.albumId)) return false; seen.add(album.albumId); return true; });
@@ -121,10 +114,10 @@ async function followable(userId) { return Boolean(await UserProfile.exists({ us
 async function profileAccess(target, viewerId) { if (!(await followable(target))) return { status: 404, body: { error: "User not found" } }; const profile = await ensureProfile(target); if (profile.isPrivate && target !== viewerId) return { status: 403, body: PRIVATE_ERROR, profile }; return { status: 200, profile }; }
 async function activity(userId, includePrivate = false, viewerId = "") {
   const profileAuthors = await authors([userId]); const actor = profileAuthors.get(userId) || author(userId);
-  const [reviews, saved] = await Promise.all([Review.find({ userId }).populate("albumCatalogId").sort({ date: -1 }).limit(MAX_ACTIVITY), getSavedAlbums(userId)]);
+  const [reviews, saved, listens] = await Promise.all([Review.find({ userId }).populate("albumCatalogId").sort({ date: -1 }).limit(MAX_ACTIVITY), getExplicitSavedAlbums(userId), getListenActivity([userId], MAX_ACTIVITY)]);
   const reviewActivities = reviews.map((review) => { const source = plain(review); const reviewId = persistedReviewId(source); const album = source.albumCatalogId ? normalizeCatalogAlbum(source.albumCatalogId) : null; return { id: reviewId, reviewId, type: "review", actor, userId, createdAt: source.date, album, rating: source.rating, reviewText: source.reviewText }; });
   const savedActivities = saved.map((album) => ({ id: `saved-${userId}-${album.albumId}`, type: "saved_album", actor, userId, createdAt: album.savedAt, album }));
-  return [...reviewActivities, ...(includePrivate ? savedActivities : [])].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, MAX_ACTIVITY);
+  return [...reviewActivities, ...listens.map((listen) => ({ ...listen, actor })), ...(includePrivate ? savedActivities : [])].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, MAX_ACTIVITY);
 }
 
 router.get("/me", auth, async (req, res) => { try { const profile = await ensureProfile(req.userId); res.json({ ...(await formatProfile(profile)), ...(await socialStats(req.userId, req.userId)) }); } catch { res.status(500).json({ error: "Failed to fetch profile" }); } });
@@ -156,7 +149,13 @@ router.put("/me", auth, async (req, res) => {
     if (pinnedBoardId && !pinnedBoard) return res.status(400).json({ error: "Pinned board must belong to your profile" });
     const update = { bio, spotifyProfileUrl: profileUrl, favoriteAlbums: favorites, listeningNextAlbum: nextAlbum, pinnedReviewId: null, pinnedBoardId: pinnedBoard?._id || null };
     let profile;
-    if (pinnedReviewId) {
+    if (pinnedBoardId) {
+      await transaction("BOARD", async (session) => {
+        const board = await claimBoard(req.userId, boardId, session);
+        const pinnedReview = pinnedReviewId ? await assertPinnedReview(pinnedReviewId, req.userId, session) : null;
+        profile = await updateProfile(req.userId, { ...update, pinnedBoardId: board._id, pinnedReviewId: pinnedReview?._id || null }, session);
+      });
+    } else if (pinnedReviewId) {
       await runReviewTransaction("pin", async (session) => {
         const pinnedReview = await assertPinnedReview(pinnedReviewId, req.userId, session);
         profile = await updateProfile(req.userId, { ...update, pinnedReviewId: pinnedReview._id }, session);
@@ -171,6 +170,19 @@ router.put("/me", auth, async (req, res) => {
 router.patch("/me", auth, async (req, res) => { try { if (typeof req.body.isPrivate !== "boolean") return res.status(400).json({ error: "isPrivate must be true or false" }); const profile = await UserProfile.findOneAndUpdate({ userId: req.userId }, { $set: { userId: req.userId, isPrivate: req.body.isPrivate } }, { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }).populate("favoriteAlbums.albumCatalogId").populate("listeningNextAlbum.albumCatalogId").populate({ path: "pinnedReviewId", populate: { path: "albumCatalogId" } }).populate("pinnedBoardId"); res.json({ ...(await formatProfile(profile)), ...(await socialStats(req.userId, req.userId)) }); } catch { res.status(500).json({ error: "Failed to update profile" }); } });
 
 router.put("/:userId/follow", auth, async (req, res) => { try { const target = String(req.params.userId || "").trim(); if (target === req.userId) return res.status(400).json({ error: "You cannot follow yourself" }); if (typeof req.body.following !== "boolean") return res.status(400).json({ error: "following must be true or false" }); if (!(await followable(target))) return res.status(404).json({ error: "User not found" }); if (req.body.following) { await Follow.updateOne({ followerId: req.userId, followingId: target }, { $setOnInsert: { followerId: req.userId, followingId: target } }, { upsert: true }); await Notification.updateOne({ recipientUserId: target, actorUserId: req.userId, type: "follow" }, { $setOnInsert: { notificationId: crypto.randomUUID(), recipientUserId: target, actorUserId: req.userId, type: "follow" } }, { upsert: true }); } else await Follow.deleteOne({ followerId: req.userId, followingId: target }); res.json({ targetUserId: target, ...(await socialStats(target, req.userId)) }); } catch { res.status(500).json({ error: "Failed to update follow status" }); } });
+
+for (const path of ["/:userId/diary", "/:userId/boards/:boardId/albums/:albumId/listens"]) {
+  router.get(path, async (req, res) => {
+    try {
+      const access = await profileAccess(req.params.userId, viewer(req));
+      if (access.status !== 200) return res.status(access.status).json(access.body);
+      const fixed = req.params.boardId ? { boardId: req.params.boardId, albumId: req.params.albumId } : {};
+      res.json(await listListens(req.params.userId, req.query, fixed));
+    } catch (error) {
+      res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch diary", ...(error.status && error.code ? { code: error.code } : {}) });
+    }
+  });
+}
 
 router.get("/:userId/boards/:boardId", async (req, res) => { try { const access = await profileAccess(req.params.userId, viewer(req)); if (access.status !== 200) return res.status(access.status).json(access.body); const requestedBoardId = String(req.params.boardId || "").trim().toLowerCase(); const board = requestedBoardId === "default" ? await Board.findOne({ userId: req.params.userId, isDefault: true }) : await Board.findOne({ boardId: publicBoardId(requestedBoardId), userId: req.params.userId }); if (!board) return res.status(404).json({ error: "Board not found" }); res.json(await formatBoard(board)); } catch { res.status(500).json({ error: "Failed to fetch board" }); } });
 router.get("/:userId/boards", async (req, res) => { try { const access = await profileAccess(req.params.userId, viewer(req)); if (access.status !== 200) return res.status(access.status).json(access.body); res.json(await Promise.all((await Board.find({ userId: req.params.userId }).sort({ isDefault: -1, updatedAt: -1 })).map(formatBoard))); } catch { res.status(500).json({ error: "Failed to fetch boards" }); } });

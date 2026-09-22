@@ -46,6 +46,38 @@ async function createReview(album, userId, rating, date) {
   return Review.create({ userId, albumCatalogId: album._id, rating, reviewText: `${userId} review`, date });
 }
 
+function reviewFeedClient(t, viewerId) {
+  const clerkPath = require.resolve("@clerk/express");
+  const routePath = require.resolve("../routes/reviews");
+  const oldClerk = require.cache[clerkPath];
+  const oldRoute = require.cache[routePath];
+  require.cache[clerkPath] = {
+    id: clerkPath, filename: clerkPath, loaded: true,
+    exports: {
+      getAuth: () => ({ userId: viewerId }),
+      clerkClient: { users: { getUserList: async () => ({ data: [] }) } },
+    },
+  };
+  delete require.cache[routePath];
+  const router = require(routePath);
+  t.after(() => {
+    if (oldClerk) require.cache[clerkPath] = oldClerk;
+    else delete require.cache[clerkPath];
+    if (oldRoute) require.cache[routePath] = oldRoute;
+    else delete require.cache[routePath];
+  });
+  return async (path, params, query) => {
+    const layer = router.stack.find((item) => item.route?.path === path && item.route.methods.get);
+    const res = {
+      statusCode: 200,
+      status(code) { this.statusCode = code; return this; },
+      json(body) { this.body = body; return this; },
+    };
+    await layer.route.stack.at(-1).handle({ userId: viewerId, params, query }, res);
+    return { status: res.statusCode, ...res.body };
+  };
+}
+
 test.before(async () => {
   if (!enabled) return;
   replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
@@ -165,6 +197,102 @@ test("review creation keys permit one durable review across concurrent retries",
   const stored = await Review.findOne({ userId: "idempotent-owner", creationKey }).select("+creationKey");
   assert.equal(stored.creationKey, creationKey);
   assert.match(stored.reviewId, REVIEW_ID_V4);
+});
+
+test("popular review routes keep snapshot order across unlikes, re-likes, and new reviews", { skip: !enabled }, async (t) => {
+  const owner = "snapshot-owner";
+  const request = reviewFeedClient(t, owner);
+  const album = await createAlbum("Snapshot ranking");
+  const date = new Date("2026-09-01T00:00:00Z");
+  const reviews = [];
+  for (let i = 0; i < 5; i += 1) reviews.push(await createReview(album, owner, 4, date));
+  for (let i = 0; i < 3; i += 1) {
+    for (let like = 0; like < 3 - i; like += 1) {
+      await mutateReviewLike(reviews[i].reviewId, `snapshot-liker-${like}`, true);
+    }
+  }
+  const feeds = [
+    { path: "/review/album/:albumId", params: { albumId: album.albumId } },
+    { path: "/review/user/:userId", params: { userId: owner } },
+    { path: "/review/user/", params: {} },
+  ];
+  for (const feed of feeds) {
+    feed.first = await request(feed.path, feed.params, { sort: "popular", limit: "2" });
+    assert.equal(feed.first.status, 200);
+    assert.deepEqual(feed.first.reviews.map((row) => row.reviewId), reviews.slice(0, 2).map((row) => row.reviewId));
+    assert.ok(feed.first.nextCursor);
+  }
+
+  // A previously returned row loses its rank; another row is unliked and
+  // re-liked; an unseen row gains enough likes to jump ahead of the cursor.
+  for (let like = 0; like < 3; like += 1) await mutateReviewLike(reviews[0].reviewId, `snapshot-liker-${like}`, false);
+  await mutateReviewLike(reviews[2].reviewId, "snapshot-liker-0", false);
+  await mutateReviewLike(reviews[2].reviewId, "snapshot-liker-0", true);
+  for (const liker of [owner, "new-1", "new-2", "new-3"]) await mutateReviewLike(reviews[3].reviewId, liker, true);
+  const added = await createReview(album, owner, 5, new Date());
+  for (let i = 0; i < 5; i += 1) await mutateReviewLike(added.reviewId, `new-review-${i}`, true);
+  await Review.updateOne({ _id: reviews[2]._id }, { $set: { reviewText: "Current edited text", rating: 3.5 } });
+  await AlbumCatalog.updateOne({ _id: album._id }, { $set: { cover: "https://example.test/current-cover.jpg" } });
+
+  const expected = [reviews[0], reviews[1], reviews[2], reviews[4], reviews[3]].map((row) => row.reviewId);
+  for (const feed of feeds) {
+    const seen = [...feed.first.reviews];
+    let cursor = feed.first.nextCursor;
+    for (let page = 0; cursor && page < 10; page += 1) {
+      assert.ok(cursor.length < 1024, "cursor size must not grow with reviewed IDs");
+      const response = await request(feed.path, feed.params, { sort: "popular", limit: "1", cursor });
+      assert.equal(response.status, 200);
+      seen.push(...response.reviews);
+      cursor = response.nextCursor;
+    }
+    assert.equal(cursor, null);
+    assert.deepEqual(seen.map((row) => row.reviewId), expected);
+    assert.equal(new Set(seen.map((row) => row.reviewId)).size, seen.length);
+    assert.equal(seen.find((row) => row.reviewId === reviews[2].reviewId).reviewText, "Current edited text");
+    const nowLiked = seen.find((row) => row.reviewId === reviews[3].reviewId);
+    assert.equal(nowLiked.likedByViewer, true);
+    assert.equal(nowLiked.likeCount, 4);
+    assert.equal(nowLiked.album.cover, "https://example.test/current-cover.jpg");
+    for (const row of seen) {
+      assert.equal(Object.hasOwn(row, "_id"), false);
+      assert.equal(Object.hasOwn(row, "snapshotTime"), false);
+    }
+  }
+
+  const fresh = await request(feeds[0].path, feeds[0].params, { sort: "popular", limit: "2" });
+  assert.deepEqual(fresh.reviews.map((row) => row.reviewId), [added.reviewId, reviews[3].reviewId]);
+  const wrongScope = await request(feeds[0].path, feeds[0].params, { sort: "popular", cursor: feeds[1].first.nextCursor });
+  assert.equal(wrongScope.status, 400);
+  assert.equal(wrongScope.code, "INVALID_REVIEW_CURSOR");
+});
+
+test("popular continuation omits deleted reviews and fills pages past deleted batches", { skip: !enabled }, async (t) => {
+  const owner = "snapshot-deletion-owner";
+  const request = reviewFeedClient(t, owner);
+  const path = "/review/album/:albumId";
+  const album = await createAlbum("Snapshot deletions");
+  const params = { albumId: album.albumId };
+  const reviews = [];
+  for (let i = 0; i < 6; i += 1) reviews.push(await createReview(album, owner, 4, new Date("2026-09-01T00:00:00Z")));
+  const first = await request(path, params, { sort: "popular", limit: "1" });
+  assert.equal(first.status, 200);
+  assert.equal(first.reviews[0].reviewId, reviews[5].reviewId);
+  for (const review of reviews.slice(1, 5)) await deleteOwnedReview(review.reviewId, owner);
+  const next = await request(path, params, { sort: "popular", limit: "1", cursor: first.nextCursor });
+  assert.equal(next.status, 200);
+  assert.deepEqual(next.reviews.map((row) => row.reviewId), [reviews[0].reviewId]);
+  assert.equal(next.nextCursor, null);
+
+  await deleteOwnedReview(reviews[0].reviewId, owner);
+  const empty = await request(path, params, { sort: "popular", limit: "1", cursor: first.nextCursor });
+  assert.equal(empty.status, 200);
+  assert.deepEqual(empty.reviews, []);
+  assert.equal(empty.nextCursor, null);
+  await deleteOwnedReview(reviews[5].reviewId, owner);
+  const freshEmpty = await request(path, params, { sort: "popular" });
+  assert.equal(freshEmpty.status, 200);
+  assert.deepEqual(freshEmpty.reviews, []);
+  assert.equal(freshEmpty.nextCursor, null);
 });
 
 test("review IDs require UUID v4 values and unsupported transactions get action-specific errors", { skip: !enabled }, async () => {

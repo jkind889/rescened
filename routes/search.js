@@ -1,7 +1,7 @@
 const express = require("express");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const { normalizeCatalogAlbum, toSearchResult } = require("./utils/albumCatalog");
-const { buildCatalogSearchQuery, escapeRegex } = require("./utils/catalogSearch");
+const { buildRankedCatalogSearchPipeline, escapeRegex } = require("./utils/catalogSearch");
 const {
   MusicBrainzSearchError,
   getSuggestionDraft,
@@ -91,13 +91,13 @@ function externalSearchUnavailable(res) {
   });
 }
 
-async function findLocal(query, { skip = 0, limit }) {
-  const searchQuery = buildCatalogSearchQuery(query);
-  const [total, albums] = await Promise.all([
-    AlbumCatalog.countDocuments(searchQuery),
-    AlbumCatalog.find(searchQuery).sort({ artistDisplayName: 1, title: 1 }).skip(skip).limit(limit),
-  ]);
-  return { total, albums };
+async function findLocal(query, { skip = 0, limit, paginated = false }) {
+  // Search exposes only a next-page flag, not a total. One extra row answers
+  // that question without counting every match across the catalog.
+  const albums = await AlbumCatalog.aggregate(buildRankedCatalogSearchPipeline(query, {
+    skip, limit: limit + (paginated ? 1 : 0),
+  }));
+  return { albums: paginated ? albums.slice(0, limit) : albums, hasNextPage: paginated && albums.length > limit };
 }
 
 router.get("/search", searchRateLimit, async (req, res) => {
@@ -108,13 +108,13 @@ router.get("/search", searchRateLimit, async (req, res) => {
     const limit = getLimit(req.query.limit);
     if (req.query.page !== undefined) {
       const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1);
-      const result = await findLocal(query, { skip: (page - 1) * limit, limit });
+      const result = await findLocal(query, { skip: (page - 1) * limit, limit, paginated: true });
       return res.json({
         results: result.albums.map(toSearchResult),
         page,
         limit,
         hasPreviousPage: page > 1,
-        hasNextPage: page * limit < result.total,
+        hasNextPage: result.hasNextPage,
       });
     }
     const result = await findLocal(query, { limit });

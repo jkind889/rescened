@@ -2,6 +2,7 @@ import { API_BASE_URL } from "../config/api";
 import {Link, useLocation, useNavigate, useParams} from "react-router-dom";
 import {useState, useEffect, useRef } from "react";
 import ReviewForm from "./ReviewForm";
+import ListenForm from "./ListenForm";
 import AlbumReviewFeed from "./AlbumReviewFeed";
 import LikeButton from "./LikeButton";
 import AsyncState from "./Loading/AsyncState";
@@ -82,6 +83,13 @@ export function AlbumDetail()
     const [savedBoardIds, setSavedBoardIds] = useState([]);
     const [boards, setBoards] = useState([]);
     const [activeTab, setActiveTab] = useState("artist");
+    const [isListenModalOpen, setIsListenModalOpen] = useState(false);
+    const [listenMessage, setListenMessage] = useState("");
+    const [boardListenId, setBoardListenId] = useState("");
+    const [listens, setListens] = useState([]);
+    const [listenCursor, setListenCursor] = useState(null);
+    const [listenError, setListenError] = useState("");
+    const [isLoadingListens, setIsLoadingListens] = useState(false);
     const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
     const [isBoardModalOpen, setIsBoardModalOpen] = useState(false);
     const [newBoardTitle, setNewBoardTitle] = useState("");
@@ -567,50 +575,22 @@ export function AlbumDetail()
         return `${minutes}:${seconds}`;
     };
 
-// users can keep saving the same album over and over again, need to check if the album already exists in the user's collection before saving
-    async function handleSaveToCollection() {
-        if (!canUseAuthenticatedActions) {
-            return;
+    async function fetchListens(cursor = null) {
+        setIsLoadingListens(true);
+        setListenError("");
+        try {
+            const token = await getToken();
+            const response = await fetch(`${API_BASE_URL}/diary?albumId=${albumId}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { headers: { Authorization: `Bearer ${token}` } });
+            if (!response.ok) throw new Error(await getApiErrorMessage(response, "Could not load listens."));
+            const data = await response.json();
+            if (activeAlbumIdRef.current !== albumId) return;
+            setListens((current) => cursor ? [...current, ...data.listens] : data.listens);
+            setListenCursor(data.nextCursor || null);
+        } catch (error) {
+            setListenError(error.message);
+        } finally {
+            setIsLoadingListens(false);
         }
-
-        const wasSaved = isSaved;
-        const token = await getToken();
-        setBoardSaveMessage("");
-        
-
-        const res = await fetch(`${API_BASE_URL}/boards/default/albums`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${token}`
-            },
-            // The backend uses this ID to find or create the catalog album before saving.
-            body: JSON.stringify({
-                albumId: album.albumId,
-             }),
-        });
-        if (!res.ok) {
-            const message = await getApiErrorMessage(res, "Failed to save album to collection. Please try again.");
-            console.error("Failed to save album to collection");
-            setBoardSaveMessage(message);
-            return;
-        }
-        const data = await res.json();
-        if (res.ok) {
-            setIsSaved(true);
-            if (!wasSaved) {
-                setAlbumSocial((currentSocial) => ({
-                    ...currentSocial,
-                    savedCount: (Number(currentSocial.savedCount) || 0) + 1,
-                }));
-            }
-            if (data.board?.boardId) {
-                setSavedBoardIds((currentIds) => [...new Set([...currentIds, String(data.board.boardId)])]);
-            }
-        }
-
-
-        console.log("Album saved to collection:", data);
     }
 
     async function fetchBoards() {
@@ -640,6 +620,10 @@ export function AlbumDetail()
 
         try {
             await fetchBoards();
+            setBoardListenId("");
+            setListens([]);
+            setListenCursor(null);
+            void fetchListens();
             setBoardSaveMessage("");
             setIsBoardModalOpen(true);
         } catch (error) {
@@ -657,13 +641,13 @@ export function AlbumDetail()
             const wasSaved = isSaved;
             setIsSavingBoard(true);
             const token = await getToken();
-            const res = await fetch(`${API_BASE_URL}/boards/${boardId}/albums`, {
-                method: "POST",
+            const res = await fetch(`${API_BASE_URL}/boards/${boardId}/${boardListenId ? `listens/${boardListenId}` : "albums"}`, {
+                method: boardListenId ? "PUT" : "POST",
                 headers: {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ albumId: album.albumId }),
+                body: boardListenId ? undefined : JSON.stringify({ albumId: album.albumId }),
             });
 
             if (!res.ok) {
@@ -678,10 +662,8 @@ export function AlbumDetail()
                     savedCount: (Number(currentSocial.savedCount) || 0) + 1,
                 }));
             }
-            if (data.board?.boardId) {
-                setSavedBoardIds((currentIds) => [...new Set([...currentIds, String(data.board.boardId)])]);
-            }
-            setBoardSaveMessage(`Saved to ${data.board?.title || "board"}.`);
+            setSavedBoardIds((currentIds) => [...new Set([...currentIds, String(boardId)])]);
+            setBoardSaveMessage(boardListenId ? "Listen added to board." : `Saved to ${data.board?.title || "board"}.`);
             await fetchBoards();
         } catch (error) {
             console.error(error);
@@ -823,41 +805,38 @@ export function AlbumDetail()
                     </div>
 
                     <div className="album-side-actions" aria-label="Album actions">
-                        {canUseAuthenticatedActions ? (
-                            <button className="album-side-action" disabled={isSaved || isBoardStateLoading} onClick={handleSaveToCollection}>
-                                <span aria-hidden="true">+</span>
-                                {isBoardStateLoading ? "Checking..." : isSaved ? "Saved" : "Save"}
-                            </button>
-                        ) : renderSignInAction("Save", "+")}
+                        <div className="album-listen-like-group" role="group" aria-label="Listens and likes">
+                            {canUseAuthenticatedActions ? (
+                                <button className="album-side-action" type="button" onClick={() => setIsListenModalOpen(true)}>
+                                    <span aria-hidden="true">＋</span>Log listen
+                                </button>
+                            ) : renderSignInAction("Log listen", "＋")}
+                            <div className="album-side-action album-like-action">
+                                <LikeButton liked={albumLike.likedByViewer} count={albumLike.likeCount} label="album" message={likeMessage} onToggle={toggleAlbumLike} />
+                                <small>{albumLike.likedByViewer ? "Liked" : "Like"}</small>
+                            </div>
+                        </div>
                         {canUseAuthenticatedActions ? (
                             <button className="album-side-action" type="button" onClick={openBoardModal} disabled={isBoardStateLoading}>
-                                Boards...
+                                Boards…<small>{isBoardStateLoading ? "Checking…" : isSaved ? "Saved · Manage boards" : "Save or add a listen"}</small>
                             </button>
-                        ) : renderSignInAction("Boards...")}
-                        <div className="album-side-action album-like-action">
-                            <LikeButton
-                                liked={albumLike.likedByViewer}
-                                count={albumLike.likeCount}
-                                label="album"
-                                message={likeMessage}
-                                onToggle={toggleAlbumLike}
-                            />
-                        </div>
+                        ) : renderSignInAction("Boards…")}
                         {canUseAuthenticatedActions ? (
                             <button className="album-side-action" type="button" onClick={() => {
                                 setReviewActionMessage("");
                                 setIsReviewModalOpen(true);
                             }}>
                                 <span aria-hidden="true">★</span>
-                                Rate
+                                Write review
                             </button>
-                        ) : renderSignInAction("Rate", "★")}
+                        ) : renderSignInAction("Write review", "★")}
                         {canUseAuthenticatedActions ? (
                             <Link className="album-side-action" to={`/suggestions/corrections/${album.albumId}`}>
                                 Suggest a correction
                             </Link>
                         ) : renderSignInAction("Suggest a correction")}
-                        {boardSaveMessage && <p className="board-save-message">{boardSaveMessage}</p>}
+                        {listenMessage && <p className="board-save-message" role="status">{listenMessage}</p>}
+                        {boardSaveMessage && <p className="board-save-message" role="status">{boardSaveMessage}</p>}
                     </div>
 
                     <div className="album-ratings-panel">
@@ -1069,6 +1048,17 @@ export function AlbumDetail()
                     )}
                 </div>
             </div>
+            {isListenModalOpen && (
+                <div className="review-modal-backdrop">
+                    <div className="review-modal" role="dialog" aria-modal="true" aria-label={`Log a listen for ${album.title}`}>
+                        <button className="review-modal-close" type="button" onClick={() => setIsListenModalOpen(false)} aria-label="Close listen form">×</button>
+                        <ListenForm key={albumId} album={album} onSubmitted={(listen) => {
+                            setIsListenModalOpen(false);
+                            if (activeAlbumIdRef.current === listen.albumId) setListenMessage(`Listen logged for ${listen.listenedOn}.`);
+                        }} />
+                    </div>
+                </div>
+            )}
             {isReviewModalOpen && (
                 <div className="review-modal-backdrop" role="presentation" onMouseDown={() => setIsReviewModalOpen(false)}>
                     <div className="review-modal" role="dialog" aria-modal="true" aria-label={`Review ${album.title}`} onMouseDown={(event) => event.stopPropagation()}>
@@ -1090,9 +1080,20 @@ export function AlbumDetail()
                             ×
                         </button>
                         <div className="board-save-modal-header">
-                            <h2>Save to board</h2>
+                            <h2>Save or add a listen to a board</h2>
                             <p>{album.title}</p>
                         </div>
+                        <label className="review-form-field">
+                            <span>What to add</span>
+                            <select value={boardListenId} onChange={(event) => { setBoardListenId(event.target.value); setBoardSaveMessage(""); }} disabled={isSavingBoard}>
+                                <option value="">Save album</option>
+                                {listens.map((listen) => <option key={listen.listenId} value={listen.listenId}>Listen · {listen.listenedOn} · {new Date(listen.createdAt).toLocaleTimeString()}</option>)}
+                            </select>
+                        </label>
+                        {isLoadingListens && <p role="status">Loading listens…</p>}
+                        {listenError && <p role="alert">{listenError} <button type="button" onClick={() => fetchListens(listenCursor)}>Retry</button></p>}
+                        {listenCursor && <button type="button" disabled={isLoadingListens} onClick={() => fetchListens(listenCursor)}>Load older listens</button>}
+                        {!isLoadingListens && !listenError && !listens.length && <p>Log a listen first to add a listening date to a board.</p>}
                         <div className="board-save-list">
                             {boards.map((board) => {
                                 const boardId = String(board.boardId);
@@ -1104,10 +1105,10 @@ export function AlbumDetail()
                                         key={board.boardId}
                                         type="button"
                                         onClick={() => saveAlbumToBoard(board.boardId)}
-                                        disabled={alreadySaved || isSavingBoard}
+                                        disabled={(!boardListenId && alreadySaved) || isSavingBoard}
                                     >
                                         <span>{board.title}</span>
-                                        <small>{alreadySaved ? "Saved" : `${board.itemCount || 0} albums`}</small>
+                                        <small>{boardListenId ? "Add listen" : alreadySaved ? "Saved" : `${board.itemCount || 0} albums`}</small>
                                     </button>
                                 );
                             })}

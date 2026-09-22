@@ -161,7 +161,7 @@ export function Boards() {
               <BoardPreview albums={board.previewAlbums || []} />
               <h2>{board.title}</h2>
               <p>
-                {board.itemCount} album{board.itemCount === 1 ? "" : "s"}
+                {board.itemCount} album{board.itemCount === 1 ? "" : "s"} · {board.listenCount || 0} listen{board.listenCount === 1 ? "" : "s"}
                 {board.isDefault ? " · Default" : ""}
               </p>
             </Link>

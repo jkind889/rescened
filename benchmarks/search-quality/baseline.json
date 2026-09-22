@@ -1,0 +1,291 @@
+{
+  "schemaVersion": 1,
+  "status": "complete",
+  "corpus": {
+    "version": "1",
+    "fixtureSha256": "4be1de0d396ca7cf455ea861e97c51aac20540e67b17f9cc3860e046aeead7ca",
+    "querySha256": "7db2e5de698e7dde0f140cdfe21417dfcb6a442cbaac11e99e1c76d6828d70c0"
+  },
+  "environment": {
+    "recordedAt": "2026-09-18T15:28:53.944Z",
+    "revision": "b734b8184868d1198c5a9f200e3bd7dfedcfe607",
+    "dirty": true,
+    "node": "v22.21.0",
+    "mongoose": "9.6.2",
+    "sourceHashes": {
+      "routes/search.js": "ac6baa593c1540fa2530190af133d1fd9533efb6362b033c741c2d2c3a2b1158",
+      "routes/utils/catalogSearch.js": "0d20004dc01b9ddc70ff7f9d372eee7168db50f6fd6e191bb6df3f2a8a37f70f",
+      "routes/utils/albumCatalog.js": "ff46fb330d73e819bf64b3c859aa277f01d2758fe67dcf6a201376171ce7b626",
+      "routes/utils/rateLimit.js": "9a26e7404eca726cfdd4db9b27c6550c1a502d7a49404dd1e1d09df8324f2ee2",
+      "routes/utils/serverConfig.js": "730d83bac378f6baa819e098a22f783d51cb40c779b95994823401dd419cc4f7",
+      "routes/health.js": "9d3aa4403bd76ca0034f1ec7b1913386e10716ac42bf620606ad16d6f76080ac",
+      "models/AlbumCatalog.js": "507c3fb3eeca329a2849d3d72c12352ea3a193027966f4e6c0310334a46cb905",
+      "benchmarks/server.cjs": "b4e81e29fd631b9532a40ad322efb9425051d61d0b948c4a20f6daffa430f063",
+      "benchmarks/run.cjs": "73d5a34257acfe3e462dbc26e41f3ac6512a689764d97e8f9af19c664f2344e9",
+      "benchmarks/fixtures.cjs": "23c4a46340faaafb389c57e6190238a3d616316bb4bdf3df7cc6d2e59dbb7624",
+      "benchmarks/workload.cjs": "9b4f35b29528a0cfcaac836c1339b190fec09997d1e403f65365d17bb708d15a",
+      "benchmarks/report.cjs": "0dd0c35ce2be1aaf39273228b9c90e18cd91ae51759b45468709658e060bae9e",
+      "benchmarks/search-quality/corpus.cjs": "df21acb4e08e98bd57e6aad36bffcbe9a11541ab61d1b7e9dd95fe7b0f1b94fb",
+      "benchmarks/search-quality/report.cjs": "035a952614ead11e1b218a9cded4356d76342c3f9e6b42cda88f28fe13eebf90",
+      "benchmarks/search-quality/run.cjs": "3d6d60ba8c9887d443d77c7ae9380aab4f637671c8887df06626a8d1fd9fdba1"
+    },
+    "lockfileSha256": "d3e5371885875a2ad989fc64de04974bc384270b3be62a23bfce47c4bb20f028",
+    "mongo": "7.0.24",
+    "indexes": [
+      {
+        "v": 2,
+        "key": {
+          "_id": 1
+        },
+        "name": "_id_"
+      },
+      {
+        "v": 2,
+        "key": {
+          "albumId": 1
+        },
+        "name": "albumId_1",
+        "unique": true
+      },
+      {
+        "v": 2,
+        "key": {
+          "_fts": "text",
+          "_ftsx": 1
+        },
+        "name": "title_text_artistDisplayName_text_artistCredits.name_text",
+        "weights": {
+          "artistCredits.name": 1,
+          "artistDisplayName": 1,
+          "title": 1
+        },
+        "default_language": "english",
+        "language_override": "language",
+        "textIndexVersion": 3
+      },
+      {
+        "v": 2,
+        "key": {
+          "artistDisplayName": 1,
+          "title": 1
+        },
+        "name": "artistDisplayName_1_title_1"
+      },
+      {
+        "v": 2,
+        "key": {
+          "externalReferences.provider": 1,
+          "externalReferences.entityType": 1,
+          "externalReferences.externalId": 1
+        },
+        "name": "externalReferences.provider_1_externalReferences.entityType_1_externalReferences.externalId_1",
+        "unique": true,
+        "sparse": true
+      }
+    ]
+  },
+  "catalog": [
+    {"albumId":"d2f88917-989e-47c7-8bf9-65ba93d1c090","title":"Discovery","artistDisplayName":"Daft Punk"},
+    {"albumId":"51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2","title":"Homework","artistDisplayName":"Daft Punk"},
+    {"albumId":"00776122-3474-40fe-88e3-90de47e8485e","title":"Discovery Live","artistDisplayName":"A Different Artist"},
+    {"albumId":"d58c08d2-ccc0-4ff0-87f5-747d60712489","title":"Moon Safari","artistDisplayName":"Air"},
+    {"albumId":"ff422ffa-c50a-40dd-8261-88d093a02a3d","title":"Air","artistDisplayName":"A Quiet Quartet"},
+    {"albumId":"1af8f348-933a-48c5-869d-df08f35e5160","title":"Windows","artistDisplayName":"A Window Ensemble"},
+    {"albumId":"d37ada7f-a12e-4a27-83fb-58efdd38c4e9","title":"Debut","artistDisplayName":"Björk"},
+    {"albumId":"109709bc-d52a-4d57-829b-026d2efbbac6","title":"Black Messiah","artistDisplayName":"D’Angelo"},
+    {"albumId":"ad3f8af8-8019-4f14-8adc-a23a321dafc3","title":"Café Sessions","artistDisplayName":"Café Trio"},
+    {"albumId":"d413fbd4-ab4c-419e-845f-6ca60bfb013a","title":"光","artistDisplayName":"宇多田ヒカル"},
+    {"albumId":"45b873ec-8bd9-4233-8470-cd181b387c55","title":"Signals [Live]","artistDisplayName":"Bracket Band"},
+    {"albumId":"3029ee73-533d-4066-8f5f-ee26cf6a6dc8","title":"Signals Live","artistDisplayName":"A Bracket Band"},
+    {"albumId":"85ba8fdf-0dde-4279-880a-fd184dba24e1","title":"Home","artistDisplayName":"Northbound"},
+    {"albumId":"dd799f14-cbaf-4c1f-8c35-725af67bd403","title":"Home","artistDisplayName":"Southbound"},
+    {"albumId":"194faf5f-7615-4ef3-89f8-6c66a84b46a3","title":"Night Windows","artistDisplayName":"Zeta"},
+    {"albumId":"6173fb4d-0b7b-48b2-81ec-387be8917c79","title":"Night Windows (Deluxe)","artistDisplayName":"Alpha"},
+    {"albumId":"9f5288f0-4479-4f5a-8ab0-2e1dad3350b8","title":"Night Windows Remixes","artistDisplayName":"Beta"},
+    {"albumId":"9e1be9c8-534a-4855-8909-e2d1db71cc81","title":"Crossing Paths","artistDisplayName":"The Crossing Project"},
+    {"albumId":"20bbe54f-94e5-4d0c-8cd5-0105d0a3625e","title":"Mira Vale: A Tribute","artistDisplayName":"A Tribute Band"},
+    {"albumId":"e8739c83-6f88-489d-8f21-722466a4e0a9","title":"Coastline","artistDisplayName":"Coastal Trio"},
+    {"albumId":"b6ea40fe-4274-46cd-8a0e-5fb0dd9156fb","title":"Harbor Lights","artistDisplayName":"Harbor Quartet"},
+    {"albumId":"acc2a88f-dcdc-479f-82b8-c4072af84171","title":"Deep Water","artistDisplayName":"Ocean Ensemble"},
+    {"albumId":"2a500703-7edf-48a9-8539-e1b79157fc66","title":"Blue Lantern Records","artistDisplayName":"A Label Tribute"},
+    {"albumId":"e1bf6972-9689-4f0b-89d6-7de15d63d9b4","title":"Other Songs","artistDisplayName":"Blue Lantern Records"},
+    {"albumId":"c9d93fd3-f6a1-4d4e-8c1c-abfadf6289ba","title":"Soul Sketches","artistDisplayName":"Soul Sketchers"},
+    {"albumId":"b1dac9b9-580a-41ce-84fc-af70e3972a70","title":"Wildcard Decoy","artistDisplayName":"Dot Star Players"},
+    {"albumId":"b4597033-4c4e-4bd2-8026-fbf108edfbcd","title":"Copper","artistDisplayName":"Amber Artist"},
+    {"albumId":"ad1de102-69f9-461e-8303-db5139625662","title":"Violet","artistDisplayName":"Indigo Artist"},
+    {"albumId":"60595797-f102-43a5-84ad-aeb4b5599541","title":"Study 01","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"e71fbdff-e59f-407a-8f4a-ab7a1f99d87d","title":"Study 02","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"740983d1-e988-4d12-8519-ad52c1813944","title":"Study 03","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"472d8d15-d8c9-4c1d-8b4b-d6b313c4c147","title":"Study 04","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"f690ff78-a49e-4e1c-81bd-fa72b699fc96","title":"Study 05","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"9dcbce0c-6f7f-4169-8e9d-f4f037510064","title":"Study 06","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"8f6b12a7-ab72-482f-8e8a-7f288573dbb3","title":"Study 07","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"112a5ae1-82ea-4005-85e6-e00a6e15aecb","title":"Study 08","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"91d944dd-75a7-4145-86df-11e178054db0","title":"Study 09","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"63c63cbf-a323-45b8-841b-9d5c39ab84e4","title":"Study 10","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"b8f296b3-b215-4cbc-8e6b-266d67187f07","title":"Study 11","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"3272004a-d830-4e30-8305-212310a3b7ab","title":"Study 12","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"b83746b4-e836-41b0-8b8e-b7c32392aa30","title":"Study 13","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"56841558-9fe8-4683-826a-6c765767a984","title":"Study 14","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"c2d93673-b615-4385-8ed5-7c1d1f1b09db","title":"Study 15","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"f85ce517-ed64-4f2a-8efb-49174928c3f0","title":"Study 16","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"a8bc32c6-ff43-46be-8e66-e227388fdbef","title":"Study 17","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"0c2a3af0-2a4f-4a74-8c64-ad821519fa4a","title":"Study 18","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"4ed646b0-c90e-4915-8207-e5c691ac41a8","title":"Study 19","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"5a8c4f82-d52c-485a-8d13-df9f5ae1cf21","title":"Study 20","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"b101bdb5-53a9-497e-8084-6b274fb191a9","title":"Study 21","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"c5f2db41-1748-438c-8b4a-8d9236db9be1","title":"Study 22","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"8785778d-b5fc-462d-8e6c-f41b8450afde","title":"Study 23","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"0ced63e3-efc6-484a-8c2a-f1ca41f97ca8","title":"Study 24","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"4dc89348-b94b-40d1-8b9e-e85885b8df6e","title":"Study 25","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"52cd340a-b25c-4dad-8728-cccadaa66755","title":"Study 26","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"297b1f61-4b6e-423f-8063-59b6a9a6118f","title":"Study 27","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"4acac796-b15c-4422-8cea-0745f37e75b0","title":"Study 28","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"04835e2d-4ed6-4fa9-8202-52aeeda0bd35","title":"Study 29","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"6af2c9eb-2356-4f5f-8246-93adfbb4c2c0","title":"Study 30","artistDisplayName":"The Meridian Ensemble"},
+    {"albumId":"06ee6633-0b98-43c7-8222-329f750e2797","title":"The Meridian Ensemble: A Tribute","artistDisplayName":"A Tribute 1"},
+    {"albumId":"a1c0946b-c831-42f2-818a-f59442e0b5d3","title":"The Meridian Ensemble: A Tribute","artistDisplayName":"A Tribute 2"},
+    {"albumId":"cb26be2f-9dd5-4da5-8cea-b9fde4ccb7ca","title":"The Meridian Ensemble: A Tribute","artistDisplayName":"A Tribute 3"},
+    {"albumId":"08f5608e-1a52-494c-848a-b67f22ff53ac","title":"The Meridian Ensemble: A Tribute","artistDisplayName":"A Tribute 4"},
+    {"albumId":"a2de1961-bbfc-4ba7-8890-7456fd4903b1","title":"The Meridian Ensemble: A Tribute","artistDisplayName":"A Tribute 5"},
+    {"albumId":"ee584e62-ae29-4e31-8370-129b96522ba7","title":"The Meridian Ensemble: A Tribute","artistDisplayName":"A Tribute 6"}
+  ],
+  "cases": [
+    {"id":"artist-exact","category":"artist","query":"Daft Punk","intent":"Find albums by an exact artist","explanation":"Both albums are equally relevant.","relevantIds":["d2f88917-989e-47c7-8bf9-65ba93d1c090","51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2"],"preferredIds":[],"autocomplete":{"ids":["d2f88917-989e-47c7-8bf9-65ba93d1c090","51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2"],"metrics":{"hitAt5":1,"mrrAt5":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["d2f88917-989e-47c7-8bf9-65ba93d1c090","51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2"],"metrics":{"hitAt5":1,"mrrAt5":1,"recallAt24":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["d2f88917-989e-47c7-8bf9-65ba93d1c090","51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"artist-short","category":"artist","query":"Air","intent":"Find albums by the artist Air","explanation":"Title and label collisions are distractors.","relevantIds":["d58c08d2-ccc0-4ff0-87f5-747d60712489"],"preferredIds":["d58c08d2-ccc0-4ff0-87f5-747d60712489"],"autocomplete":{"ids":["ff422ffa-c50a-40dd-8261-88d093a02a3d","1af8f348-933a-48c5-869d-df08f35e5160","d58c08d2-ccc0-4ff0-87f5-747d60712489"],"metrics":{"hitAt5":1,"mrrAt5":0.3333333333333333,"correctlyEmpty":null,"preferredRank":3,"preferredAt1":0}},"page":{"ids":["ff422ffa-c50a-40dd-8261-88d093a02a3d","1af8f348-933a-48c5-869d-df08f35e5160","d58c08d2-ccc0-4ff0-87f5-747d60712489"],"metrics":{"hitAt5":1,"mrrAt5":0.3333333333333333,"recallAt24":1,"correctlyEmpty":null,"preferredRank":3,"preferredAt1":0}},"fullResultIds":["ff422ffa-c50a-40dd-8261-88d093a02a3d","1af8f348-933a-48c5-869d-df08f35e5160","d58c08d2-ccc0-4ff0-87f5-747d60712489"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":true,"recallAt24Ceiling":1}},
+    {"id":"artist-credit","category":"artist","query":"Mira Vale","intent":"Find a credited collaborator","explanation":"Artist credits qualify even when the display name differs; a tribute title does not.","relevantIds":["9e1be9c8-534a-4855-8909-e2d1db71cc81"],"preferredIds":[],"autocomplete":{"ids":["20bbe54f-94e5-4d0c-8cd5-0105d0a3625e","9e1be9c8-534a-4855-8909-e2d1db71cc81"],"metrics":{"hitAt5":1,"mrrAt5":0.5,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["20bbe54f-94e5-4d0c-8cd5-0105d0a3625e","9e1be9c8-534a-4855-8909-e2d1db71cc81"],"metrics":{"hitAt5":1,"mrrAt5":0.5,"recallAt24":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["20bbe54f-94e5-4d0c-8cd5-0105d0a3625e","9e1be9c8-534a-4855-8909-e2d1db71cc81"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"artist-album","category":"artist","query":"Daft Punk Discovery","intent":"Find a specific artist and album","explanation":"Words may span artist and title fields.","relevantIds":["d2f88917-989e-47c7-8bf9-65ba93d1c090"],"preferredIds":["d2f88917-989e-47c7-8bf9-65ba93d1c090"],"autocomplete":{"ids":[],"metrics":{"hitAt5":0,"mrrAt5":0,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":0}},"page":{"ids":[],"metrics":{"hitAt5":0,"mrrAt5":0,"recallAt24":0,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":0}},"fullResultIds":[],"diagnostics":{"notRetrievedIds":["d2f88917-989e-47c7-8bf9-65ba93d1c090"],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":true,"recallAt24Ceiling":1}},
+    {"id":"artist-album-reversed","category":"artist","query":"Moon Safari Air","intent":"Find an album with artist appended","explanation":"Album-first phrasing has the same intended target.","relevantIds":["d58c08d2-ccc0-4ff0-87f5-747d60712489"],"preferredIds":["d58c08d2-ccc0-4ff0-87f5-747d60712489"],"autocomplete":{"ids":[],"metrics":{"hitAt5":0,"mrrAt5":0,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":0}},"page":{"ids":[],"metrics":{"hitAt5":0,"mrrAt5":0,"recallAt24":0,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":0}},"fullResultIds":[],"diagnostics":{"notRetrievedIds":["d58c08d2-ccc0-4ff0-87f5-747d60712489"],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":true,"recallAt24Ceiling":1}},
+    {"id":"artist-discography","category":"artist","query":"The Meridian Ensemble","intent":"Browse an exact artist with over 24 albums","explanation":"All 30 studies are equally relevant; six early-sorting tribute artists are distractors.","relevantIds":["60595797-f102-43a5-84ad-aeb4b5599541","e71fbdff-e59f-407a-8f4a-ab7a1f99d87d","740983d1-e988-4d12-8519-ad52c1813944","472d8d15-d8c9-4c1d-8b4b-d6b313c4c147","f690ff78-a49e-4e1c-81bd-fa72b699fc96","9dcbce0c-6f7f-4169-8e9d-f4f037510064","8f6b12a7-ab72-482f-8e8a-7f288573dbb3","112a5ae1-82ea-4005-85e6-e00a6e15aecb","91d944dd-75a7-4145-86df-11e178054db0","63c63cbf-a323-45b8-841b-9d5c39ab84e4","b8f296b3-b215-4cbc-8e6b-266d67187f07","3272004a-d830-4e30-8305-212310a3b7ab","b83746b4-e836-41b0-8b8e-b7c32392aa30","56841558-9fe8-4683-826a-6c765767a984","c2d93673-b615-4385-8ed5-7c1d1f1b09db","f85ce517-ed64-4f2a-8efb-49174928c3f0","a8bc32c6-ff43-46be-8e66-e227388fdbef","0c2a3af0-2a4f-4a74-8c64-ad821519fa4a","4ed646b0-c90e-4915-8207-e5c691ac41a8","5a8c4f82-d52c-485a-8d13-df9f5ae1cf21","b101bdb5-53a9-497e-8084-6b274fb191a9","c5f2db41-1748-438c-8b4a-8d9236db9be1","8785778d-b5fc-462d-8e6c-f41b8450afde","0ced63e3-efc6-484a-8c2a-f1ca41f97ca8","4dc89348-b94b-40d1-8b9e-e85885b8df6e","52cd340a-b25c-4dad-8728-cccadaa66755","297b1f61-4b6e-423f-8063-59b6a9a6118f","4acac796-b15c-4422-8cea-0745f37e75b0","04835e2d-4ed6-4fa9-8202-52aeeda0bd35","6af2c9eb-2356-4f5f-8246-93adfbb4c2c0"],"preferredIds":[],"autocomplete":{"ids":["06ee6633-0b98-43c7-8222-329f750e2797","a1c0946b-c831-42f2-818a-f59442e0b5d3","cb26be2f-9dd5-4da5-8cea-b9fde4ccb7ca","08f5608e-1a52-494c-848a-b67f22ff53ac","a2de1961-bbfc-4ba7-8890-7456fd4903b1"],"metrics":{"hitAt5":0,"mrrAt5":0,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["06ee6633-0b98-43c7-8222-329f750e2797","a1c0946b-c831-42f2-818a-f59442e0b5d3","cb26be2f-9dd5-4da5-8cea-b9fde4ccb7ca","08f5608e-1a52-494c-848a-b67f22ff53ac","a2de1961-bbfc-4ba7-8890-7456fd4903b1","ee584e62-ae29-4e31-8370-129b96522ba7","60595797-f102-43a5-84ad-aeb4b5599541","e71fbdff-e59f-407a-8f4a-ab7a1f99d87d","740983d1-e988-4d12-8519-ad52c1813944","472d8d15-d8c9-4c1d-8b4b-d6b313c4c147","f690ff78-a49e-4e1c-81bd-fa72b699fc96","9dcbce0c-6f7f-4169-8e9d-f4f037510064","8f6b12a7-ab72-482f-8e8a-7f288573dbb3","112a5ae1-82ea-4005-85e6-e00a6e15aecb","91d944dd-75a7-4145-86df-11e178054db0","63c63cbf-a323-45b8-841b-9d5c39ab84e4","b8f296b3-b215-4cbc-8e6b-266d67187f07","3272004a-d830-4e30-8305-212310a3b7ab","b83746b4-e836-41b0-8b8e-b7c32392aa30","56841558-9fe8-4683-826a-6c765767a984","c2d93673-b615-4385-8ed5-7c1d1f1b09db","f85ce517-ed64-4f2a-8efb-49174928c3f0","a8bc32c6-ff43-46be-8e66-e227388fdbef","0c2a3af0-2a4f-4a74-8c64-ad821519fa4a"],"metrics":{"hitAt5":0,"mrrAt5":0,"recallAt24":0.6,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["06ee6633-0b98-43c7-8222-329f750e2797","a1c0946b-c831-42f2-818a-f59442e0b5d3","cb26be2f-9dd5-4da5-8cea-b9fde4ccb7ca","08f5608e-1a52-494c-848a-b67f22ff53ac","a2de1961-bbfc-4ba7-8890-7456fd4903b1","ee584e62-ae29-4e31-8370-129b96522ba7","60595797-f102-43a5-84ad-aeb4b5599541","e71fbdff-e59f-407a-8f4a-ab7a1f99d87d","740983d1-e988-4d12-8519-ad52c1813944","472d8d15-d8c9-4c1d-8b4b-d6b313c4c147","f690ff78-a49e-4e1c-81bd-fa72b699fc96","9dcbce0c-6f7f-4169-8e9d-f4f037510064","8f6b12a7-ab72-482f-8e8a-7f288573dbb3","112a5ae1-82ea-4005-85e6-e00a6e15aecb","91d944dd-75a7-4145-86df-11e178054db0","63c63cbf-a323-45b8-841b-9d5c39ab84e4","b8f296b3-b215-4cbc-8e6b-266d67187f07","3272004a-d830-4e30-8305-212310a3b7ab","b83746b4-e836-41b0-8b8e-b7c32392aa30","56841558-9fe8-4683-826a-6c765767a984","c2d93673-b615-4385-8ed5-7c1d1f1b09db","f85ce517-ed64-4f2a-8efb-49174928c3f0","a8bc32c6-ff43-46be-8e66-e227388fdbef","0c2a3af0-2a4f-4a74-8c64-ad821519fa4a","4ed646b0-c90e-4915-8207-e5c691ac41a8","5a8c4f82-d52c-485a-8d13-df9f5ae1cf21","b101bdb5-53a9-497e-8084-6b274fb191a9","c5f2db41-1748-438c-8b4a-8d9236db9be1","8785778d-b5fc-462d-8e6c-f41b8450afde","0ced63e3-efc6-484a-8c2a-f1ca41f97ca8","4dc89348-b94b-40d1-8b9e-e85885b8df6e","52cd340a-b25c-4dad-8728-cccadaa66755","297b1f61-4b6e-423f-8063-59b6a9a6118f","4acac796-b15c-4422-8cea-0745f37e75b0","04835e2d-4ed6-4fa9-8202-52aeeda0bd35","6af2c9eb-2356-4f5f-8246-93adfbb4c2c0"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":["60595797-f102-43a5-84ad-aeb4b5599541","e71fbdff-e59f-407a-8f4a-ab7a1f99d87d","740983d1-e988-4d12-8519-ad52c1813944","472d8d15-d8c9-4c1d-8b4b-d6b313c4c147","f690ff78-a49e-4e1c-81bd-fa72b699fc96","9dcbce0c-6f7f-4169-8e9d-f4f037510064","8f6b12a7-ab72-482f-8e8a-7f288573dbb3","112a5ae1-82ea-4005-85e6-e00a6e15aecb","91d944dd-75a7-4145-86df-11e178054db0","63c63cbf-a323-45b8-841b-9d5c39ab84e4","b8f296b3-b215-4cbc-8e6b-266d67187f07","3272004a-d830-4e30-8305-212310a3b7ab","b83746b4-e836-41b0-8b8e-b7c32392aa30","56841558-9fe8-4683-826a-6c765767a984","c2d93673-b615-4385-8ed5-7c1d1f1b09db","f85ce517-ed64-4f2a-8efb-49174928c3f0","a8bc32c6-ff43-46be-8e66-e227388fdbef","0c2a3af0-2a4f-4a74-8c64-ad821519fa4a","4ed646b0-c90e-4915-8207-e5c691ac41a8","5a8c4f82-d52c-485a-8d13-df9f5ae1cf21","b101bdb5-53a9-497e-8084-6b274fb191a9","c5f2db41-1748-438c-8b4a-8d9236db9be1","8785778d-b5fc-462d-8e6c-f41b8450afde","0ced63e3-efc6-484a-8c2a-f1ca41f97ca8","4dc89348-b94b-40d1-8b9e-e85885b8df6e","52cd340a-b25c-4dad-8728-cccadaa66755","297b1f61-4b6e-423f-8063-59b6a9a6118f","4acac796-b15c-4422-8cea-0745f37e75b0","04835e2d-4ed6-4fa9-8202-52aeeda0bd35","6af2c9eb-2356-4f5f-8246-93adfbb4c2c0"],"beyondFirstPageIds":["4ed646b0-c90e-4915-8207-e5c691ac41a8","5a8c4f82-d52c-485a-8d13-df9f5ae1cf21","b101bdb5-53a9-497e-8084-6b274fb191a9","c5f2db41-1748-438c-8b4a-8d9236db9be1","8785778d-b5fc-462d-8e6c-f41b8450afde","0ced63e3-efc6-484a-8c2a-f1ca41f97ca8","4dc89348-b94b-40d1-8b9e-e85885b8df6e","52cd340a-b25c-4dad-8728-cccadaa66755","297b1f61-4b6e-423f-8063-59b6a9a6118f","4acac796-b15c-4422-8cea-0745f37e75b0","04835e2d-4ed6-4fa9-8202-52aeeda0bd35","6af2c9eb-2356-4f5f-8246-93adfbb4c2c0"],"unmetPreference":false,"recallAt24Ceiling":0.8}},
+    {"id":"album-exact","category":"album","query":"Discovery","intent":"Find the album with this exact title","explanation":"The longer live title is related, but the exact title is preferred.","relevantIds":["d2f88917-989e-47c7-8bf9-65ba93d1c090","00776122-3474-40fe-88e3-90de47e8485e"],"preferredIds":["d2f88917-989e-47c7-8bf9-65ba93d1c090"],"autocomplete":{"ids":["00776122-3474-40fe-88e3-90de47e8485e","d2f88917-989e-47c7-8bf9-65ba93d1c090"],"metrics":{"hitAt5":1,"mrrAt5":1,"correctlyEmpty":null,"preferredRank":2,"preferredAt1":0}},"page":{"ids":["00776122-3474-40fe-88e3-90de47e8485e","d2f88917-989e-47c7-8bf9-65ba93d1c090"],"metrics":{"hitAt5":1,"mrrAt5":1,"recallAt24":1,"correctlyEmpty":null,"preferredRank":2,"preferredAt1":0}},"fullResultIds":["00776122-3474-40fe-88e3-90de47e8485e","d2f88917-989e-47c7-8bf9-65ba93d1c090"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":true,"recallAt24Ceiling":1}},
+    {"id":"album-partial","category":"album","query":"Moon Saf","intent":"Find an album by a title prefix","explanation":"A partial title should find Moon Safari.","relevantIds":["d58c08d2-ccc0-4ff0-87f5-747d60712489"],"preferredIds":[],"autocomplete":{"ids":["d58c08d2-ccc0-4ff0-87f5-747d60712489"],"metrics":{"hitAt5":1,"mrrAt5":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["d58c08d2-ccc0-4ff0-87f5-747d60712489"],"metrics":{"hitAt5":1,"mrrAt5":1,"recallAt24":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["d58c08d2-ccc0-4ff0-87f5-747d60712489"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"album-substring","category":"album","query":"Safari","intent":"Find an album by an interior title word","explanation":"Search is not restricted to title prefixes.","relevantIds":["d58c08d2-ccc0-4ff0-87f5-747d60712489"],"preferredIds":[],"autocomplete":{"ids":["d58c08d2-ccc0-4ff0-87f5-747d60712489"],"metrics":{"hitAt5":1,"mrrAt5":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["d58c08d2-ccc0-4ff0-87f5-747d60712489"],"metrics":{"hitAt5":1,"mrrAt5":1,"recallAt24":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["d58c08d2-ccc0-4ff0-87f5-747d60712489"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"album-shared","category":"album","query":"Home","intent":"Find albums sharing an exact title","explanation":"Both exact Home titles are preferred equally; Homework is a weaker partial match.","relevantIds":["85ba8fdf-0dde-4279-880a-fd184dba24e1","dd799f14-cbaf-4c1f-8c35-725af67bd403","51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2"],"preferredIds":["85ba8fdf-0dde-4279-880a-fd184dba24e1","dd799f14-cbaf-4c1f-8c35-725af67bd403"],"autocomplete":{"ids":["51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2","85ba8fdf-0dde-4279-880a-fd184dba24e1","dd799f14-cbaf-4c1f-8c35-725af67bd403"],"metrics":{"hitAt5":1,"mrrAt5":1,"correctlyEmpty":null,"preferredRank":2,"preferredAt1":0}},"page":{"ids":["51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2","85ba8fdf-0dde-4279-880a-fd184dba24e1","dd799f14-cbaf-4c1f-8c35-725af67bd403"],"metrics":{"hitAt5":1,"mrrAt5":1,"recallAt24":1,"correctlyEmpty":null,"preferredRank":2,"preferredAt1":0}},"fullResultIds":["51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2","85ba8fdf-0dde-4279-880a-fd184dba24e1","dd799f14-cbaf-4c1f-8c35-725af67bd403"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":true,"recallAt24Ceiling":1}},
+    {"id":"album-editions","category":"album","query":"Night Windows","intent":"Find the base album and related editions","explanation":"Prefer the exact base title; do not impose an order on other editions.","relevantIds":["194faf5f-7615-4ef3-89f8-6c66a84b46a3","6173fb4d-0b7b-48b2-81ec-387be8917c79","9f5288f0-4479-4f5a-8ab0-2e1dad3350b8"],"preferredIds":["194faf5f-7615-4ef3-89f8-6c66a84b46a3"],"autocomplete":{"ids":["6173fb4d-0b7b-48b2-81ec-387be8917c79","9f5288f0-4479-4f5a-8ab0-2e1dad3350b8","194faf5f-7615-4ef3-89f8-6c66a84b46a3"],"metrics":{"hitAt5":1,"mrrAt5":1,"correctlyEmpty":null,"preferredRank":3,"preferredAt1":0}},"page":{"ids":["6173fb4d-0b7b-48b2-81ec-387be8917c79","9f5288f0-4479-4f5a-8ab0-2e1dad3350b8","194faf5f-7615-4ef3-89f8-6c66a84b46a3"],"metrics":{"hitAt5":1,"mrrAt5":1,"recallAt24":1,"correctlyEmpty":null,"preferredRank":3,"preferredAt1":0}},"fullResultIds":["6173fb4d-0b7b-48b2-81ec-387be8917c79","9f5288f0-4479-4f5a-8ab0-2e1dad3350b8","194faf5f-7615-4ef3-89f8-6c66a84b46a3"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":true,"recallAt24Ceiling":1}},
+    {"id":"album-edition-specific","category":"album","query":"Night Windows (Deluxe)","intent":"Find the explicitly requested edition","explanation":"Parentheses are literal and the edition qualifier matters.","relevantIds":["6173fb4d-0b7b-48b2-81ec-387be8917c79"],"preferredIds":["6173fb4d-0b7b-48b2-81ec-387be8917c79"],"autocomplete":{"ids":["6173fb4d-0b7b-48b2-81ec-387be8917c79"],"metrics":{"hitAt5":1,"mrrAt5":1,"correctlyEmpty":null,"preferredRank":1,"preferredAt1":1}},"page":{"ids":["6173fb4d-0b7b-48b2-81ec-387be8917c79"],"metrics":{"hitAt5":1,"mrrAt5":1,"recallAt24":1,"correctlyEmpty":null,"preferredRank":1,"preferredAt1":1}},"fullResultIds":["6173fb4d-0b7b-48b2-81ec-387be8917c79"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"format-case-space","category":"formatting","query":"  dAfT   pUnK  ","intent":"Ignore input case and repeated spaces","explanation":"Formatting should not change the artist intent.","relevantIds":["d2f88917-989e-47c7-8bf9-65ba93d1c090","51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2"],"preferredIds":[],"autocomplete":{"ids":["d2f88917-989e-47c7-8bf9-65ba93d1c090","51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2"],"metrics":{"hitAt5":1,"mrrAt5":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["d2f88917-989e-47c7-8bf9-65ba93d1c090","51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2"],"metrics":{"hitAt5":1,"mrrAt5":1,"recallAt24":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["d2f88917-989e-47c7-8bf9-65ba93d1c090","51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"format-apostrophe","category":"formatting","query":"D'Angelo","intent":"Match a straight apostrophe to a curly one","explanation":"The fixture stores D’Angelo.","relevantIds":["109709bc-d52a-4d57-829b-026d2efbbac6"],"preferredIds":[],"autocomplete":{"ids":["109709bc-d52a-4d57-829b-026d2efbbac6"],"metrics":{"hitAt5":1,"mrrAt5":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["109709bc-d52a-4d57-829b-026d2efbbac6"],"metrics":{"hitAt5":1,"mrrAt5":1,"recallAt24":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["109709bc-d52a-4d57-829b-026d2efbbac6"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"format-unicode","category":"formatting","query":"Café Sessions","intent":"Match canonically equivalent Unicode","explanation":"The query is decomposed; the fixture title is composed.","relevantIds":["ad3f8af8-8019-4f14-8adc-a23a321dafc3"],"preferredIds":[],"autocomplete":{"ids":["ad3f8af8-8019-4f14-8adc-a23a321dafc3"],"metrics":{"hitAt5":1,"mrrAt5":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["ad3f8af8-8019-4f14-8adc-a23a321dafc3"],"metrics":{"hitAt5":1,"mrrAt5":1,"recallAt24":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["ad3f8af8-8019-4f14-8adc-a23a321dafc3"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"format-accent","category":"formatting","query":"bjork","intent":"Find an artist without typing the accent","explanation":"Desired accent-insensitive matching; this may be a current quality gap.","relevantIds":["d37ada7f-a12e-4a27-83fb-58efdd38c4e9"],"preferredIds":[],"autocomplete":{"ids":[],"metrics":{"hitAt5":0,"mrrAt5":0,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":[],"metrics":{"hitAt5":0,"mrrAt5":0,"recallAt24":0,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":[],"diagnostics":{"notRetrievedIds":["d37ada7f-a12e-4a27-83fb-58efdd38c4e9"],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"format-nonlatin","category":"formatting","query":"宇多田ヒカル","intent":"Find a non-Latin artist name","explanation":"Preserve the script instead of requiring transliteration.","relevantIds":["d413fbd4-ab4c-419e-845f-6ca60bfb013a"],"preferredIds":[],"autocomplete":{"ids":["d413fbd4-ab4c-419e-845f-6ca60bfb013a"],"metrics":{"hitAt5":1,"mrrAt5":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["d413fbd4-ab4c-419e-845f-6ca60bfb013a"],"metrics":{"hitAt5":1,"mrrAt5":1,"recallAt24":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["d413fbd4-ab4c-419e-845f-6ca60bfb013a"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"format-punctuation","category":"formatting","query":"Signals [Live]","intent":"Match literal square brackets","explanation":"Signals Live without brackets is a distractor.","relevantIds":["45b873ec-8bd9-4233-8470-cd181b387c55"],"preferredIds":[],"autocomplete":{"ids":["45b873ec-8bd9-4233-8470-cd181b387c55"],"metrics":{"hitAt5":1,"mrrAt5":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["45b873ec-8bd9-4233-8470-cd181b387c55"],"metrics":{"hitAt5":1,"mrrAt5":1,"recallAt24":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["45b873ec-8bd9-4233-8470-cd181b387c55"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"label-exact","category":"label","query":"Prism Records","intent":"Find albums on an exact label","explanation":"Both label members are equally relevant.","relevantIds":["d2f88917-989e-47c7-8bf9-65ba93d1c090","51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2"],"preferredIds":[],"autocomplete":{"ids":["d2f88917-989e-47c7-8bf9-65ba93d1c090","51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2"],"metrics":{"hitAt5":1,"mrrAt5":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["d2f88917-989e-47c7-8bf9-65ba93d1c090","51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2"],"metrics":{"hitAt5":1,"mrrAt5":1,"recallAt24":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["d2f88917-989e-47c7-8bf9-65ba93d1c090","51a29c1c-fb8a-4b5a-81bc-62bc7aa584d2"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"label-partial","category":"label","query":"Lantern","intent":"Find a family of label names","explanation":"Label intent excludes the unrelated title and artist collisions.","relevantIds":["e8739c83-6f88-489d-8f21-722466a4e0a9","b6ea40fe-4274-46cd-8a0e-5fb0dd9156fb","acc2a88f-dcdc-479f-82b8-c4072af84171"],"preferredIds":[],"autocomplete":{"ids":["2a500703-7edf-48a9-8539-e1b79157fc66","e1bf6972-9689-4f0b-89d6-7de15d63d9b4","e8739c83-6f88-489d-8f21-722466a4e0a9","b6ea40fe-4274-46cd-8a0e-5fb0dd9156fb","acc2a88f-dcdc-479f-82b8-c4072af84171"],"metrics":{"hitAt5":1,"mrrAt5":0.3333333333333333,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["2a500703-7edf-48a9-8539-e1b79157fc66","e1bf6972-9689-4f0b-89d6-7de15d63d9b4","e8739c83-6f88-489d-8f21-722466a4e0a9","b6ea40fe-4274-46cd-8a0e-5fb0dd9156fb","acc2a88f-dcdc-479f-82b8-c4072af84171"],"metrics":{"hitAt5":1,"mrrAt5":0.3333333333333333,"recallAt24":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["2a500703-7edf-48a9-8539-e1b79157fc66","e1bf6972-9689-4f0b-89d6-7de15d63d9b4","e8739c83-6f88-489d-8f21-722466a4e0a9","b6ea40fe-4274-46cd-8a0e-5fb0dd9156fb","acc2a88f-dcdc-479f-82b8-c4072af84171"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"label-case","category":"label","query":"  bLuE   LaNtErN records ","intent":"Normalize label-query formatting","explanation":"Match the full label despite case and whitespace.","relevantIds":["e8739c83-6f88-489d-8f21-722466a4e0a9","b6ea40fe-4274-46cd-8a0e-5fb0dd9156fb"],"preferredIds":[],"autocomplete":{"ids":["2a500703-7edf-48a9-8539-e1b79157fc66","e1bf6972-9689-4f0b-89d6-7de15d63d9b4","e8739c83-6f88-489d-8f21-722466a4e0a9","b6ea40fe-4274-46cd-8a0e-5fb0dd9156fb"],"metrics":{"hitAt5":1,"mrrAt5":0.3333333333333333,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["2a500703-7edf-48a9-8539-e1b79157fc66","e1bf6972-9689-4f0b-89d6-7de15d63d9b4","e8739c83-6f88-489d-8f21-722466a4e0a9","b6ea40fe-4274-46cd-8a0e-5fb0dd9156fb"],"metrics":{"hitAt5":1,"mrrAt5":0.3333333333333333,"recallAt24":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["2a500703-7edf-48a9-8539-e1b79157fc66","e1bf6972-9689-4f0b-89d6-7de15d63d9b4","e8739c83-6f88-489d-8f21-722466a4e0a9","b6ea40fe-4274-46cd-8a0e-5fb0dd9156fb"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"label-apostrophe","category":"label","query":"Listener's Choice","intent":"Normalize punctuation in a label","explanation":"The label stores a curly apostrophe.","relevantIds":["c9d93fd3-f6a1-4d4e-8c1c-abfadf6289ba"],"preferredIds":[],"autocomplete":{"ids":["c9d93fd3-f6a1-4d4e-8c1c-abfadf6289ba"],"metrics":{"hitAt5":1,"mrrAt5":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["c9d93fd3-f6a1-4d4e-8c1c-abfadf6289ba"],"metrics":{"hitAt5":1,"mrrAt5":1,"recallAt24":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["c9d93fd3-f6a1-4d4e-8c1c-abfadf6289ba"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"label-many","category":"label","query":"Harbour","intent":"Find multiple artists on one label","explanation":"Both label members qualify without a preferred order.","relevantIds":["85ba8fdf-0dde-4279-880a-fd184dba24e1","dd799f14-cbaf-4c1f-8c35-725af67bd403"],"preferredIds":[],"autocomplete":{"ids":["85ba8fdf-0dde-4279-880a-fd184dba24e1","dd799f14-cbaf-4c1f-8c35-725af67bd403"],"metrics":{"hitAt5":1,"mrrAt5":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["85ba8fdf-0dde-4279-880a-fd184dba24e1","dd799f14-cbaf-4c1f-8c35-725af67bd403"],"metrics":{"hitAt5":1,"mrrAt5":1,"recallAt24":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["85ba8fdf-0dde-4279-880a-fd184dba24e1","dd799f14-cbaf-4c1f-8c35-725af67bd403"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"label-collision","category":"label","query":"Blue Lantern Records","intent":"Find albums from a label with name collisions","explanation":"Artist/title collisions are plausible results but irrelevant to this explicit evaluation intent.","relevantIds":["e8739c83-6f88-489d-8f21-722466a4e0a9","b6ea40fe-4274-46cd-8a0e-5fb0dd9156fb"],"preferredIds":[],"autocomplete":{"ids":["2a500703-7edf-48a9-8539-e1b79157fc66","e1bf6972-9689-4f0b-89d6-7de15d63d9b4","e8739c83-6f88-489d-8f21-722466a4e0a9","b6ea40fe-4274-46cd-8a0e-5fb0dd9156fb"],"metrics":{"hitAt5":1,"mrrAt5":0.3333333333333333,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"page":{"ids":["2a500703-7edf-48a9-8539-e1b79157fc66","e1bf6972-9689-4f0b-89d6-7de15d63d9b4","e8739c83-6f88-489d-8f21-722466a4e0a9","b6ea40fe-4274-46cd-8a0e-5fb0dd9156fb"],"metrics":{"hitAt5":1,"mrrAt5":0.3333333333333333,"recallAt24":1,"correctlyEmpty":null,"preferredRank":null,"preferredAt1":null}},"fullResultIds":["2a500703-7edf-48a9-8539-e1b79157fc66","e1bf6972-9689-4f0b-89d6-7de15d63d9b4","e8739c83-6f88-489d-8f21-722466a4e0a9","b6ea40fe-4274-46cd-8a0e-5fb0dd9156fb"],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":1}},
+    {"id":"miss-artist","category":"miss","query":"Absent Astronaut Orchestra","intent":"Search for an absent artist","explanation":"No fixture artist, title, credit, or label has this name.","relevantIds":[],"preferredIds":[],"autocomplete":{"ids":[],"metrics":{"hitAt5":null,"mrrAt5":null,"correctlyEmpty":1,"preferredRank":null,"preferredAt1":null}},"page":{"ids":[],"metrics":{"hitAt5":null,"mrrAt5":null,"recallAt24":null,"correctlyEmpty":1,"preferredRank":null,"preferredAt1":null}},"fullResultIds":[],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":null}},
+    {"id":"miss-album","category":"miss","query":"Unwritten Lunar Sonata","intent":"Search for an absent album","explanation":"No album has this title.","relevantIds":[],"preferredIds":[],"autocomplete":{"ids":[],"metrics":{"hitAt5":null,"mrrAt5":null,"correctlyEmpty":1,"preferredRank":null,"preferredAt1":null}},"page":{"ids":[],"metrics":{"hitAt5":null,"mrrAt5":null,"recallAt24":null,"correctlyEmpty":1,"preferredRank":null,"preferredAt1":null}},"fullResultIds":[],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":null}},
+    {"id":"miss-label","category":"miss","query":"Nonexistent Wax Company","intent":"Search for an absent label","explanation":"No record belongs to this label.","relevantIds":[],"preferredIds":[],"autocomplete":{"ids":[],"metrics":{"hitAt5":null,"mrrAt5":null,"correctlyEmpty":1,"preferredRank":null,"preferredAt1":null}},"page":{"ids":[],"metrics":{"hitAt5":null,"mrrAt5":null,"recallAt24":null,"correctlyEmpty":1,"preferredRank":null,"preferredAt1":null}},"fullResultIds":[],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":null}},
+    {"id":"miss-combination","category":"miss","query":"Copper Violet","intent":"Search for an unsupported word combination","explanation":"Words occur on different albums, not a single relevant record.","relevantIds":[],"preferredIds":[],"autocomplete":{"ids":[],"metrics":{"hitAt5":null,"mrrAt5":null,"correctlyEmpty":1,"preferredRank":null,"preferredAt1":null}},"page":{"ids":[],"metrics":{"hitAt5":null,"mrrAt5":null,"recallAt24":null,"correctlyEmpty":1,"preferredRank":null,"preferredAt1":null}},"fullResultIds":[],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":null}},
+    {"id":"miss-regex-star","category":"miss","query":".*","intent":"Search for literal dot-star text","explanation":"Must not turn user input into a match-all regular expression.","relevantIds":[],"preferredIds":[],"autocomplete":{"ids":[],"metrics":{"hitAt5":null,"mrrAt5":null,"correctlyEmpty":1,"preferredRank":null,"preferredAt1":null}},"page":{"ids":[],"metrics":{"hitAt5":null,"mrrAt5":null,"recallAt24":null,"correctlyEmpty":1,"preferredRank":null,"preferredAt1":null}},"fullResultIds":[],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":null}},
+    {"id":"miss-regex-alternation","category":"miss","query":"Daft Punk|Air","intent":"Search for a literal vertical bar","explanation":"Do not interpret input as a regular-expression OR.","relevantIds":[],"preferredIds":[],"autocomplete":{"ids":[],"metrics":{"hitAt5":null,"mrrAt5":null,"correctlyEmpty":1,"preferredRank":null,"preferredAt1":null}},"page":{"ids":[],"metrics":{"hitAt5":null,"mrrAt5":null,"recallAt24":null,"correctlyEmpty":1,"preferredRank":null,"preferredAt1":null}},"fullResultIds":[],"diagnostics":{"notRetrievedIds":[],"belowTop5Ids":[],"beyondFirstPageIds":[],"unmetPreference":false,"recallAt24Ceiling":null}}
+  ],
+  "summary": {
+    "overall": {
+      "count": 30,
+      "positiveCount": 24,
+      "autocomplete": {
+        "hitAt5": 0.8333333333333334,
+        "mrrAt5": 0.7013888888888888,
+        "correctlyEmpty": 1,
+        "preferredAt1": 0.14285714285714285
+      },
+      "page": {
+        "hitAt5": 0.8333333333333334,
+        "mrrAt5": 0.7013888888888888,
+        "recallAt24": 0.8583333333333334,
+        "correctlyEmpty": 1,
+        "preferredAt1": 0.14285714285714285
+      }
+    },
+    "categories": {
+      "artist": {
+        "count": 6,
+        "positiveCount": 6,
+        "autocomplete": {
+          "hitAt5": 0.5,
+          "mrrAt5": 0.3055555555555555,
+          "correctlyEmpty": null,
+          "preferredAt1": 0
+        },
+        "page": {
+          "hitAt5": 0.5,
+          "mrrAt5": 0.3055555555555555,
+          "recallAt24": 0.6,
+          "correctlyEmpty": null,
+          "preferredAt1": 0
+        }
+      },
+      "album": {
+        "count": 6,
+        "positiveCount": 6,
+        "autocomplete": {
+          "hitAt5": 1,
+          "mrrAt5": 1,
+          "correctlyEmpty": null,
+          "preferredAt1": 0.25
+        },
+        "page": {
+          "hitAt5": 1,
+          "mrrAt5": 1,
+          "recallAt24": 1,
+          "correctlyEmpty": null,
+          "preferredAt1": 0.25
+        }
+      },
+      "formatting": {
+        "count": 6,
+        "positiveCount": 6,
+        "autocomplete": {
+          "hitAt5": 0.8333333333333334,
+          "mrrAt5": 0.8333333333333334,
+          "correctlyEmpty": null,
+          "preferredAt1": null
+        },
+        "page": {
+          "hitAt5": 0.8333333333333334,
+          "mrrAt5": 0.8333333333333334,
+          "recallAt24": 0.8333333333333334,
+          "correctlyEmpty": null,
+          "preferredAt1": null
+        }
+      },
+      "label": {
+        "count": 6,
+        "positiveCount": 6,
+        "autocomplete": {
+          "hitAt5": 1,
+          "mrrAt5": 0.6666666666666666,
+          "correctlyEmpty": null,
+          "preferredAt1": null
+        },
+        "page": {
+          "hitAt5": 1,
+          "mrrAt5": 0.6666666666666666,
+          "recallAt24": 1,
+          "correctlyEmpty": null,
+          "preferredAt1": null
+        }
+      },
+      "miss": {
+        "count": 6,
+        "positiveCount": 0,
+        "autocomplete": {
+          "hitAt5": null,
+          "mrrAt5": null,
+          "correctlyEmpty": 1,
+          "preferredAt1": null
+        },
+        "page": {
+          "hitAt5": null,
+          "mrrAt5": null,
+          "recallAt24": null,
+          "correctlyEmpty": 1,
+          "preferredAt1": null
+        }
+      }
+    }
+  }
+}

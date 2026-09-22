@@ -37,6 +37,20 @@ recurring datasets
             -> broader local catalog and fewer external misses
 ```
 
+## Local search relevance (2.0)
+
+The `2.0` implementation uses the existing `/search/search` endpoint for both navbar autocomplete and paginated results. It matches the normalized phrase across title, display artist, artist credits, and label. Queries with 2–12 distinct space-separated tokens additionally match when every token occurs in the same album's title or artist fields, in any order. For example, `Daft Punk Discovery` and `Discovery Daft Punk` can both find *Discovery*. Longer queries retain phrase matching. Label discovery remains phrase-based.
+
+Matching ignores case, normalizes query whitespace and canonical Unicode, treats straight/curly apostrophes equivalently, and folds common Latin accents (Latin-1 and Latin Extended-A/B), including decomposed accents in stored Latin text. `bjork` can find Björk. It preserves literal regex punctuation and non-Latin scripts; it does not provide typo correction or transliteration.
+
+Reviewed whole-query artist preferences live in `routes/utils/searchArtistAliases.js`: `ye` / `Kanye West` find records credited to either name; `Travis` prioritizes Travis Scott; `Pierre`, `Pierre Bourne`, `Pi'erre`, and `Pi'erre Bourne` prioritize Pi’erre Bourne (including straight/curly/no-apostrophe catalog spellings). These matches rank before ordinary exact matches, while alternative text matches remain available. Expansion applies only to exact display-artist or credited-artist names, never labels or titles. Explicit queries such as `Travis Barker` and `Pierre Henry` keep their own results. Aliases require a complete normalized query, so `yellow` does not activate `ye`, and mixed inputs such as `ye graduation` continue to use ordinary token matching. The table is a small curated set, not a popularity score, catalog rename, or general artist-identity database. Add aliases with competing-artist regression cases; the separate real-route alias suite preserves the original 30-query baseline.
+
+Results rank by exact artist/display credit, exact title, exact label, partial title/artist phrase, then other matches. Artist, title, and immutable public `albumId` break ties. The artist-first choice for ambiguous names such as `Air` is a product rule to revisit with actual usage, not a universal interpretation of intent. Label-intent collisions remain an evaluation limitation.
+
+MongoDB performs matching, ranking, sorting, and pagination before the API serializes public catalog fields. Both response shapes and the one-extra-row next-page check remain unchanged. The alphabetic `/albums/catalog` browse endpoint retains its existing phrase matcher. No schema migration, catalog writes, frontend deployment change, or provider request is required for local ranking.
+
+The unchanged 30-query corpus and historical baseline remain the comparison source. Run `npm run search:evaluate -- --compare benchmarks/search-quality/baseline.json`; retain the generated report under `.benchmarks/search-quality/`. Run the normal tests, MongoDB integration suite, and catalog contract check before release. Relevance measurements on this synthetic set do not establish production accuracy or latency. The computed sort adds database work; new capacity measurements are required before reusing earlier performance claims.
+
 ## Goals
 
 - Avoid a dead end when the initial catalog does not contain an album.
@@ -67,7 +81,7 @@ Discogs, Apple Music, TheAudioDB, and other providers remain deferred. MusicBrai
 
 | Area | Current behavior | Relevant implementation |
 | --- | --- | --- |
-| Local search | Escaped, case-insensitive catalog search with straight and typographic apostrophes treated as equivalent, with a maximum page size of 24. | `routes/search.js` |
+| Local search | Ranked phrase and mixed title/artist matching with common Latin accent folding, equivalent apostrophes, and a maximum page size of 24; see the 2.0 section above. | `routes/search.js` |
 | Public album identity | Every usable public album has a Rescened UUID v4; MongoDB IDs stay internal. | `models/AlbumCatalog.js`, `routes/utils/albumCatalog.js` |
 | Search UI | Suggestions and local catalog cards use Rescened `albumId` values; external candidates use provider identities and remain separate. | `frontend/src/Components/Searchbar.jsx`, `frontend/src/Pages/SearchResults.jsx` |
 | Community publication | A pending suggestion is not public. Moderator approval links or creates the catalog record. | `routes/suggestions.js`, `routes/utils/approval.js` |
@@ -78,9 +92,9 @@ The old Spotify fallback cannot be copied directly. It filled local-result gaps 
 
 ### Local search scalability
 
-The catalog model already defines a text index, while the current route uses unanchored regex matching and alphabetical sorting. A larger catalog may eventually make that query slower or expose relevance problems, but changing local ranking and adding external fallback in one slice would make regressions harder to isolate.
+The catalog model already defines a text index, while the 2.0 route uses unanchored regex matching and a computed relevance sort. A larger catalog may make this query slower. The historical fallback release retained alphabetic ordering; the 2.0 relevance work is a separate change.
 
-Keep local query behavior unchanged for the initial fallback. Capture catalog size, search latency, and representative query results as imports accumulate. Move to text-score ranking, Atlas Search, or another indexed strategy only through a separate measured change; external discovery does not require that redesign.
+Capture catalog size, search latency, and representative query results as imports accumulate. Move to text-score ranking, Atlas Search, or another indexed strategy only through a separate measured change; external discovery does not require that redesign.
 
 ## Product behavior
 

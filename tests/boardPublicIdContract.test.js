@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const Board = require("../models/Board");
 const BoardItem = require("../models/BoardItem");
+const BoardListen = require("../models/BoardListen");
 const Follow = require("../models/Follow");
 const UserProfile = require("../models/UserProfile");
 
@@ -39,6 +40,7 @@ function installClerk(t) {
 
 function loadRoute(t, routePath) {
   installClerk(t);
+  t.mock.method(BoardListen, "aggregate", async () => []);
   const previous = require.cache[routePath];
   delete require.cache[routePath];
   const router = require(routePath);
@@ -165,7 +167,7 @@ test("board detail resolves a UUID and never serializes Board or BoardItem Mongo
 
   assert.equal(response.status, 200);
   assert.deepEqual(boardFilters, [{ boardId: BOARD_ID, userId: "owner" }]);
-  assert.deepEqual(itemFilters, [{ boardId: sourceBoard._id }, { boardId: sourceBoard._id }]);
+  assert.deepEqual(itemFilters, [{ boardId: sourceBoard._id }]);
   assert.equal(response.body.boardId, BOARD_ID);
   assert.equal(response.body.albums[0].albumId, ALBUM_ID);
   assert.equal(Object.hasOwn(response.body.albums[0], "boardId"), false);
@@ -230,6 +232,9 @@ test("board mutations reject client-owned IDs and deletion clears a profile pin"
   const sourceBoard = board();
   let pinClear;
   t.mock.method(Board, "findOne", async () => sourceBoard);
+  t.mock.method(Board, "findOneAndUpdate", async () => sourceBoard);
+  t.mock.method(mongoose, "startSession", async () => ({ withTransaction: async (fn) => fn(), endSession: async () => {} }));
+  t.mock.method(BoardListen, "deleteMany", async () => ({}));
   t.mock.method(BoardItem, "deleteMany", async () => ({}));
   t.mock.method(UserProfile, "updateMany", async (filter, update) => {
     pinClear = { filter, update };
@@ -277,6 +282,8 @@ test("profile pins resolve a board UUID to the internal relation and serialize a
     boardFilter = filter;
     return sourceBoard;
   });
+  t.mock.method(Board, "findOneAndUpdate", async () => sourceBoard);
+  t.mock.method(mongoose, "startSession", async () => ({ withTransaction: async (fn) => fn(), endSession: async () => {} }));
   t.mock.method(UserProfile, "findOneAndUpdate", async (_filter, update) => {
     storedUpdate = update;
     return profile;

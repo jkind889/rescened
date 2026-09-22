@@ -37,6 +37,12 @@ const RATE_LIMITS = {
     duration: 10 * 60,
     message: "Too many review submissions. Please try again soon.",
   },
+  diaryMutation: {
+    keyPrefix: "rescened:diary-mutation",
+    points: 30,
+    duration: 10 * 60,
+    message: "Too many diary updates. Please try again soon.",
+  },
   reviewMutation: {
     keyPrefix: "rescened:review-mutation",
     points: 30,
@@ -197,6 +203,7 @@ const searchLimiter = createRateLimiter(RATE_LIMITS.search);
 const externalSearchLimiter = createRateLimiter(RATE_LIMITS.externalSearch);
 const albumSaveLimiter = createRateLimiter(RATE_LIMITS.albumSave);
 const reviewCreateLimiter = createRateLimiter(RATE_LIMITS.reviewCreate);
+const diaryMutationLimiter = createRateLimiter(RATE_LIMITS.diaryMutation);
 const reviewMutationLimiter = createRateLimiter(RATE_LIMITS.reviewMutation);
 const likeMutationLimiter = createRateLimiter(RATE_LIMITS.likeMutation);
 const submissionCreateLimiter = createRateLimiter(RATE_LIMITS.submissionCreate);
@@ -207,6 +214,10 @@ module.exports = {
   RATE_LIMIT_ERROR_CODE,
   RATE_LIMITS,
   RateLimitExceededError,
+  diaryMutationRateLimit: createRateLimitMiddleware(diaryMutationLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.diaryMutation.message,
+  }),
   albumSaveRateLimit: createRateLimitMiddleware(albumSaveLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,
     message: RATE_LIMITS.albumSave.message,

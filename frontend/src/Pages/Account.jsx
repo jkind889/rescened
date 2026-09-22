@@ -664,10 +664,10 @@ export function Account() {
 
             {profile.pinnedReview ? (
               <Link className="profile-pin-card" to={`/album/${profile.pinnedReview.albumId}`}>
-                <AlbumCover src={profile.pinnedReview.cover} title={profile.pinnedReview.title} />
+                <AlbumCover src={profile.pinnedReview.album?.cover} title={profile.pinnedReview.album?.title || "Album"} />
                 <div>
                   <span>Pinned Review</span>
-                  <h3>{profile.pinnedReview.title || "Untitled album"}</h3>
+                  <h3>{profile.pinnedReview.album?.title || "Untitled album"}</h3>
                   <p>{profile.pinnedReview.reviewText || `${profile.pinnedReview.rating}/5`}</p>
                 </div>
               </Link>
@@ -685,7 +685,7 @@ export function Account() {
                 <div>
                   <span>Pinned Board</span>
                   <h3>{profile.pinnedBoard.title || "Untitled board"}</h3>
-                  <p>{profile.pinnedBoard.itemCount || 0} album{profile.pinnedBoard.itemCount === 1 ? "" : "s"}</p>
+                  <p>{profile.pinnedBoard.itemCount || 0} album{profile.pinnedBoard.itemCount === 1 ? "" : "s"} · {profile.pinnedBoard.listenCount || 0} listen{profile.pinnedBoard.listenCount === 1 ? "" : "s"}</p>
                 </div>
               </Link>
             ) : (
@@ -882,6 +882,7 @@ export function Account() {
           const actorName = actor.username || "rescened user";
           const actionLabelByType = {
             saved_album: "Saved",
+            listen: "Listened",
             review: "Reviewed",
             liked_album: "Liked",
             liked_review: "Liked",
@@ -889,6 +890,7 @@ export function Account() {
           };
           const actionTextByType = {
             saved_album: "saved",
+            listen: "listened to",
             review: "reviewed",
             liked_album: "liked",
             liked_review: "liked a review of",
@@ -912,7 +914,7 @@ export function Account() {
           const reviewAuthorName = reviewAuthor.username || reviewAuthor.userId || "rescened user";
 
           return (
-            <article className="profile-activity-item" key={activity.id}>
+            <article className={`profile-activity-item${activity.type === "listen" ? " profile-activity-item--listen" : ""}`} key={activity.id}>
               {activity.type === "follow" ? (
                 targetUser.imageUrl ? (
                   <img className="profile-cover" src={targetUser.imageUrl} alt={`${targetUserName} avatar`} />
@@ -923,7 +925,7 @@ export function Account() {
                 <AlbumCover src={album.cover} title={album.title || "Album"} />
               )}
               <div>
-                <span>{actionLabel}</span>
+                <span className={activity.type === "listen" ? "profile-listen-badge" : undefined}>{activity.type === "listen" && <span aria-hidden="true">♫ </span>}{actionLabel}</span>
                 {activity.type === "follow" ? (
                   <h3>
                     <Link to={`/profile/${actor.userId}`} state={actorState}>
@@ -951,6 +953,11 @@ export function Account() {
                 {activity.type !== "follow" && activity.type !== "liked_review" && (
                   <p>{album.artistDisplayName || "Artist unknown"}</p>
                 )}
+                {activity.type === "listen" && activity.listenedOn && (
+                  <p className="profile-listen-date">
+                    Listened on <time dateTime={activity.listenedOn}>{formatDate(`${activity.listenedOn}T12:00:00`)}</time>
+                  </p>
+                )}
                 {activity.reviewText && <p className="profile-review-copy">{activity.reviewText}</p>}
                 {activity.type === "review" && (
                   <div className="review-card-actions">
@@ -966,7 +973,7 @@ export function Account() {
               </div>
               <div className="profile-activity-meta">
                 {activity.rating && <strong>{activity.rating}/5</strong>}
-                <time>{formatDate(activity.createdAt)}</time>
+                <time dateTime={activity.createdAt}>{activity.type === "listen" ? "Logged " : ""}{formatDate(activity.createdAt)}</time>
               </div>
             </article>
           );
@@ -979,8 +986,8 @@ export function Account() {
     return renderActivityFeed(activityItems, {
       title: "No activity yet",
       body: canManageProfile
-        ? "Reviews, saves, likes, and follows will show up here."
-        : "This listener has not saved or reviewed anything yet.",
+        ? "Listens, reviews, and saved albums will show up here."
+        : "This listener has not logged a listen, saved an album, or written a review yet.",
     });
   }
 
@@ -1029,7 +1036,7 @@ export function Account() {
                   <BoardPreview albums={board.previewAlbums || []} />
                   <h2>{board.title}</h2>
                   <p>
-                    {board.itemCount} album{board.itemCount === 1 ? "" : "s"}
+                    {board.itemCount} album{board.itemCount === 1 ? "" : "s"} · {board.listenCount || 0} listen{board.listenCount === 1 ? "" : "s"}
                     {board.isDefault ? " · Default" : ""}
                   </p>
                 </Link>
@@ -1053,7 +1060,7 @@ export function Account() {
 
     return renderActivityFeed(networkItems, {
       title: "No network activity yet",
-      body: "Follow listeners with reviews and their latest activity will show up here.",
+      body: "Follow listeners to see their latest listens and reviews here.",
     });
   }
 
@@ -1366,6 +1373,7 @@ export function Account() {
                         const targetUser = activity.targetUser || {};
                         const actionLabelByType = {
                           saved_album: "Saved",
+                          listen: "Listened",
                           review: "Reviewed",
                           liked_album: "Liked",
                           liked_review: "Liked",
@@ -1392,13 +1400,16 @@ export function Account() {
                               <AlbumCover src={album.cover} title={album.title || "Album"} />
                             )}
                             <div>
-                              <span>{actionLabel}</span>
+                              <span className={activity.type === "listen" ? "profile-listen-badge" : undefined}>{activity.type === "listen" && <span aria-hidden="true">♫ </span>}{actionLabel}</span>
                               <strong>
                                 {activity.type === "follow"
                                   ? targetUser.username || targetUser.userId || "rescened user"
                                   : album.title || "Untitled album"}
                               </strong>
-                              <time>{formatDate(activity.createdAt)}</time>
+                              {activity.type === "listen" && activity.listenedOn && (
+                                <time dateTime={activity.listenedOn}>Listened {formatDate(`${activity.listenedOn}T12:00:00`)}</time>
+                              )}
+                              <time dateTime={activity.createdAt}>{activity.type === "listen" ? "Logged " : ""}{formatDate(activity.createdAt)}</time>
                             </div>
                           </Link>
                         );

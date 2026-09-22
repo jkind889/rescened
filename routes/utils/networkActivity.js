@@ -5,6 +5,7 @@ const AlbumCatalog = require("../../models/AlbumCatalog");
 const Like = require("../../models/Like");
 const { normalizeCatalogAlbum } = require("./albumCatalog");
 const { persistedReviewId } = require("./reviewInteractions");
+const { getListenActivity } = require("./listenActivity");
 
 const NETWORK_ACTIVITY_LIMIT = 20;
 
@@ -77,17 +78,17 @@ async function getNetworkActivity(viewerId, getAuthors) {
   const visibleIds = followedIds.filter((id) => !privateIds.has(id));
   if (visibleIds.length === 0) return [];
 
-  // One globally ordered query, not a separate feed request per followed user.
-  const reviews = await Review.aggregate(buildNetworkReviewsPipeline(visibleIds, viewerId));
-  if (reviews.length === 0) return [];
-  const authors = await getAuthors(reviews.map((review) => review.userId));
-  return reviews.map((review) => {
+  // Fetch bounded candidates across all visible accounts for each event type.
+  const [reviews, listens] = await Promise.all([
+    Review.aggregate(buildNetworkReviewsPipeline(visibleIds, viewerId)),
+    getListenActivity(visibleIds, NETWORK_ACTIVITY_LIMIT),
+  ]);
+  const reviewActivities = reviews.map((review) => {
     const reviewId = persistedReviewId(review);
     return {
       id: reviewId,
       reviewId,
       type: "review",
-      actor: authors.get(review.userId) || { userId: review.userId, username: "rescened user", imageUrl: "" },
       userId: review.userId,
       createdAt: review.date,
       album: normalizeCatalogAlbum(review.catalogAlbum),
@@ -97,6 +98,16 @@ async function getNetworkActivity(viewerId, getAuthors) {
       likedByViewer: review.likedByViewer,
     };
   });
+  // Stable ties preserve each query's internal ordering, with reviews first.
+  const activities = [...reviewActivities, ...listens]
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, NETWORK_ACTIVITY_LIMIT);
+  if (activities.length === 0) return [];
+  const authors = await getAuthors(activities.map((item) => item.userId));
+  return activities.map((item) => ({
+    ...item,
+    actor: authors.get(item.userId) || { userId: item.userId, username: "rescened user", imageUrl: "" },
+  }));
 }
 
 module.exports = { NETWORK_ACTIVITY_LIMIT, buildNetworkReviewsPipeline, getNetworkActivity };

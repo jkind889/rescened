@@ -1,7 +1,7 @@
 const express = require("express");
 const { clerkClient, getAuth } = require("@clerk/express");
 const AlbumCatalog = require("../models/AlbumCatalog");
-const BoardItem = require("../models/BoardItem");
+const { savedUserCount } = require("./utils/boardLibrary");
 const Follow = require("../models/Follow");
 const Like = require("../models/Like");
 const Review = require("../models/Reviews");
@@ -60,7 +60,7 @@ async function ratingSummary(albumCatalogId) {
 
 async function socialContext(album, viewerId) {
   const [savedCount, summary] = await Promise.all([
-    BoardItem.distinct("userId", { albumCatalogId: album._id }).then((ids) => ids.length),
+    savedUserCount(album._id),
     ratingSummary(album._id),
   ]);
   let followedReviewers = [];

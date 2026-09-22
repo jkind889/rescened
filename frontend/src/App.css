@@ -2257,13 +2257,15 @@ html:has(.search-results-page) .search-submit {
 }
 
 .board-title-form input {
-  max-width: 620px;
+  flex: 1;
+  min-width: 0;
+  max-width: none;
   min-height: 58px;
   border-color: transparent;
   background: transparent;
   padding: 0;
   color: #ffffff;
-  font-size: clamp(2rem, 5vw, 3.8rem);
+  font-size: clamp(1.6rem, 4vw, 2.8rem);
   font-weight: 900;
   line-height: 1;
 }
@@ -9323,5 +9325,182 @@ label.moderation-candidate-choice {
   .community-page *::after {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+.album-side-actions .album-listen-like-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  grid-column: 1 / -1;
+  border-bottom: 1px solid var(--app-line);
+}
+
+.album-listen-like-group .album-side-action {
+  min-width: 0;
+  min-height: 86px;
+  border-bottom: 0;
+}
+
+.album-listen-like-group > :first-child {
+  border-right: 1px solid var(--app-line);
+}
+
+.album-side-actions small {
+  font-size: 0.7rem;
+  font-weight: 400;
+}
+
+.album-side-actions > .board-save-message {
+  grid-column: 1 / -1;
+  padding: 0.65rem;
+  margin: 0;
+}
+
+.board-detail-actions select,
+.board-listens-modal button:not(.review-modal-close) {
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--app-line);
+  border-radius: 0;
+  background: var(--app-bg);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.board-album-listening {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+  font-size: 0.78rem;
+}
+
+.board-album-listening p {
+  margin: 0;
+  color: var(--app-muted);
+  overflow-wrap: anywhere;
+}
+
+.board-album-listening .board-album-membership {
+  color: var(--app-text);
+}
+
+.board-album-card {
+  align-content: start;
+}
+
+.board-album-row {
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.6fr) auto;
+}
+
+.board-listening-help {
+  margin: 0 0 1.25rem;
+  color: var(--app-muted);
+  font-size: 0.8rem;
+}
+
+.board-listens-modal {
+  box-sizing: border-box;
+  width: min(620px, calc(100vw - 2rem));
+  padding: 1.25rem;
+  border: 1px solid var(--app-line);
+  background: var(--app-surface);
+  color: var(--app-text);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+}
+
+.board-listens-modal h2 {
+  margin: 0 2rem 0.75rem 0;
+  font-size: 1.35rem;
+}
+
+.board-listens-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.board-listens-tabs button[aria-pressed="true"] {
+  border-color: var(--app-accent);
+  color: var(--app-accent);
+}
+
+.board-listens-list {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0;
+}
+
+.board-listens-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--app-line);
+}
+
+.board-listens-modal button:disabled,
+.board-remove-album:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.board-listens-message {
+  font-size: 0.85rem;
+  color: var(--app-accent);
+}
+
+@media (max-width: 760px) {
+  .board-album-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Listening activity shares the feed layout with a distinct diary accent. */
+.profile-activity-item--listen {
+  border-left: 3px solid #83c6b2;
+  background: linear-gradient(110deg, rgba(131, 198, 178, 0.08), rgba(0, 0, 0, 0.58));
+}
+
+.profile-activity-item .profile-listen-badge,
+.profile-sidebar-activity-row .profile-listen-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: #a6ddcc;
+}
+
+.profile-listen-badge span {
+  color: inherit;
+}
+
+.profile-activity-item .profile-listen-date {
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: #a6bcb5;
+}
+
+.profile-activity-item .profile-listen-date time {
+  font-size: inherit;
+  color: inherit;
+}
+
+:root[data-theme="light"] .profile-activity-item--listen {
+  border-left-color: #28765f;
+  background: var(--app-surface-strong);
+}
+
+:root[data-theme="light"] .profile-listen-badge,
+:root[data-theme="light"] .profile-listen-badge span {
+  color: #28765f;
+}
+
+@media (max-width: 640px) {
+  .profile-activity-item--listen .profile-activity-meta {
+    grid-column: 2 / -1;
+    justify-items: start;
   }
 }

@@ -7,6 +7,7 @@ const UserProfile = require("../models/UserProfile");
 const Review = require("../models/Reviews");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const Like = require("../models/Like");
+const Listen = require("../models/Listen");
 
 const clerkPath = require.resolve("@clerk/express");
 const profilePath = require.resolve("../routes/profile");
@@ -69,6 +70,11 @@ function installNetworkRoute(t, options = {}) {
     // These are already-aggregated rows. Filtering and sorting semantics are
     // exercised against MongoDB by the integration suite, not simulated here.
     return rows;
+  });
+
+  t.mock.method(Listen, "aggregate", async () => {
+    if (options.listenError) throw options.listenError;
+    return options.listens ?? [];
   });
 
   const previousClerk = require.cache[clerkPath];
@@ -311,7 +317,7 @@ for (const [name, options] of [
   });
 }
 
-for (const failureKey of ["followError", "profileError", "reviewError"]) {
+for (const failureKey of ["followError", "profileError", "reviewError", "listenError"]) {
   test(`network sanitizes ${failureKey} failures`, async (t) => {
     const error = Object.assign(new Error("mongodb://secret-user:secret-password@internal-host/private-db"), { status: 503, code: "INTERNAL_SECRET" });
     const route = installNetworkRoute(t, { [failureKey]: error });

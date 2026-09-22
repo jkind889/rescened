@@ -52,6 +52,7 @@ app.use("/albums", albumRoutes);
 app.use("/reviews", reviewRoutes);
 app.use("/profile", profileRoutes)
 app.use("/boards", boardRoutes)
+app.use("/diary", require("./routes/diary"));
 app.use("/likes", likeRoutes)
 app.use("/notifications", notificationRoutes)
 app.use("/suggestions", suggestionRoutes)
@@ -59,11 +60,17 @@ app.use("/moderation/album-suggestions", moderationRoutes)
 
 async function startServer({
   connect = mongoose.connect.bind(mongoose),
+  initializeDiary = async () => Promise.all([
+    require("./models/Listen").init(),
+    require("./models/BoardListen").init(),
+    require("./models/ListenCreation").init(),
+  ]),
   listen = app.listen.bind(app),
   mongoUri = process.env.MONGO_URI,
   port = parsePort(),
 } = {}) {
   await connect(mongoUri);
+  await initializeDiary();
   console.log("MongoDB Connected");
   return listen(port, () => {
     console.log(`server running on port ${port}`);

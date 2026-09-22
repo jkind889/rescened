@@ -1,10 +1,13 @@
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 const Like = require("../../models/Like");
+const Review = require("../../models/Reviews");
 
 const DEFAULT_REVIEW_PAGE_SIZE = 20;
 const MAX_REVIEW_PAGE_SIZE = 50;
 const CURSOR_VERSION = 1;
+const POPULAR_CURSOR_VERSION = 2;
+const POPULAR_PAGE_TIMEOUT_MS = 10000;
 const VALID_SORTS = new Set(["recent", "popular"]);
 
 class ReviewFeedValidationError extends Error {
@@ -26,11 +29,15 @@ function cursorKey() {
 function encodeCursor(payload) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", cursorKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(JSON.stringify({ v: CURSOR_VERSION, ...payload }), "utf8"), cipher.final()]);
+  const version = payload.sort === "popular" ? POPULAR_CURSOR_VERSION : CURSOR_VERSION;
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify({ v: version, ...payload }), "utf8"), cipher.final()]);
   return [iv.toString("base64url"), cipher.getAuthTag().toString("base64url"), encrypted.toString("base64url")].join(".");
 }
 
 function decodeCursor(cursor, expected) {
+  if (typeof cursor !== "string" || cursor.length > 4096) {
+    throw new ReviewFeedValidationError("Review cursor is invalid", "INVALID_REVIEW_CURSOR");
+  }
   const parts = String(cursor || "").split(".");
   if (parts.length !== 3 || parts.some((part) => !part)) {
     throw new ReviewFeedValidationError("Review cursor is invalid", "INVALID_REVIEW_CURSOR");
@@ -41,16 +48,18 @@ function decodeCursor(cursor, expected) {
     decipher.setAuthTag(Buffer.from(parts[1], "base64url"));
     const payload = JSON.parse(Buffer.concat([decipher.update(Buffer.from(parts[2], "base64url")), decipher.final()]).toString("utf8"));
     if (
-      payload?.v !== CURSOR_VERSION
+      payload?.v !== (expected.sort === "popular" ? POPULAR_CURSOR_VERSION : CURSOR_VERSION)
       || payload.sort !== expected.sort
       || payload.scope !== expected.scope
       || !mongoose.isValidObjectId(payload.id)
       || !Number.isFinite(new Date(payload.date).getTime())
-      || (payload.sort === "popular" && (!Number.isFinite(payload.likeCount) || !Number.isFinite(new Date(payload.asOf).getTime())))
+      || (payload.sort === "popular" && (
+        !Number.isSafeInteger(payload.likeCount) || payload.likeCount < 0 || !validSnapshotTime(payload.snapshotTime)
+      ))
     ) {
       throw new Error("cursor shape");
     }
-    return { ...payload, id: new mongoose.Types.ObjectId(payload.id), date: new Date(payload.date), asOf: payload.asOf ? new Date(payload.asOf) : null };
+    return { ...payload, id: new mongoose.Types.ObjectId(payload.id), date: new Date(payload.date) };
   } catch (error) {
     if (error instanceof ReviewFeedValidationError) throw error;
     throw new ReviewFeedValidationError("Review cursor is invalid", "INVALID_REVIEW_CURSOR");
@@ -71,7 +80,7 @@ function parseReviewFeedQuery(query, scope) {
   }
   const limit = parseLimit(query?.limit);
   const cursor = query?.cursor ? decodeCursor(query.cursor, { sort, scope }) : null;
-  return { sort, limit, cursor, scope, asOf: cursor?.asOf || new Date() };
+  return { sort, limit, cursor, scope, snapshotTime: cursor?.snapshotTime || null };
 }
 
 function recentCursorFilter(cursor) {
@@ -95,7 +104,7 @@ function popularCursorFilter(cursor) {
   };
 }
 
-function buildPopularReviewPagePipeline(match, { cursor, limit, asOf }) {
+function buildPopularReviewPagePipeline(match, { cursor, limit }) {
   const pipeline = [
     { $match: match },
     {
@@ -109,7 +118,6 @@ function buildPopularReviewPagePipeline(match, { cursor, limit, asOf }) {
                 $and: [
                   { $eq: ["$targetType", "review"] },
                   { $eq: ["$reviewId", "$$currentReviewId"] },
-                  { $lte: ["$createdAt", asOf] },
                 ],
               },
             },
@@ -126,17 +134,94 @@ function buildPopularReviewPagePipeline(match, { cursor, limit, asOf }) {
   pipeline.push(
     { $sort: { likeCount: -1, date: -1, _id: -1 } },
     { $limit: limit + 1 },
-    { $project: { reviewLikeStats: 0 } },
+    { $project: { _id: 1, date: 1, likeCount: 1 } },
   );
   return pipeline;
 }
 
-function nextCursorFor(review, { sort, scope, asOf }) {
+function validSnapshotTime(value) {
+  return value && Number.isInteger(value.t) && value.t > 0 && value.t <= 0xffffffff
+    && Number.isInteger(value.i) && value.i >= 0 && value.i <= 0xffffffff;
+}
+
+function popularFeedUnavailable() {
+  return Object.assign(new Error("Popular reviews are temporarily unavailable. Please try again."), {
+    status: 503, code: "POPULAR_REVIEWS_UNAVAILABLE",
+  });
+}
+
+async function readPopularReviewPage(match, feed, db = Review.db.db) {
+  const deadline = Date.now() + POPULAR_PAGE_TIMEOUT_MS;
+  const remainingTime = () => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw popularFeedUnavailable();
+    return remaining;
+  };
+  let snapshotTime = feed.snapshotTime;
+  let cursor = feed.cursor;
+  const rows = [];
+  try {
+    while (rows.length <= feed.limit) {
+      // A real database snapshot preserves deleted/recreated likes as well as
+      // new likes. A createdAt cutoff on the live Like collection cannot do so.
+      const result = await db.command({
+        aggregate: Review.collection.name,
+        pipeline: [
+          ...buildPopularReviewPagePipeline(match, { cursor, limit: feed.limit }),
+          // At most 51 tiny rank tuples become one document. Requesting two
+          // documents exhausts the command cursor without retaining a session
+          // or server cursor between HTTP requests.
+          { $group: { _id: null, rows: { $push: "$$ROOT" } } },
+        ],
+        cursor: { batchSize: 2 },
+        readConcern: {
+          level: "snapshot",
+          ...(snapshotTime ? { atClusterTime: new mongoose.mongo.Timestamp(snapshotTime) } : {}),
+        },
+        maxTimeMS: remainingTime(),
+      }, { readPreference: "primary" });
+      if (!snapshotTime) {
+        const timestamp = result.cursor.atClusterTime || result.atClusterTime;
+        if (!timestamp) throw popularFeedUnavailable();
+        snapshotTime = { t: timestamp.getHighBitsUnsigned(), i: timestamp.getLowBitsUnsigned() };
+      }
+      const ranked = result.cursor.firstBatch[0]?.rows || [];
+      if (!ranked.length) break;
+
+      // Freeze only ranking. Never resurrect deleted reviews or return their
+      // historical text; resolve each page against current review documents.
+      const current = await Review.find({ ...match, _id: { $in: ranked.map((row) => row._id) } })
+        .maxTimeMS(remainingTime()).lean();
+      const byId = new Map(current.map((row) => [String(row._id), row]));
+      for (const rank of ranked) {
+        const review = byId.get(String(rank._id));
+        if (review) rows.push({ ...review, likeCount: rank.likeCount, date: rank.date });
+        if (rows.length > feed.limit) break;
+      }
+      if (ranked.length <= feed.limit) break;
+      const last = ranked.at(-1);
+      cursor = { id: last._id, date: last.date, likeCount: last.likeCount };
+    }
+    return { rows, snapshotTime };
+  } catch (error) {
+    if ([239, 246, 286].includes(error?.code) || ["SnapshotTooOld", "SnapshotUnavailable"].includes(error?.codeName)) {
+      if (feed.cursor) {
+        throw new ReviewFeedValidationError("Review cursor has expired. Reload the list to continue.", "INVALID_REVIEW_CURSOR");
+      }
+      throw popularFeedUnavailable();
+    }
+    if ([20, 50, 72, 134].includes(error?.code)) throw popularFeedUnavailable();
+    throw error;
+  }
+}
+
+function nextCursorFor(review, { sort, scope, snapshotTime }) {
   if (!review) return null;
+  if (sort === "popular" && !validSnapshotTime(snapshotTime)) throw popularFeedUnavailable();
   return encodeCursor({
     sort,
     scope,
-    asOf: sort === "popular" ? new Date(asOf).toISOString() : undefined,
+    snapshotTime: sort === "popular" ? snapshotTime : undefined,
     likeCount: sort === "popular" ? Number(review.likeCount) || 0 : undefined,
     date: new Date(review.date).toISOString(),
     id: String(review._id),
@@ -152,6 +237,6 @@ module.exports = {
   encodeCursor,
   nextCursorFor,
   parseReviewFeedQuery,
+  readPopularReviewPage,
   recentCursorFilter,
 };
-
