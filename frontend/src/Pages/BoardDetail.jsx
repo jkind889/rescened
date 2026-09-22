@@ -1,7 +1,9 @@
 import { API_BASE_URL } from "../config/api";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@clerk/react";
+import BoardListens from "../Components/BoardListens";
+import { getApiErrorMessage } from "../utils/apiErrors";
 import AsyncState from "../Components/Loading/AsyncState";
 
 function getArtistName(album) {
@@ -13,6 +15,10 @@ export function BoardDetail() {
   const navigate = useNavigate();
   const { getToken, isSignedIn } = useAuth();
   const isPublicBoard = Boolean(userId);
+  const requestRef = useRef(null);
+  const scope = `${userId || "owner"}:${boardId}:${isSignedIn}`;
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
   const [board, setBoard] = useState(null);
   const [title, setTitle] = useState("");
   const [query, setQuery] = useState("");
@@ -20,9 +26,17 @@ export function BoardDetail() {
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [selectedAlbum, setSelectedAlbum] = useState(null);
+  const [savingAlbumId, setSavingAlbumId] = useState("");
+  const [removingAlbumId, setRemovingAlbumId] = useState("");
+  const [albumFilter, setAlbumFilter] = useState("all");
   const [isSavingTitle, setIsSavingTitle] = useState(false);
 
-  const fetchBoard = useCallback(async function fetchBoard() {
+  const fetchBoard = useCallback(async function fetchBoard(refresh = false) {
+    if (scopeRef.current !== scope) return;
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
     if ((!isSignedIn && !isPublicBoard) || !boardId) {
       setBoard(null);
       setLoadError("");
@@ -31,7 +45,10 @@ export function BoardDetail() {
     }
 
     try {
-      setIsLoading(true);
+      if (!refresh) {
+        setIsLoading(true);
+        setSelectedAlbum(null);
+      }
       setLoadError("");
       const token = isSignedIn ? await getToken() : null;
       const boardUrl = isPublicBoard
@@ -39,31 +56,38 @@ export function BoardDetail() {
         : `${API_BASE_URL}/boards/${boardId}`;
       const response = await fetch(boardUrl, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: controller.signal,
       });
 
       if (!response.ok) {
-        throw new Error("Failed to fetch board");
+        throw new Error(await getApiErrorMessage(response, "Could not load this board."));
       }
 
       const data = await response.json();
+      if (controller.signal.aborted || scopeRef.current !== scope) return;
       setBoard(data);
       setTitle(data.title || "");
       setLoadError("");
     } catch (boardError) {
-      console.error(boardError);
-      setBoard(null);
-      setLoadError("Could not load this board.");
+      if (controller.signal.aborted || scopeRef.current !== scope) return;
+      if (refresh) {
+        setActionError("Your change was saved, but the board could not refresh. Reload the page to see the latest totals.");
+      } else {
+        setBoard(null);
+        setLoadError(boardError.message || "Could not load this board.");
+      }
     } finally {
-      setIsLoading(false);
+      if (!controller.signal.aborted && scopeRef.current === scope) setIsLoading(false);
     }
-  }, [boardId, getToken, isPublicBoard, isSignedIn, userId]);
+  }, [boardId, getToken, isPublicBoard, isSignedIn, userId, scope]);
 
   useEffect(() => {
     fetchBoard();
+    return () => requestRef.current?.abort();
   }, [fetchBoard]);
 
   const filteredAlbums = useMemo(() => {
-    const albums = board?.albums || [];
+    const albums = (board?.albums || []).filter((album) => albumFilter === "all" || (albumFilter === "listened" ? album.listenCount > 0 : album.explicitlySaved));
     const normalizedQuery = query.trim().toLowerCase();
 
     if (!normalizedQuery) {
@@ -75,7 +99,7 @@ export function BoardDetail() {
       album.artistDisplayName,
       album.releaseYear,
     ].join(" ").toLowerCase().includes(normalizedQuery));
-  }, [board, query]);
+  }, [albumFilter, board, query]);
 
   async function renameBoard(event) {
     event.preventDefault();
@@ -142,11 +166,12 @@ export function BoardDetail() {
   }
 
   async function removeAlbum(albumId) {
-    if (!board) {
+    if (!board || isPublicBoard || removingAlbumId || savingAlbumId) {
       return;
     }
 
     try {
+      setRemovingAlbumId(albumId);
       setActionError("");
       const token = await getToken();
       const response = await fetch(`${API_BASE_URL}/boards/${board.boardId}/albums/${albumId}`, {
@@ -157,18 +182,54 @@ export function BoardDetail() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to remove album");
+        throw new Error(await getApiErrorMessage(response, "Failed to remove album"));
       }
 
+      if (scopeRef.current !== scope) return;
       setBoard((currentBoard) => ({
         ...currentBoard,
         itemCount: Math.max(0, (currentBoard.itemCount || 1) - 1),
+        listenCount: Math.max(0, (currentBoard.listenCount || 0) - (currentBoard.albums.find((album) => album.albumId === albumId)?.listenCount || 0)),
         albums: currentBoard.albums.filter((album) => album.albumId !== albumId),
       }));
     } catch (removeError) {
       console.error(removeError);
-      setActionError("Could not remove that album.");
+      setActionError(removeError.message || "Could not remove that album.");
+    } finally {
+      setRemovingAlbumId("");
     }
+  }
+
+  async function keepAlbumSaved(albumId) {
+    if (isPublicBoard || !isSignedIn || savingAlbumId || removingAlbumId) return;
+    setSavingAlbumId(albumId);
+    setActionError("");
+    try {
+      const token = await getToken();
+      const response = await fetch(`${API_BASE_URL}/boards/${board.boardId}/albums`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ albumId }),
+      });
+      if (!response.ok) throw new Error(await getApiErrorMessage(response, "Could not save this album."));
+      await fetchBoard(true);
+    } catch (error) {
+      if (scopeRef.current === scope) setActionError(error.message || "Could not save this album.");
+    } finally {
+      setSavingAlbumId("");
+    }
+  }
+
+  function renderListeningSummary(album) {
+    const count = album.listenCount || 0;
+    return (
+      <div className="board-album-listening">
+        <p className="board-album-membership">{album.explicitlySaved ? "Saved album" : "Added through listens"}</p>
+        <p>{count} listen{count === 1 ? "" : "s"}{album.latestListenedOn && <> · Latest <time dateTime={album.latestListenedOn}>{album.latestListenedOn}</time></>}</p>
+        {(!isPublicBoard || count > 0) && <button type="button" disabled={Boolean(removingAlbumId || savingAlbumId)} onClick={() => setSelectedAlbum(album)}>{isPublicBoard ? "View listening dates" : "Manage listens"}</button>}
+        {!isPublicBoard && !album.explicitlySaved && <button type="button" disabled={Boolean(savingAlbumId || removingAlbumId)} onClick={() => keepAlbumSaved(album.albumId)}>{savingAlbumId === album.albumId ? "Saving…" : "Keep album saved"}</button>}
+      </div>
+    );
   }
 
   if (!isSignedIn && !isPublicBoard) {
@@ -224,14 +285,20 @@ export function BoardDetail() {
           </form>
         )}
         <p>
-          {board.isDefault ? "Default board" : "Board"} · {board.itemCount} album{board.itemCount === 1 ? "" : "s"}
+          {board.isDefault ? "Default board" : "Board"} · {board.itemCount} album{board.itemCount === 1 ? "" : "s"} · {board.listenCount || 0} listen{board.listenCount === 1 ? "" : "s"}
         </p>
         <div className="board-detail-actions">
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search this board"
+            aria-label="Search this board"
           />
+          <select aria-label="Filter board albums" value={albumFilter} onChange={(event) => setAlbumFilter(event.target.value)}>
+            <option value="all">All albums</option>
+            <option value="saved">Saved albums</option>
+            <option value="listened">With listens</option>
+          </select>
           <div className="profile-view-toggle" aria-label="Board view">
             <button
               className={viewMode === "grid" ? "profile-view-toggle-active" : ""}
@@ -256,12 +323,13 @@ export function BoardDetail() {
         </div>
       </div>
 
-      {actionError && <p className="boards-error">{actionError}</p>}
+      {!isPublicBoard && <p className="board-listening-help">Removing an album clears its saves and listening dates from this board. Your diary entries stay intact.</p>}
+      {actionError && <p role="alert" className="boards-error">{actionError}</p>}
 
       {filteredAlbums.length === 0 ? (
         <div className="boards-empty">
-          <h2>No albums here yet</h2>
-          <p>Save albums from their detail pages to build this board.</p>
+          <h2>{board.albums?.length ? "No matching albums" : "No albums here yet"}</h2>
+          <p>{board.albums?.length ? "Try another search or filter." : "Save albums or add listens from an album’s Boards button to build this board."}</p>
         </div>
       ) : viewMode === "grid" ? (
         <div className="board-album-grid">
@@ -272,8 +340,9 @@ export function BoardDetail() {
                 <h2>{album.title || "Untitled album"}</h2>
                 <p>{getArtistName(album)}</p>
               </Link>
+              {renderListeningSummary(album)}
               {!isPublicBoard && (
-                <button type="button" onClick={() => removeAlbum(album.albumId)}>Remove</button>
+                <button className="board-remove-album" type="button" disabled={Boolean(removingAlbumId || savingAlbumId)} onClick={() => removeAlbum(album.albumId)}>{removingAlbumId === album.albumId ? "Removing…" : "Remove album"}</button>
               )}
             </article>
           ))}
@@ -287,13 +356,22 @@ export function BoardDetail() {
                 <strong>{album.title || "Untitled album"}</strong>
                 <em>{getArtistName(album)}</em>
               </Link>
+              {renderListeningSummary(album)}
               {!isPublicBoard && (
-                <button type="button" onClick={() => removeAlbum(album.albumId)}>Remove</button>
+                <button className="board-remove-album" type="button" disabled={Boolean(removingAlbumId || savingAlbumId)} onClick={() => removeAlbum(album.albumId)}>{removingAlbumId === album.albumId ? "Removing…" : "Remove album"}</button>
               )}
             </article>
           ))}
         </div>
       )}
+      {selectedAlbum && <BoardListens
+        key={`${userId || "owner"}:${board.boardId}:${selectedAlbum.albumId}`}
+        album={selectedAlbum}
+        boardId={board.boardId}
+        userId={userId}
+        onClose={() => setSelectedAlbum(null)}
+        onChanged={() => fetchBoard(true)}
+      />}
     </section>
   );
 }

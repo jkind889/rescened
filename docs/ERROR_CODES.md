@@ -49,6 +49,7 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `REVIEW_DELETION_UNAVAILABLE` | `503` | Review deletion cannot run because transaction-capable MongoDB is unavailable. No cascade write is attempted. |
 | `REVIEW_LIKE_UNAVAILABLE` | `503` | Review-like and notification mutation cannot run because transaction-capable MongoDB is unavailable. |
 | `REVIEW_PIN_UNAVAILABLE` | `503` | Pinning a review cannot run because transaction-capable MongoDB is unavailable. |
+| `POPULAR_REVIEWS_UNAVAILABLE` | `503` | Popular review-history pagination cannot obtain a MongoDB snapshot, snapshot reads are unsupported, or the page exceeds its database time budget. No live-ranking fallback is used. |
 | `DIARY_WRITE_UNAVAILABLE` | `503` | A diary or listen-membership mutation requires MongoDB transactions. No partial fallback writes are attempted. |
 | `BOARD_WRITE_UNAVAILABLE` | `503` | Board saves, album removals, deletion, or board pinning require MongoDB transactions. |
 
@@ -61,7 +62,7 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `INVALID_MODERATION_REQUEST` | `400` | A moderation body, filter, limit, public ID, reason, or `applyFields` selection is invalid. |
 | `INVALID_BOARD_ID` | `400` | A board mutation supplied a client-owned `boardId` or Mongo `_id`; board IDs are server-generated UUID-v4 values. |
 | `INVALID_REVIEW_ID` | `400` | A review mutation received a malformed or client-supplied public UUID-v4 `reviewId`; Mongo ObjectIds are rejected. |
-| `INVALID_REVIEW_CURSOR` | `400` | A review-list pagination cursor could not be decrypted or does not match its list and sort. |
+| `INVALID_REVIEW_CURSOR` | `400` | A review-list pagination cursor could not be decrypted, does not match its list/sort or supported version, or refers to an expired popular-ranking snapshot. Reload the list from its first page. |
 | `INVALID_REVIEW_SORT` | `400` | A review list requested a sort other than `recent` or `popular`. |
 | `INVALID_IDEMPOTENCY_KEY` | `400` | A review or diary creation request omitted or supplied a malformed UUID-v4 `Idempotency-Key`. |
 | `INVALID_DIARY_REQUEST` | `400` | A diary/board mutation contains unsupported fields, or a diary filter, limit, or board list is invalid. |

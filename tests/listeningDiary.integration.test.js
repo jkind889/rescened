@@ -359,14 +359,16 @@ integration("default board alias and existing save APIs support both membership 
   assert.equal((await request("GET", "/boards/default")).body.itemCount, 1);
 });
 
-integration("diary mutations retain rate-limit responses and never manufacture activity events", async () => {
+integration("diary mutations retain rate limits and emit one listen activity without synthetic saves", async () => {
   await log({ boardIds: [board.boardId] });
   const activity = await request("GET", "/profile/me/activity");
-  assert.deepEqual(activity.body, []);
+  assert.equal(activity.body.length, 1);
+  assert.equal(activity.body[0].type, "listen");
+  assert.equal(activity.body[0].listenedOn, "2020-01-02");
   await saveAlbum(owner, board.boardId, album._id);
   const explicitActivity = await request("GET", "/profile/me/activity");
-  assert.equal(explicitActivity.body.length, 1);
-  assert.equal(explicitActivity.body[0].type, "saved_album");
+  assert.equal(explicitActivity.body.length, 2);
+  assert.equal(explicitActivity.body.filter((item) => item.type === "saved_album").length, 1);
   for (let i = 0; i < 30; i += 1) {
     assert.equal((await request("POST", "/diary", { body: {} })).status, 400);
   }
@@ -431,4 +433,59 @@ integration("overlapping album removal and logging commit whole operations", asy
     assert.equal(linked.listenId, created.value.listen.listenId);
   }
   assert.equal((await formatBoard(board)).listenCount, memberships.length);
+});
+
+
+integration("listen activity reflects retries, date corrections, privacy, current metadata and deletion", async () => {
+  const key = crypto.randomUUID();
+  const { listen } = await log({ boardIds: [board.boardId, secondBoard.boardId] }, key);
+  await log({ boardIds: [board.boardId, secondBoard.boardId] }, key);
+  const viewerId = "feed-viewer";
+  await Follow.create({ followerId: viewerId, followingId: owner });
+  await AlbumCatalog.updateOne({ _id: album._id }, { $set: { title: "Updated album" } });
+  const paths = ["/profile/me/activity", `/profile/${owner}/activity`, "/profile/me/network"];
+  for (const path of paths) {
+    const response = await request("GET", path, { userId: path.endsWith("network") ? viewerId : owner });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.length, 1);
+    const item = response.body[0];
+    assert.equal(item.id, listen.listenId);
+    assert.equal(item.listenId, listen.listenId);
+    assert.equal(item.type, "listen");
+    assert.equal(item.album.title, "Updated album");
+    assert.equal(item.actor.userId, owner);
+    noInternalIds(response.body, [album._id]);
+  }
+  const original = (await request("GET", "/profile/me/activity")).body[0];
+  await updateListen(owner, listen.listenId, { listenedOn: "2021-02-03", timeZone: "UTC" });
+  const corrected = (await request("GET", "/profile/me/activity")).body[0];
+  assert.equal(corrected.listenedOn, "2021-02-03");
+  assert.equal(corrected.createdAt, original.createdAt);
+  await UserProfile.updateOne({ userId: owner }, { $set: { isPrivate: true } });
+  assert.equal((await request("GET", `/profile/${owner}/activity`, { userId: viewerId })).status, 403);
+  assert.deepEqual((await request("GET", "/profile/me/network", { userId: viewerId })).body, []);
+  assert.equal((await request("GET", "/profile/me/activity")).body.length, 1);
+  await deleteListen(owner, listen.listenId);
+  assert.deepEqual((await request("GET", "/profile/me/activity")).body, []);
+});
+
+integration("activity caps mixed events globally and excludes missing catalog listens before limiting", async () => {
+  await Follow.create({ followerId: "feed-viewer", followingId: owner });
+  await UserProfile.create({ userId: owner });
+  const missingAlbum = new mongoose.Types.ObjectId();
+  await Listen.insertMany(Array.from({ length: 25 }, (_, index) => ({
+    userId: owner, albumCatalogId: album._id, listenedOn: "2020-01-02",
+    createdAt: new Date(Date.UTC(2026, 0, index + 1)),
+  })));
+  await Listen.create({ userId: owner, albumCatalogId: missingAlbum, listenedOn: "2020-01-02", createdAt: new Date("2026-03-01") });
+  const review = await Review.create({ userId: owner, albumCatalogId: album._id, rating: 4, reviewText: "Latest review", date: new Date("2026-02-01") });
+  for (const path of ["/profile/me/activity", "/profile/me/network"]) {
+    const response = await request("GET", path, { userId: path.endsWith("network") ? "feed-viewer" : owner });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.length, 20);
+    assert.equal(response.body[0].reviewId, review.reviewId);
+    assert.equal(response.body[1].createdAt, "2026-01-25T00:00:00.000Z");
+    assert.equal(response.body.at(-1).createdAt, "2026-01-07T00:00:00.000Z");
+    assert.ok(response.body.every((item) => item.album.albumId === album.albumId));
+  }
 });

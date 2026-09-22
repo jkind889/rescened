@@ -51,7 +51,7 @@ export function ReviewForm({album, onAddReview, onSubmitted})
             <div className="review-form-header">
                 <div>
                     <p className="review-form-kicker">Your review</p>
-                    <h2>Log {album.title}</h2>
+                    <h2>Review {album.title}</h2>
                 </div>
             </div>
 

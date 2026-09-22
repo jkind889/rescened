@@ -8,6 +8,7 @@ const Follow = require("../models/Follow");
 const Like = require("../models/Like");
 const Notification = require("../models/Notification");
 const Review = require("../models/Reviews");
+const Listen = require("../models/Listen");
 const UserProfile = require("../models/UserProfile");
 
 const clerkPath = require.resolve("@clerk/express");
@@ -293,6 +294,7 @@ test("profile review activity uses the public review ID for both activity identi
   };
   t.mock.method(Review, "find", () => chainQuery([review]));
   t.mock.method(BoardItem, "find", () => chainQuery([]));
+  t.mock.method(Listen, "aggregate", async () => []);
   const router = loadRoute(t, profileRoutePath);
 
   const response = await invokeLastHandler(router, "/me/activity", "get", { userId: "owner" });

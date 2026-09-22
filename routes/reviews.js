@@ -12,7 +12,7 @@ const {
   getListLimit,
 } = require("./utils/reviewFeeds");
 const {
-  buildPopularReviewPagePipeline,
+  readPopularReviewPage,
   nextCursorFor,
   parseReviewFeedQuery,
   recentCursorFilter,
@@ -39,24 +39,23 @@ async function authorMap(ids) {
   } catch { /* optional */ }
   return map;
 }
-async function likeStats(reviews, viewerId, asOf) {
+async function likeStats(reviews, viewerId) {
   const ids = reviews.map((review) => String(review._id)).filter(Boolean);
   const rows = ids.length ? await Like.find({
     targetType: "review",
     reviewId: { $in: ids },
-    ...(asOf ? { createdAt: { $lte: asOf } } : {}),
   }) : [];
   const stats = new Map(ids.map((id) => [id, { likeCount: 0, likedByViewer: false }]));
   rows.forEach((row) => { const item = stats.get(String(row.reviewId)); if (item) { item.likeCount += 1; item.likedByViewer ||= Boolean(viewerId && row.userId === viewerId); } });
   return stats;
 }
-async function serializeReviews(reviews, viewerId, { likeStatsAsOf } = {}) {
+async function serializeReviews(reviews, viewerId) {
   const sources = reviews.map(plain);
   const albumIds = [...new Set(sources.map((review) => String(review.albumCatalogId?._id || review.albumCatalogId || "")).filter(Boolean))];
   const albums = albumIds.length ? await AlbumCatalog.find({ _id: { $in: albumIds } }) : [];
   const albumMap = new Map(albums.map((album) => [String(album._id), normalizeCatalogAlbum(album)]));
   const authors = await authorMap(sources.map((review) => review.userId));
-  const stats = await likeStats(sources, viewerId, likeStatsAsOf);
+  const stats = await likeStats(sources, viewerId);
   return sources.map((review) => ({
     reviewId: persistedReviewId(review),
     userId: review.userId,
@@ -135,7 +134,9 @@ async function sendReviewPage(req, res, { match, scope, viewerId }) {
   const feed = parseReviewFeedQuery(req.query, scope);
   let rows;
   if (feed.sort === "popular") {
-    rows = await Review.aggregate(buildPopularReviewPagePipeline(match, feed));
+    const page = await readPopularReviewPage(match, feed);
+    rows = page.rows;
+    feed.snapshotTime = page.snapshotTime;
   } else {
     rows = await Review.find({ ...match, ...recentCursorFilter(feed.cursor) })
       .sort({ date: -1, _id: -1 })
@@ -144,7 +145,7 @@ async function sendReviewPage(req, res, { match, scope, viewerId }) {
   const hasNextPage = rows.length > feed.limit;
   const page = rows.slice(0, feed.limit);
   res.json({
-    reviews: await serializeReviews(page, viewerId, { likeStatsAsOf: feed.sort === "popular" ? feed.asOf : null }),
+    reviews: await serializeReviews(page, viewerId),
     nextCursor: hasNextPage ? nextCursorFor(page.at(-1), feed) : null,
   });
 }
