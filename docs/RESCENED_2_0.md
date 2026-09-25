@@ -57,6 +57,17 @@ The [benchmark guide](../benchmarks/README.md#initial-baseline-and-adding-cases)
 
 **Open decisions:** Feedback status names and revision/withdrawal behavior, retention of submitted result context, duplicate grouping, and who owns promotion of accepted examples into a released dataset version.
 
+## Automatic album listens
+
+**Direction:** Optional listening-service connection that automatically creates diary entries when a session covers 80% of the distinct tracks on the edition actually played. The user chose automatic logging with undo/delete rather than a confirmation inbox. Manual logging remains available. Last.fm is the candidate first source, subject to verifying that its evidence supports edition matching.
+
+The [first-release scope](AUTOMATIC_ALBUM_LISTENS.md) now starts with a prerequisite discovery phase: resolve complete edition tracklists and the relationship between existing release-group albums and specific editions before implementing automatic listening. The current importer deliberately omits tracklists, and its representative release is chosen from cover data. Preserve public album IDs while evaluating subordinate edition identities, provider evidence, and a reviewed enrichment workflow. The document retains the later connection, sync, diary, UI, and verification scope. This is planned work, not shipped behavior.
+
+### Automatic-listen feasibility study
+
+The [Last.fm study](LASTFM_LISTENING_STUDY.md) now has a standalone offline evaluator, frozen 20-pair sample, 40 reviewed MusicBrainz reference lists, and explicitly gated live capture commands. The first Last.fm metadata run misses the frozen strict coverage gates, and real controlled-session evidence is still pending; no catalog/schema changes or automatic diary writes are authorized by this experiment. Choose edition-specific or shared-standard counting only after the independent pilot gates are scored.
+
+
 ## Other feature ideas
 
 Add future ideas here with the user problem, proposed behavior, and any open questions.

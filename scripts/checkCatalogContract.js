@@ -8,6 +8,8 @@ const roots = [
   "server.js",
   "frontend/src",
   "lib/catalogImport",
+  "lib/listeningStudy",
+  "scripts/lastfmStudy.js",
   "scripts/fetchListenBrainzCatalog.js",
   "scripts/importCatalogDataset.js",
   "scripts/validateCatalogDataset.js",

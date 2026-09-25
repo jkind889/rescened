@@ -1,5 +1,14 @@
 # Rescened repository guidance
 
+## Delegation hierarchy
+
+- The main agent is the coordinator: it owns requirements, architectural decisions, task boundaries, integration, final verification, and the user-facing result.
+- Delegate bounded, independent work to subagents when it materially improves progress or review quality. Keep small changes and tightly dependent steps local. Follow [the delegation guide](docs/AGENT_DELEGATION.md) for roles, task briefs, and handoffs.
+- Use `explorer` for read-only investigation, `executor_luna` for scoped implementation, `executor_sol` for unusually difficult work that cannot be narrowed effectively, and `doc-writer` for documentation based on verified facts. Use `tester` when exposed by the current runtime; otherwise assign its bounded verification responsibilities to `worker` or perform them in the main agent. Do not assume a role exists merely because its configuration file is on disk.
+- The coordinator assigns exact file ownership and acceptance criteria before spawning. Subagents report directly to the coordinator and must not delegate further. Use at most three simultaneous subagents, or fewer if the runtime limit requires it.
+- Subagents share the working tree. Tell every editing subagent that it is not alone, must preserve others' edits, and must report overlapping ownership before writing. Keep Git mutations and ownership transfers with the coordinator.
+- Delegation does not expand authorization. All agents must preserve the catalog, security, provider, and data-operation rules below. Database apply steps still require explicit user authorization for the named target.
+
 ## Project shape
 
 - The product and npm packages are named **Rescened**. The checkout or remote may still use the legacy name `albumboxd`; do not rename paths, remotes, packages, or product copy unless the task explicitly requires it.

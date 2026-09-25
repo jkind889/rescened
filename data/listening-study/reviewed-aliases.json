@@ -1,0 +1,276 @@
+{
+  "version": "1.0.0",
+  "postHoc": true,
+  "bundles": [
+    {
+      "editionId": "1989:deluxe",
+      "referenceHash": "85ff73fccf9c56d6f52f5378847640daa670c5d6686061223d77b7b99f679214",
+      "releaseMbid": "e223f526-bbd9-4aa3-a5fb-5618291e80a6",
+      "albumTitle": "1989 (Deluxe)",
+      "albumArtist": "Taylor Swift",
+      "trackCount": 19,
+      "reviewer": "Codex source review",
+      "reviewedAt": "2026-09-25",
+      "sources": [
+        "https://musicbrainz.org/release/e223f526-bbd9-4aa3-a5fb-5618291e80a6",
+        "https://musicbrainz.org/release/6bbba9c0-29b0-4f35-adec-1ad6c289e0a9"
+      ],
+      "rationale": "Reviewed three bonus voice-memo names and piano/instrument/guitar credits against the corresponding MusicBrainz reference and alternate naming source. These aliases never map to the studio songs.",
+      "aliases": [
+        {
+          "referencePosition": 17,
+          "releaseTrackMbid": "b716069d-f280-42e9-945b-f0c4d5e4e381",
+          "from": {
+            "title": "I Know Places (Voice Memo)",
+            "artist": "Taylor Swift"
+          },
+          "to": {
+            "title": "I Know Places (piano / vocal)",
+            "artist": "Taylor Swift"
+          }
+        },
+        {
+          "referencePosition": 18,
+          "releaseTrackMbid": "dd492155-2322-427f-b76c-e0ba8247b7fd",
+          "from": {
+            "title": "I Wish You Would (Voice Memo)",
+            "artist": "Taylor Swift"
+          },
+          "to": {
+            "title": "I Wish You Would (track / vocal)",
+            "artist": "Taylor Swift"
+          }
+        },
+        {
+          "referencePosition": 19,
+          "releaseTrackMbid": "08ae89b0-36b3-4a13-a934-d044772ce467",
+          "from": {
+            "title": "Blank Space - Voice Memo",
+            "artist": "Taylor Swift"
+          },
+          "to": {
+            "title": "Blank Space (guitar / vocal)",
+            "artist": "Taylor Swift"
+          }
+        }
+      ]
+    },
+    {
+      "editionId": "origin-of-symmetry:deluxe",
+      "referenceHash": "f7ccaa4cde048058cce24afa38a7197cd9509021549ff781c8c053d23f2b62f0",
+      "releaseMbid": "27fc4fb9-8c40-4a70-a3d9-29f4c041dcbe",
+      "albumTitle": "Origin of Symmetry (XX Anniversary RemiXX)",
+      "albumArtist": "Muse",
+      "trackCount": 12,
+      "reviewer": "Codex source review",
+      "reviewedAt": "2026-09-25",
+      "sources": [
+        "https://musicbrainz.org/release/27fc4fb9-8c40-4a70-a3d9-29f4c041dcbe",
+        "https://www.muse.mu/news/stream-origin-symmetry-xx-anniversary-remixx-now-322396"
+      ],
+      "rationale": "Official artist listing confirms this remixed edition and its 12-track sequence without per-track edition suffixes. Only the exact suffix in this specific edition is mapped.",
+      "aliases": [
+        {
+          "referencePosition": 1,
+          "releaseTrackMbid": "331bf6d3-aa53-4aae-9c5e-a3518a6ac690",
+          "from": {
+            "title": "New Born (XX Anniversary RemiXX)",
+            "artist": "Muse"
+          },
+          "to": {
+            "title": "New Born",
+            "artist": "Muse"
+          }
+        },
+        {
+          "referencePosition": 2,
+          "releaseTrackMbid": "2bf58acf-e811-4c54-b4f2-168524dfd7be",
+          "from": {
+            "title": "Bliss (XX Anniversary RemiXX)",
+            "artist": "Muse"
+          },
+          "to": {
+            "title": "Bliss",
+            "artist": "Muse"
+          }
+        },
+        {
+          "referencePosition": 3,
+          "releaseTrackMbid": "75fc6c90-7296-488c-a2ee-4c81eb02af14",
+          "from": {
+            "title": "Space Dementia (XX Anniversary RemiXX)",
+            "artist": "Muse"
+          },
+          "to": {
+            "title": "Space Dementia",
+            "artist": "Muse"
+          }
+        },
+        {
+          "referencePosition": 4,
+          "releaseTrackMbid": "14bf64c8-0cd9-4372-a213-dcf7b7637730",
+          "from": {
+            "title": "Hyper Music (XX Anniversary RemiXX)",
+            "artist": "Muse"
+          },
+          "to": {
+            "title": "Hyper Music",
+            "artist": "Muse"
+          }
+        },
+        {
+          "referencePosition": 5,
+          "releaseTrackMbid": "8fe528f9-384c-45aa-b6d6-8d5bc8b71dba",
+          "from": {
+            "title": "Plug In Baby (XX Anniversary RemiXX)",
+            "artist": "Muse"
+          },
+          "to": {
+            "title": "Plug In Baby",
+            "artist": "Muse"
+          }
+        },
+        {
+          "referencePosition": 6,
+          "releaseTrackMbid": "388acf03-c7d8-46d9-8ec3-aefd6a09d276",
+          "from": {
+            "title": "Citizen Erased (XX Anniversary RemiXX)",
+            "artist": "Muse"
+          },
+          "to": {
+            "title": "Citizen Erased",
+            "artist": "Muse"
+          }
+        },
+        {
+          "referencePosition": 7,
+          "releaseTrackMbid": "b7647218-c90e-4952-9070-22bb48f040ac",
+          "from": {
+            "title": "Micro Cuts (XX Anniversary RemiXX)",
+            "artist": "Muse"
+          },
+          "to": {
+            "title": "Micro Cuts",
+            "artist": "Muse"
+          }
+        },
+        {
+          "referencePosition": 8,
+          "releaseTrackMbid": "3429b575-0691-4c9d-ac51-61c41fa0cdfd",
+          "from": {
+            "title": "Screenager (XX Anniversary RemiXX)",
+            "artist": "Muse"
+          },
+          "to": {
+            "title": "Screenager",
+            "artist": "Muse"
+          }
+        },
+        {
+          "referencePosition": 9,
+          "releaseTrackMbid": "aab2c295-7eeb-4360-99d2-0f232f708375",
+          "from": {
+            "title": "Darkshines (XX Anniversary RemiXX)",
+            "artist": "Muse"
+          },
+          "to": {
+            "title": "Darkshines",
+            "artist": "Muse"
+          }
+        },
+        {
+          "referencePosition": 10,
+          "releaseTrackMbid": "fc968cc7-6f6d-47c9-b4f4-bc008b5be1e0",
+          "from": {
+            "title": "Feeling Good (XX Anniversary RemiXX)",
+            "artist": "Muse"
+          },
+          "to": {
+            "title": "Feeling Good",
+            "artist": "Muse"
+          }
+        },
+        {
+          "referencePosition": 11,
+          "releaseTrackMbid": "aaed1e07-4609-4465-a83b-d9bb16424a62",
+          "from": {
+            "title": "Futurism (XX Anniversary RemiXX)",
+            "artist": "Muse"
+          },
+          "to": {
+            "title": "Futurism",
+            "artist": "Muse"
+          }
+        },
+        {
+          "referencePosition": 12,
+          "releaseTrackMbid": "09f9e0d8-ea17-46e7-b120-69db7eec0633",
+          "from": {
+            "title": "Megalomania (XX Anniversary RemiXX)",
+            "artist": "Muse"
+          },
+          "to": {
+            "title": "Megalomania",
+            "artist": "Muse"
+          }
+        }
+      ]
+    },
+    {
+      "editionId": "hozier:standard",
+      "referenceHash": "7a020387b801291d76bdd7013301a439def228b4afb9277ac00ac653f5c57391",
+      "releaseMbid": "e96845cd-cadf-4c37-b9e7-11ab08742539",
+      "albumTitle": "Hozier",
+      "albumArtist": "Hozier",
+      "trackCount": 13,
+      "reviewer": "Codex source review",
+      "reviewedAt": "2026-09-25",
+      "sources": [
+        "https://musicbrainz.org/release/e96845cd-cadf-4c37-b9e7-11ab08742539"
+      ],
+      "rationale": "Reviewed apparent missing-letter typo against the unique reference title and recording c0b0c305-d05c-423a-8389-099f09232757. Exact alias only; not a fuzzy spelling rule.",
+      "aliases": [
+        {
+          "referencePosition": 12,
+          "releaseTrackMbid": "75528945-f629-419e-8e18-6495ee2b41ee",
+          "from": {
+            "title": "Foregner's God",
+            "artist": "Hozier"
+          },
+          "to": {
+            "title": "Foreigner’s God",
+            "artist": "Hozier"
+          }
+        }
+      ]
+    },
+    {
+      "editionId": "rumours:standard",
+      "referenceHash": "28e73b6efa1b2ea9c22eb4100752dd41e68f6f7d552e9676e6886685da76ffe2",
+      "releaseMbid": "1a8c4ac3-6f47-4570-aedb-f1928a0498ea",
+      "albumTitle": "Rumours",
+      "albumArtist": "Fleetwood Mac",
+      "trackCount": 11,
+      "reviewer": "Codex source review",
+      "reviewedAt": "2026-09-25",
+      "sources": [
+        "https://musicbrainz.org/release/1a8c4ac3-6f47-4570-aedb-f1928a0498ea"
+      ],
+      "rationale": "Reviewed shortened title against unique reference Never Going Back Again, recording d91d6ea4-a1a6-4945-b372-6b4fae18f6b6. Exact alias in this reference edition only.",
+      "aliases": [
+        {
+          "referencePosition": 3,
+          "releaseTrackMbid": "963ca4eb-2da5-4ce4-b702-a567a1f8f83e",
+          "from": {
+            "title": "Never Going Back",
+            "artist": "Fleetwood Mac"
+          },
+          "to": {
+            "title": "Never Going Back Again",
+            "artist": "Fleetwood Mac"
+          }
+        }
+      ]
+    }
+  ]
+}
