@@ -1,16 +1,30 @@
 # Automatic album listens: first release scope
 
-Status: Standalone feasibility evaluator implemented; production feature and data imports remain unimplemented.
+Status: Persistent Last.fm syncing and reviewed name-mapping pilot implemented behind disabled flags. Automatic diary publication remains unimplemented. No deployment or data import is implied.
 
-Last reviewed: 2026-09-24.
+Last reviewed: 2026-09-25.
 
-The first release is an opt-in Last.fm integration that turns qualifying track-scrobble sessions into ordinary Rescened diary entries. The user explicitly chose **automatic logging with undo/delete**, rather than a confirmation inbox, and **80% of whichever edition the user actually played**, rather than a standard-album baseline. Other defaults below are proposals for the pilot.
+The current release verifies Last.fm accounts, retains future scrobbles privately, and builds moderator-reviewed album-name coverage. **It creates no diary entries and performs no album-completion counting.** See the [persistent pilot runbook](LASTFM_SYNC.md) for its contracts, controls, and rollout requirements.
 
-**Current priority: test Last.fm before choosing a catalog model.** The [standalone study](LASTFM_LISTENING_STUDY.md) freezes 20 pairs / 40 editions and tests both edition-specific and shared-standard counting against identical evidence. It has no database or diary-write path. Forty MusicBrainz reference tracklists have been reviewed and Last.fm metadata captured. The frozen strict comparison passes 13/40 editions and 12/20 standard baselines, below both metadata gates; all 20 actual controlled sessions remain pending. See the study report for naming differences versus edition/count failures. Feasibility is not established.
+The later automatic-listening release will use **80% of one reviewed standard tracklist per album**, with automatic logging and undo/delete. Recognized edition names map to the existing album; bonus tracks cannot substitute for standard tracks. Manual entries stay independent. Edition-specific automatic detection is deferred.
 
-If the edition-specific pilot passes, retain one public album page with separate edition tracklists and shared reviews. If it fails, independently evaluate one reviewed standard baseline per album: matching tracks from any edition count toward 80%, while bonus tracks cannot replace missing standard tracks. Count distinct matching tracks, never total scrobbles. If both approaches fail, identify the missing data before implementation. The study runbook contains the frozen gates, commands, provenance, and current results; subsequent implementation proposals below are conditional on that decision.
+Approved mappings certify album identity only. Nonempty catalog tracks do not certify a reviewed standard baseline. Study mappings and IDs are never automatically promoted into production; seed candidates require explicit public catalog bindings and a reviewed environment-specific dry-run.
 
-## Phase 0: resolve edition identity and tracklist acquisition
+## Current v1 decision — 2026-09-25
+
+Reviewed artist-specific edition-name mappings now run in the standalone study, using a hash-pinned standard reference. The first entry maps three Born to Die names to one standard baseline. The [study runbook](LASTFM_LISTENING_STUDY.md#reviewed-album-name-mapping--standard-baseline-v1-study) covers commands and the three captured playback windows. Unknown/ambiguous mappings remain unresolved. This does not add catalog/schema changes, account UI, or diary writes.
+
+Manual entries remain independent: a user may deliberately add a separate manual entry after an automatic standard-album listen. Automatic syncing must not merge, overwrite, remove, or suppress it merely because album/date overlap. Explicit deluxe labels in the manual UI are separate future work. Automatic session receipts still prevent retries from duplicating automatic entries.
+
+The earlier edition-model discovery and architecture proposals below are retained as later-phase context, not prerequisites for this standard-baseline v1. The current v1 decision supersedes edition-specific threshold and manual-overlap assumptions in that earlier proposal. The frozen pilot scores remain historical evidence and are not retroactively relabeled as passes.
+
+The frozen pilot scores remain historical evidence, not production coverage estimates. The current priority is safe ingestion and reviewed name coverage; counting stays a separate release. The [study runbook](LASTFM_LISTENING_STUDY.md) retains the original sample, gates, diagnostic revisions, and subsequent playback results.
+
+## Historical proposal: later counting and edition work
+
+The sections below preserve earlier design exploration, not the current sync-only release contract. Their proposed flags, publication steps, session storage, and edition prerequisites are not implemented by the persistent mapping pilot. Current operations are documented only in [LASTFM_SYNC.md](LASTFM_SYNC.md).
+
+### Phase 0: resolve edition identity and tracklist acquisition
 
 The two prerequisites are connected: a release group represents the album concept, while its releases can have different tracklists. We need the denominator for the edition being played. A ten-track edition requires eight qualifying tracks; an eighteen-track edition requires fifteen. A listener whose first eight tracks appear on both editions has not supplied enough evidence to choose the ten-track denominator.
 
@@ -70,9 +84,9 @@ Manual logging stays available. Use “album listen” or “automatic listen”
 | --- | --- |
 | Eligible releases | Reviewed catalog albums and EPs; other release types deferred for the pilot. |
 | Evidence | A timestamped, recorded scrobble. Ignore `nowplaying` rows even if they include other useful metadata. |
-| Threshold | `ceil(0.8 × total tracks on the identified edition)` distinct matched edition track positions/local IDs. |
+| Threshold | `ceil(0.8 × total tracks on the reviewed standard baseline)` distinct matched standard track positions/local IDs. |
 | Repeats | One track contributes once per session, regardless of repeats. Shuffle is allowed. |
-| Session boundary | Proposed two-hour gap and 24-hour cap. Partition confirmed sessions by user, album, and edition; hold unresolved edition evidence separately. Define edition switches during Phase 0 rather than combining tracks across editions. Other albums do not extend this session. |
+| Session boundary | Proposed two-hour gap and 24-hour cap. Partition by user and canonical album across recognized edition names; unknown album mappings stay unresolved. Other albums do not extend this session. |
 | Publication | At the first qualifying reconciliation, after the bounded fetch window is complete; do not wait two hours to publish. Later tracks extend coverage without creating another entry. |
 | Listening date | Calendar date of the session's first qualifying track event, in its saved timezone. Crossing midnight does not split a session. |
 | Replay limitation | Back-to-back repeats within the same session produce one automatic entry in v1. Separate sessions can produce multiple same-day listens; manual logging can record additional replays. |
@@ -90,7 +104,7 @@ Freeze the edition identity, complete edition tracklist snapshot, counting-rule 
 - Hold ambiguous editions, duplicate track titles, missing album names, and unknown albums without counting them. Replaying the same evidence must not move it to a different album automatically.
 - Persist normalized event fingerprints using source account, timestamp, and stable normalized track identity; test page overlap and restarts. Last.fm does not document a unique scrobble ID in this response, so identical events at the same timestamp must be handled conservatively. Metadata corrections can also change fingerprints; do not promise perfect source-event identity.
 - Give each persisted session a stable public UUID and a unique publication receipt. Event fingerprints alone are not the diary idempotency key. Reprocessing or deleting evidence must not mint a new identity for an already handled session.
-- Proposed manual-overlap rule: if a manual diary entry already exists for that album and date, hold the automatic session as “Already logged manually” rather than assuming it is a separate listen. Offer an explicit “Log as another listen” action. Preserve intentional manual repeats and never impose a user/album/date unique index.
+- Manual entries are independent of automatic sessions. Do not merge or suppress them because album/date overlap. Preserve intentional manual repeats and never impose a user/album/date unique index.
 - For manual logging after an automatic entry exists, show the existing entry and require an explicit choice to log another. Check concurrent manual/automatic creation under a shared per-user/album/date coordination mechanism; a query alone is insufficient to prevent races. Scope this coordination without changing manual request idempotency or silently merging entries.
 
 ## Deferred automatic-listening implementation slices

@@ -11,6 +11,8 @@ import FrontPage from "./Pages/FrontPage";
 import Layout from "./Layout";
 import Account from "./Pages/Account";
 import EditProfile from "./Pages/EditProfile";
+import LastfmCallback from "./Pages/LastfmCallback";
+import AlbumMappings from "./Pages/AlbumMappings";
 import ProfileNetwork from "./Pages/ProfileNetwork";
 import Boards from "./Pages/Boards";
 import BoardDetail from "./Pages/BoardDetail";
@@ -80,6 +82,14 @@ export function App() {
               <ProtectedRoute>
                 <ModerationSuggestions />
               </ProtectedRoute>} />
+            <Route path="/moderation/album-mappings" element={
+              <ProtectedRoute>
+                <AlbumMappings />
+              </ProtectedRoute>} />
+            <Route path="/moderation/album-mappings/:caseId" element={
+              <ProtectedRoute>
+                <AlbumMappings />
+              </ProtectedRoute>} />
             <Route path="/profile/:userId/reviews" element={<ViewReviews />} />
             <Route path="/profile/:userId/network" element={<ProfileNetwork />} />
             <Route path="/profile/:userId/boards/:boardId" element={<BoardDetail />} />
@@ -88,6 +98,7 @@ export function App() {
               <ProtectedRoute>
                 <EditProfile />
               </ProtectedRoute>} />
+            <Route path="/account/lastfm/callback" element={<LastfmCallback />} />
           </Route>
         </Routes>
         </Suspense>

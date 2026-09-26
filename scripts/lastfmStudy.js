@@ -10,7 +10,7 @@ const { ROOT, frozenInputs, editionsOf, createStudy, assertStudy, validateRefere
 
 function options(argv) {
   const [command, ...rest] = argv;
-  const allowed = new Set(["output", "edition", "release", "release-group", "reference-file", "reviewer", "credentials", "username", "session"]);
+  const allowed = new Set(["output", "edition", "release", "release-group", "reference-file", "reviewer", "credentials", "username", "session", "supplemental"]);
   const result = { command };
   for (let i = 0; i < rest.length; i += 2) {
     const key = rest[i]?.replace(/^--/, "");
@@ -49,7 +49,7 @@ async function write(directory, filename, value) {
 }
 async function main(argv = process.argv.slice(2)) {
   const args = options(argv);
-  if (!["init", "use-reviewed-references", "candidates", "browse-releases", "reference", "reference-file", "freeze", "capture-albums", "capture-sessions", "evaluate", "diagnose"].includes(args.command)) throw new Error("Unknown study command");
+  if (!["init", "use-reviewed-references", "candidates", "browse-releases", "reference", "reference-file", "freeze", "capture-albums", "capture-sessions", "evaluate", "diagnose", "evaluate-mappings"].includes(args.command)) throw new Error("Unknown study command");
   const directory = await externalPath(args.output);
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   if (args.command === "init") {
@@ -62,6 +62,16 @@ async function main(argv = process.argv.slice(2)) {
   const editions = editionsOf(sample);
   const edition = editions.find((e) => e.id === args.edition);
   const save = () => write(directory, "study.json", study);
+  if (args.command === "evaluate-mappings") {
+    const { mappingReport, mappingMarkdown } = require("../lib/listeningStudy/albumNameMappings");
+    const supplemental = args.supplemental ? JSON.parse(await fs.readFile(await externalPath(args.supplemental), "utf8")) : [];
+    const result = mappingReport(study, supplemental);
+    await write(directory, "album-name-mapping-report.json", result);
+    await write(directory, "album-name-mapping-report.md", mappingMarkdown(result));
+    console.log(JSON.stringify({ evaluatedControls: result.controls.filter((r) => r.status === "evaluated").length,
+      combinedProposedListens: result.combined.proposedListens, postHoc: true }));
+    return;
+  }
   if (args.command === "diagnose") {
     const { buildDiagnostics, matchingMarkdown, identityMarkdown } = require("../lib/listeningStudy/diagnostics");
     const { matching, identity } = buildDiagnostics(study);

@@ -18,6 +18,8 @@ const {
 
 validateServerEnv();
 
+// Signature verification must receive the exact bytes, before JSON parsing.
+app.use("/webhooks/clerk/listening", express.raw({ type: "application/json", limit: "256kb" }), require("./routes/listeningWebhook"));
 app.use(express.json())
 app.use("/health", healthRoutes);
 app.use(cors(buildCorsOptions()))
@@ -57,6 +59,8 @@ app.use("/likes", likeRoutes)
 app.use("/notifications", notificationRoutes)
 app.use("/suggestions", suggestionRoutes)
 app.use("/moderation/album-suggestions", moderationRoutes)
+app.use("/connections/lastfm", require("./routes/lastfmConnections"));
+app.use("/moderation/album-mappings", require("./routes/albumMappings"));
 
 async function startServer({
   connect = mongoose.connect.bind(mongoose),
@@ -65,12 +69,18 @@ async function startServer({
     require("./models/BoardListen").init(),
     require("./models/ListenCreation").init(),
   ]),
+  initializeListening = async () => {
+    if (Object.values(require("./lib/listening/common").flags()).some(Boolean)) {
+      await Promise.all(Object.values(require("./models/Listening")).map((Model) => Model.init()));
+    }
+  },
   listen = app.listen.bind(app),
   mongoUri = process.env.MONGO_URI,
   port = parsePort(),
 } = {}) {
   await connect(mongoUri);
   await initializeDiary();
+  await initializeListening();
   console.log("MongoDB Connected");
   return listen(port, () => {
     console.log(`server running on port ${port}`);

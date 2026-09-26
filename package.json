@@ -26,6 +26,9 @@
     "db:migrate:legacy:execute": "node scripts/migrateLegacyDatabase.js --execute",
     "check:catalog-contract": "node scripts/checkCatalogContract.js",
     "listening:study": "node scripts/lastfmStudy.js",
+    "listening:worker": "node scripts/listeningWorker.js",
+    "listening:mapping-seeds": "node scripts/listeningMappingSeeds.js",
+    "listening:metrics": "node scripts/listeningMetrics.js",
     "test:listening-study-live": "RUN_LIVE_LASTFM_STUDY=true node scripts/lastfmStudy.js"
   },
   "repository": {

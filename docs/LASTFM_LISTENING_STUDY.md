@@ -1,6 +1,6 @@
 # Last.fm album-listening feasibility study
 
-This standalone experiment compares edition-specific and shared-standard counting without importing catalog data or creating diary entries. The production feature remains unimplemented. Its scope and later rollout are in [Automatic album listens](AUTOMATIC_ALBUM_LISTENS.md).
+This standalone experiment compares edition-specific and shared-standard counting without importing catalog data or creating diary entries. It remains isolated from the separate [persistent Last.fm syncing and reviewed mapping pilot](LASTFM_SYNC.md). That pilot does not implement counting or automatic diary publication. The later scope is in [Automatic album listens](AUTOMATIC_ALBUM_LISTENS.md).
 
 ## Current evidence — 2026-09-24
 
@@ -140,3 +140,23 @@ Application requires the exact reference hash, release MBID, returned album name
 On the same captured name-query sample, complete matches progress **13 → 17 → 21 of 40**. The alias-assisted result is **52.5%**, still below the proposed 24/40 research checkpoint. Reference coverage of at least 80% progresses from 28/40 formatting-only to **29/40** alias-assisted. Separate MBID lookups reach **16/40** complete alias-assisted matches. Both the formatting-only results and frozen scores remain visible. JSON retains every applied alias and source; the reports hash both the alias manifest and application code. Actual playback remains 0/20.
 
 Deferred review: generic remaster suffixes on Oasis, Radiohead, Blur, and Michael Jackson; live/demo descriptor changes; missing guest credits; and genuine edition substitutions. The available evidence has not been treated as permission to merge those cases merely to reach 60%.
+
+## Reviewed album-name mapping — standard-baseline v1 study
+
+The product direction is now one reviewed standard baseline per album, with edition-specific detection deferred. The new offline command implements the reviewed name-mapping layer without changing the frozen experiment:
+
+```sh
+npm run listening:study -- evaluate-mappings --output /private/tmp/rescened-lastfm-pilot-20260924
+```
+
+The [mapping registry](../data/listening-study/album-name-mappings.json) initially covers Lana Del Rey's `Born to Die`, `Born to Die (Deluxe Version)`, and `Born to Die (Bonus Track Version)`. These names map to the same study standard identity. This is a study ID, not a public Rescened album ID; catalog binding and production persistence are not implemented.
+
+Mappings are explicit artist/name pairs, normalized only with the frozen text rules. Unknown names, missing names, different artists, and conflicting targets remain unresolved. The recent-track artist is a track artist, not a reliable album artist; guest-credit variations therefore remain unsupported until reviewed explicitly. A mapping never creates a catalog album, strips arbitrary version qualifiers, or resolves an edition.
+
+The denominator comes from the frozen **reviewed standard reference**, not the provider-returned album list. Exact reference and tracklist hashes must match the registry; missing/changed baselines disable their mappings. The Born to Die entry explicitly reviews two core-track name variants (Blue Jeans and Video Games without the reference's remastered suffix). These are scoped to that reference, not a global remaster equivalence rule. Bonus tracks and ambiguous tracks still do not count; repeats count once. Source edition MBIDs are preserved in evidence but are not compared with the target standard album's MBID. Track-ID conflicts still use the conservative frozen matching rules.
+
+Output is `album-name-mapping-report.md` plus JSON with original names, mapping decisions, baseline status, hashes and source provenance. Raw captures, frozen reports, and controlled-session logbooks are not rewritten. No manual or automatic diary records are read or changed. Reports are observational proposed-listen results, not a replacement oracle or a new pilot pass.
+
+An optional `--supplemental /absolute/private/evidence.json` accepts an array of `{control, capture}` records using the existing independent-logbook and complete-capture contracts. Controls need distinct IDs, valid nonoverlapping windows, confirmed sequences, and capture control hashes. Supplemental controls remain labeled outside the frozen 20-session sample. Both isolated-control and combined-window results are reported; combined windows follow actual session gaps rather than treating every test window as a new listen.
+
+Saved playback replay: standard session 12/12 → one proposed listen; deluxe tracks 1–10 → 10/12 and one proposed listen; supplemental nine standard tracks plus three bonus tracks → 9/12 and none. Across all windows, the first two tests merge under the existing two-hour-gap rule, leaving two combined sessions and one proposed listen total. This distinction matters for production session design. No provider requests are made by this command.

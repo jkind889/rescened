@@ -514,6 +514,9 @@ export function ModerationSuggestions() {
           <p>Review provenance, compare duplicate candidates, and leave a durable decision trail.</p>
         </div>
         <div className="moderation-page-actions">
+          <button className="community-secondary-button" onClick={() => navigate("/moderation/album-mappings")} type="button">
+            Album name mappings
+          </button>
           <button className="community-secondary-button" onClick={() => navigate("/suggestions")} type="button">
             My suggestions
           </button>

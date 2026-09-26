@@ -87,7 +87,7 @@ function Navbar()
                                     <li className="nav-item">
                                         <Link
                                             to="/suggestions"
-                                            className={`nav-link${location.pathname.startsWith("/suggestions") || location.pathname.startsWith("/moderation/album-suggestions") ? " nav-link-current" : ""}`}
+                                            className={`nav-link${location.pathname.startsWith("/suggestions") || location.pathname.startsWith("/moderation/album-suggestions") || location.pathname.startsWith("/moderation/album-mappings") ? " nav-link-current" : ""}`}
                                         >
                                             Suggestions
                                         </Link>
