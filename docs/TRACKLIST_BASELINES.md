@@ -10,7 +10,7 @@ Request a recommendation. Official releases with matching identity and without d
 
 Browse alternatives or paste a MusicBrainz release URL/UUID. The server validates and fetches a fixed provider endpoint and checks release-group identity and complete media/track positions. Missing/partial tracklists cannot be confirmed. Repeated recordings at different positions are preserved.
 
-Supply a reason to confirm, replace, defer, or revoke. A confirmed baseline is a versioned snapshot with local track UUIDs, typed upstream references, source retrieval/license metadata, hash, reviewer, and catalog revision. Replacement creates a new version and preserves history. Ordinary catalog tracks do not establish baseline readiness.
+Supply a reason to confirm, replace, defer, or revoke. Defer applies only while no current reviewed baseline or selection exists; use revoke to withdraw a reviewed one. A stale review may still be deferred. A confirmed baseline is a versioned snapshot with local track UUIDs, typed upstream references, source retrieval/license metadata, hash, reviewer, and catalog revision. Replacement creates a new version and preserves history. Ordinary catalog tracks do not establish baseline readiness.
 
 Confirmation fills an empty public catalog tracklist and records provenance. It leaves nonempty tracks unchanged; use an explicit catalog correction to change them. Later catalog revisions make baseline readiness stale until reviewed again. Owner event reads check current validity while retained-event reprocessing catches up.
 
@@ -18,7 +18,7 @@ A stale review cannot reuse its earlier selection, because candidate snapshots a
 
 **Known limitation.** Only an approved catalog correction explicitly invalidates a reviewed baseline: it records an `invalidate` audit event, marks the review `stale`, and queues retained-event reprocessing. The catalog importer and the missing-cover backfill also advance `catalogRevision` but do not call this path. Readiness remains safe because every read compares the baseline's catalog revision with the current album, so those albums already report `stale` in the queue and `baselineAvailable: false`. However, no `invalidate` audit event is written, and affected events rely on the worker's stale-mapping scan rather than an immediate reprocessing job. Adding explicit invalidation to those writers is deferred.
 
-A pending submission's selection remains private and binds to its revision. Approval of a new album publishes the selected baseline atomically with the album; approval without one remains allowed and leaves enrichment pending. Linking an existing album never applies the suggestion's baseline or tracks. Review that catalog album separately.
+A pending submission's selection remains private and binds to its revision. Approval of a new album publishes the selected baseline atomically with the album, even if `TRACKLIST_BASELINE_MODERATION_ENABLED` was disabled after the selection was confirmed, because the confirmation already passed that gate; approval without one remains allowed and leaves enrichment pending. Linking an existing album never applies the suggestion's baseline or tracks. Review that catalog album separately.
 
 ## Controls and API
 

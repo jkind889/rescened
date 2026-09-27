@@ -157,3 +157,13 @@ test("queued, invalidated-stale, and revision-stale reviews can be confirmed aga
   assert.equal((await AlbumCatalog.findOne({ albumId: album.albumId })).tracks[0].trackId, trackId);
   await assert.rejects(command("albums", album.albumId, "confirm", 7, 4, invalidated), (error) => error.code === "INVALID_BASELINE_STATE");
 });
+
+test("defer is limited to albums without a current reviewed baseline", { skip: !enabled }, async () => {
+  const group = mbid(); const album = await AlbumCatalog.create(albumInput({ releaseGroupMbid: group })); const candidate = makeCandidate({ releaseGroupMbid: group });
+  await storeCandidate("albums", album, candidate); await command("albums", album.albumId, "confirm", 0, 1, candidate);
+  await assert.rejects(command("albums", album.albumId, "defer", 1, 2, null), (error) => error.code === "INVALID_BASELINE_STATE");
+  const current = await baselineForAlbum(await AlbumCatalog.findOne({ albumId: album.albumId }));
+  assert.equal(current.tracklistHash, candidate.tracklistHash, "a rejected defer leaves readiness intact");
+  await AlbumCatalog.updateOne({ albumId: album.albumId }, { $inc: { catalogRevision: 1 } });
+  assert.equal((await command("albums", album.albumId, "defer", 1, 3, null)).status, "deferred");
+});

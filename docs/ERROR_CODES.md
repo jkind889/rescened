@@ -525,7 +525,7 @@ The moderator-only `/moderation/album-baselines` API follows the existing `UNAUT
 | `CANDIDATE_NOT_FOUND` | 409 | Preview is missing or expired for this revision. |
 | `INCOMPLETE_TRACKLIST` | 409 | A complete ordered baseline is required. |
 | `UNSUPPORTED_RELEASE_TYPE` | 409 | Only albums and EPs are eligible in this release. |
-| `INVALID_BASELINE_STATE` | 409 | Confirm on a current reviewed baseline, or replace without one. |
+| `INVALID_BASELINE_STATE` | 409 | Confirm or defer on a current reviewed baseline, or replace without one. |
 | `MUSICBRAINZ_RATE_LIMITED` | 503 | MusicBrainz asked the server to slow down; `Retry-After` carries its delay when supplied. |
 
 Provider errors retain bounded error codes without raw responses. Any provider error that carries an upstream delay sets `Retry-After` in seconds. Refresh stale review state before retrying; do not retry automatically from the UI. See [baseline workflow](TRACKLIST_BASELINES.md).
