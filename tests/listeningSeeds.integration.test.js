@@ -30,5 +30,11 @@ test("mapping seed apply is exact, atomic, catalog-only identity binding with ze
   await assert.rejects(applySeedPlan(stale, options), /SEED_CATALOG_REVISION_CHANGED/);
   assert.equal(await models.AlbumMapping.countDocuments(), 2, "first entry rolled back when second failed");
   assert.equal(await models.MappingCase.countDocuments(), 2);
+  const legacyId = randomUUID();
+  await AlbumCatalog.collection.insertOne({ albumId: legacyId, title: "Legacy", artistDisplayName: "Artist" });
+  const legacyPlan = await prepare([{ ...binding("Legacy Deluxe"), albumId: legacyId }]);
+  assert.equal(legacyPlan.entries[0].catalogRevision, 1, "missing stored revision is treated as 1");
+  await applySeedPlan(legacyPlan, options);
+  assert.equal((await models.AlbumMapping.findOne({ albumId: legacyId }).lean()).catalogRevision, 1);
   for (const collection of ["listens", "boardlistens", "listencreations"]) assert.equal(await mongoose.connection.collection(collection).countDocuments(), 0);
 });

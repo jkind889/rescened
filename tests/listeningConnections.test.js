@@ -137,6 +137,44 @@ test("event serialization exposes owner data without connection or Mongo identif
   }
 });
 
+test("event status filters use effective mapping and catalog revisions", async () => {
+  const originalFindOne = Listening.Connection.findOne;
+  const originalScrobbleFind = Listening.Scrobble.find;
+  const originalMappingFind = Listening.AlbumMapping.find;
+  const AlbumCatalog = require("../models/AlbumCatalog");
+  const originalCatalogFind = AlbumCatalog.find;
+  try {
+    const id = "507f1f77bcf86cd799439011";
+    const mappingId = crypto.randomUUID();
+    Listening.Connection.findOne = async () => ({ _id: id });
+    Listening.Scrobble.find = () => ({ sort() { return this; }, limit() { return this; }, exec: async () => [{
+      _id: id,
+      eventId: crypto.randomUUID(),
+      artist: "Artist",
+      album: "Album",
+      track: "Track",
+      playedAt: new Date("2026-09-25T12:00:00Z"),
+      resolution: "matched",
+      albumId: "7f3aa2f7-b252-4b6a-91aa-4a0e2f7a2bf7",
+      mappingId,
+      mappingRevision: 1,
+      catalogRevision: 2,
+      baselineAvailable: false,
+    }] });
+    Listening.AlbumMapping.find = async () => [{ mappingId, status: "active", revision: 1, albumId: "7f3aa2f7-b252-4b6a-91aa-4a0e2f7a2bf7" }];
+    AlbumCatalog.find = async () => [{ albumId: "7f3aa2f-b252-4b6a-91aa-4a0e2f7a2bf7", catalogRevision: 3 }];
+    const result = await connections.listEvents({ userId: "user_1", status: "unavailable", limit: 1 });
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0].resolution, "unavailable");
+    assert.equal(result.items[0].albumId, null);
+  } finally {
+    Listening.Connection.findOne = originalFindOne;
+    Listening.Scrobble.find = originalScrobbleFind;
+    Listening.AlbumMapping.find = originalMappingFind;
+    AlbumCatalog.find = originalCatalogFind;
+  }
+});
+
 test("expired, wrong-owner, and replayed authorization callbacks are rejected before provider exchange", async () => {
   const previousFlags = { LASTFM_CONNECTION_ENABLED: process.env.LASTFM_CONNECTION_ENABLED, LASTFM_PILOT_USER_IDS: process.env.LASTFM_PILOT_USER_IDS };
   process.env.LASTFM_CONNECTION_ENABLED = "true";

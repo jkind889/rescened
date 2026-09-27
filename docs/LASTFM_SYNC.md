@@ -74,7 +74,7 @@ Approvals queue retained-event reprocessing for active connections only. Revocat
 
 Study IDs and `data/listening-study/album-name-mappings.json` are not production identities. There is no automatic import. An operator must independently bind each reusable artist/album name to an existing public UUID-v4 `albumId`.
 
-Prepare a JSON array containing only `artist`, `album`, `albumId`, `reason`, and `sources` (HTTPS source URL strings). Do not include usernames, tokens or listening evidence. A dry-run performs catalog reads, requires existing targets, captures catalog/case revisions, and refuses already mapped keys. It does not modify the database or overwrite an existing output file.
+Prepare a JSON array containing only `artist`, `album`, `albumId`, `reason`, and `sources` (HTTPS source URL strings). Do not include usernames, tokens or listening evidence. A dry-run performs catalog reads, requires existing targets, captures catalog/case revisions, and refuses already mapped keys. As in the catalog importer, a catalog album with no stored `catalogRevision` is treated as revision 1 by seeds, the worker, and owner reads. It does not modify the database or overwrite an existing output file.
 
 ```sh
 npm run listening:mapping-seeds -- --dry-run \
@@ -110,3 +110,14 @@ npm --prefix frontend run build
 The integration runner includes the listening worker, API and seed transaction suites using temporary replica sets. The Born to Die study positive/negative tests remain regression evidence: recognizing deluxe labels never makes bonus tracks substitute for missing standard tracks. The persistent pipeline has no diary-write dependency.
 
 Browser verification uses synthetic authenticated users and API responses. Real Last.fm authorization, external webhook delivery, hosted callback logging policy, and production capacity require separate supervised pilot verification before rollout.
+
+### Implementation verification — September 26, 2026
+
+- `npm test`: passed, 349 passed and 54 intentionally skipped; no failures.
+- `npm run test:integration`: passed, 76 tests against temporary MongoDB replica sets; no failures or skips. Includes preservation of unavailable blank-track evidence through mapping approval and revocation.
+- `npm run check:catalog-contract`: passed.
+- `npm --prefix frontend run lint` and `npm --prefix frontend run build`: passed; build reports the existing chunk-size warning.
+- Mocked Playwright/Chrome browser checks: passed for pause/resume/disconnect/reconnect, callback query removal and a single exchange, approval then revocation without reload, stale revision errors, queue filtering, and desktop/mobile rendering. No console issues were observed.
+- `git diff --check`: passed.
+
+These checks do not establish live Last.fm authorization, hosted callback privacy, webhook delivery, or pilot deployment readiness. No live provider test, seed apply, or production database operation was performed.

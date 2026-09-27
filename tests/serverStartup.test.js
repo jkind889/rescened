@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const serverPath = require.resolve("../server");
-const REQUIRED_ENV = ["MONGO_URI", "CLERK_SECRET_KEY", "CLERK_PUBLISHABLE_KEY", "NODE_ENV"];
+const REQUIRED_ENV = ["MONGO_URI", "CLERK_SECRET_KEY", "CLERK_PUBLISHABLE_KEY", "NODE_ENV", "LASTFM_CONNECTION_ENABLED", "LASTFM_SYNC_ENABLED", "LASTFM_DISCOVERY_ENABLED", "ALBUM_MAPPING_MODERATION_ENABLED"];
 
 function loadServer(t) {
   const previous = Object.fromEntries(REQUIRED_ENV.map((key) => [key, process.env[key]]));
@@ -11,6 +11,10 @@ function loadServer(t) {
     CLERK_SECRET_KEY: "sk_test_startup",
     CLERK_PUBLISHABLE_KEY: "pk_test_startup",
     NODE_ENV: "test",
+    LASTFM_CONNECTION_ENABLED: "false",
+    LASTFM_SYNC_ENABLED: "false",
+    LASTFM_DISCOVERY_ENABLED: "false",
+    ALBUM_MAPPING_MODERATION_ENABLED: "false",
   });
   delete require.cache[serverPath];
   const server = require("../server");
@@ -38,6 +42,7 @@ test("startServer waits for MongoDB before binding the HTTP port", async (t) => 
       await connected;
     },
     initializeDiary: async () => { calls.push(["diaryIndexes"]); },
+    initializeListening: async () => { calls.push(["listeningIndexes"]); },
     listen: (port, callback) => {
       calls.push(["listen", port]);
       callback();
@@ -53,6 +58,7 @@ test("startServer waits for MongoDB before binding the HTTP port", async (t) => 
   assert.deepEqual(calls, [
     ["connect", "mongodb://example.test/rescened"],
     ["diaryIndexes"],
+    ["listeningIndexes"],
     ["listen", 4100],
   ]);
 });
@@ -80,5 +86,18 @@ test("startServer does not bind a port when MongoDB connection fails", async (t)
     /MongoDB unavailable/,
   );
 
+  assert.equal(listenCalls, 0);
+});
+
+
+test("startServer does not accept traffic when listening index initialization fails", async (t) => {
+  const { startServer } = loadServer(t);
+  let listenCalls = 0;
+  await assert.rejects(startServer({
+    connect: async () => {},
+    initializeDiary: async () => {},
+    initializeListening: async () => { throw new Error("Listening index creation failed"); },
+    listen: () => { listenCalls += 1; },
+  }), /Listening index creation failed/);
   assert.equal(listenCalls, 0);
 });

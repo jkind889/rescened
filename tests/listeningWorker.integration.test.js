@@ -296,6 +296,54 @@ test("listening worker MongoDB integration", { skip: !enabled }, async (t) => {
     assert.equal(await Listen.countDocuments(), 0);
   });
 
+  await t.test("reprocessing preserves blank-track unavailable evidence while updating valid events", async () => {
+    await reset();
+    const conn = await connection();
+    const albumId = crypto.randomUUID();
+    await AlbumCatalog.create({ albumId, title: "Standard", artistDisplayName: "Album Artist", artistCredits: [{ name: "Album Artist", role: "main" }], catalogRevision: 1 });
+    const key = mappingKey("Album Artist", "Edition Label");
+    const mapping = await AlbumMapping.create({ mappingId: crypto.randomUUID(), key, provider: "lastfm", artist: "Album Artist", album: "Edition Label", artistKey: normalize("Album Artist"), albumKey: normalize("Edition Label"), albumId, catalogRevision: 1, revision: 1, reviewer: "moderator", reason: "verified" });
+    await Scrobble.create([
+      {
+        eventId: crypto.randomUUID(), connectionId: conn._id, connectionRevision: 1, identityKey: "blank-track",
+        artist: "Album Artist", album: "Edition Label", track: "", artistKey: normalize("Album Artist"), albumKey: normalize("Edition Label"), trackKey: "",
+        playedAt: new Date(DUE.getTime() + 1_000), expiresAt: new Date(DUE.getTime() + RETENTION_MS), resolution: "unavailable", mappingId: mapping.mappingId,
+      },
+      {
+        eventId: crypto.randomUUID(), connectionId: conn._id, connectionRevision: 1, identityKey: "valid-track",
+        artist: "Album Artist", album: "Edition Label", track: "Track", artistKey: normalize("Album Artist"), albumKey: normalize("Edition Label"), trackKey: normalize("Track"),
+        playedAt: new Date(DUE.getTime() + 2_000), expiresAt: new Date(DUE.getTime() + RETENTION_MS), resolution: "unavailable", mappingId: mapping.mappingId,
+      },
+    ]);
+    await enqueueJob("reprocess", "reprocess:track-identity-active", { key, mappingId: mapping.mappingId, mappingRevision: 1 }, { runAt: DUE });
+    assert.equal((await runWorkerOnce({ ...workerOptions({}, () => new Date("2026-09-25T14:00:00Z")), types: ["reprocess"] })).status, "done");
+    assert.equal((await Scrobble.findOne({ identityKey: "blank-track" })).resolution, "unavailable");
+    assert.equal((await Scrobble.findOne({ identityKey: "valid-track" })).resolution, "matched");
+
+    await AlbumMapping.updateOne({ _id: mapping._id }, { $set: { status: "revoked" }, $inc: { revision: 1 } });
+    await enqueueJob("reprocess", "reprocess:track-identity-revoked", { key, mappingId: mapping.mappingId, mappingRevision: 2 }, { runAt: DUE });
+    assert.equal((await runWorkerOnce({ ...workerOptions({}, () => new Date("2026-09-25T14:00:01Z")), types: ["reprocess"] })).status, "done");
+    assert.equal((await Scrobble.findOne({ identityKey: "blank-track" })).resolution, "unavailable");
+    assert.equal((await Scrobble.findOne({ identityKey: "valid-track" })).resolution, "unresolved");
+  });
+
+  await t.test("albums without a stored catalog revision resolve as revision 1 and are not stale", async () => {
+    await reset();
+    const conn = await connection();
+    const albumId = crypto.randomUUID();
+    // Legacy catalog documents predate the field; insert directly to bypass the schema default.
+    await AlbumCatalog.collection.insertOne({ albumId, title: "Legacy", artistDisplayName: "Album Artist", artistCredits: [{ name: "Album Artist", role: "main" }] });
+    const key = mappingKey("Album Artist", "Legacy Label");
+    await AlbumMapping.create({ mappingId: crypto.randomUUID(), key, provider: "lastfm", artist: "Album Artist", album: "Legacy Label", artistKey: normalize("Album Artist"), albumKey: normalize("Legacy Label"), albumId, catalogRevision: 1, revision: 1, reviewer: "moderator", reason: "verified" });
+    const provider = { async recentTracks({ page }) { return { page, totalPages: 1, tracks: [track("Mapped", "2026-09-25T12:10:00Z", "Legacy Label")] }; } };
+    await enqueueJob("sync", "sync:legacy", { connectionId: String(conn._id), connectionRevision: 1 }, { runAt: DUE });
+    await runWorkerOnce(workerOptions(provider));
+    const event = await Scrobble.findOne().lean();
+    assert.equal(event.resolution, "matched");
+    assert.equal(event.catalogRevision, 1);
+    assert.equal(await scheduleStaleMappingJobs({ clock: () => new Date("2026-09-26T14:00:00Z") }), 0);
+  });
+
   await t.test("sync stays disabled without its flag and owner removal closes ingestion before cleanup", async () => {
     await reset();
     const conn = await connection();
@@ -365,7 +413,12 @@ test("listening worker MongoDB integration", { skip: !enabled }, async (t) => {
         clock: () => new Date("2026-09-25T14:00:00Z"), env: {}, provider: {},
         discovery: { async discover() { throw new Error("unused"); } }, types: ["reprocess"],
       });
-      assert.equal(result.status, "done");
+      assert.equal(result.status, "pending");
+      const completed = await runWorkerOnce({
+        clock: () => new Date("2026-09-25T14:00:02Z"), env: {}, provider: {},
+        discovery: { async discover() { throw new Error("unused"); } }, types: ["reprocess"],
+      });
+      assert.equal(completed.status, "done");
     } finally {
       Scrobble.updateMany = originalUpdateMany;
     }

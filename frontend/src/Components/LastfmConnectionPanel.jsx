@@ -224,7 +224,7 @@ export default function LastfmConnectionPanel() {
             <div className="lastfm-event-list">
               {events.map((event) => (
                 <article className="lastfm-event" key={event.eventId}>
-            <div><strong>{event.track || "Unknown track"}</strong><span>{event.artist || "Unknown artist"} · {event.album || "Unknown album"}</span></div>
+                  <div><strong>{event.track || "Unknown track"}</strong><span>{event.artist || "Unknown artist"} · {event.album || "Unknown album"}</span></div>
                   <div className="lastfm-event-meta"><span className={`lastfm-resolution lastfm-resolution-${event.resolution}`}>{resolutionLabel(event)}</span><time>{formatLastfmDate(event.playedAt, { time: true })}</time></div>
                 </article>
               ))}

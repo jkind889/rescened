@@ -209,20 +209,28 @@ export default function AlbumMappings() {
     setCommand({ pending: true, error: null, success: "" });
     try {
       const token = await getToken();
-      await requestLastfmJson(
+      const selectedCandidate = [...candidates, ...catalogResults].find((candidate) => candidate.albumId === selectedAlbumId);
+      const expectedCatalogRevision = action === "approve" && Number.isSafeInteger(Number(selectedCandidate?.catalogRevision))
+        ? Number(selectedCandidate.catalogRevision)
+        : undefined;
+      const updatedDetail = await requestLastfmJson(
         lastfmUrl(`${ALBUM_MAPPING_PATH}/${encodeURIComponent(selectedCase.caseId || caseId)}/${action}`),
         {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ expectedRevision: selectedCase.revision, reason: reason.trim(), ...(action === "approve" ? { albumId: selectedAlbumId } : {}) }),
+          body: JSON.stringify({
+            expectedRevision: selectedCase.revision,
+            reason: reason.trim(),
+            ...(action === "approve" ? { albumId: selectedAlbumId, ...(expectedCatalogRevision === undefined ? {} : { expectedCatalogRevision }) } : {}),
+          }),
         },
         "The mapping decision could not be applied.",
       );
+      setDetail(updatedDetail);
+      setSelectedAlbumId(updatedDetail?.mapping?.albumId || selectedAlbumId);
       setCommand({ pending: false, error: null, success: `${ACTIONS.find((item) => item.value === action)?.label || "Decision"} recorded.` });
       setReason("");
       await loadQueue();
-      if (action !== "revoke") navigate(`${ALBUM_MAPPING_PATH}/${encodeURIComponent(caseId)}`, { replace: true });
-      else setDetail(null);
     } catch (error) {
       const parsed = errorState(error, "The mapping decision could not be applied.");
       setCommand({ pending: false, error: parsed, success: "" });

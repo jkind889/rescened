@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const mongoose = require("mongoose");
+const { catalogRevisionOf } = require("../lib/listening/common");
 const { Connection, Scrobble, MappingCase, AlbumMapping, Job } = require("../models/Listening");
 
 async function collectMetrics(now = new Date()) {
@@ -11,7 +12,7 @@ async function collectMetrics(now = new Date()) {
   const mappings = await AlbumMapping.find({ status: "active", key: { $in: names.map(({ _id }) => JSON.stringify(["lastfm", _id.artist, _id.album])) } }).select("albumId catalogRevision").lean();
   const AlbumCatalog = require("../models/AlbumCatalog");
   const albums = await AlbumCatalog.find({ albumId: { $in: mappings.map((mapping) => mapping.albumId) } }).select("albumId catalogRevision").lean();
-  const revisions = new Map(albums.map((album) => [album.albumId, album.catalogRevision]));
+  const revisions = new Map(albums.map((album) => [album.albumId, catalogRevisionOf(album)]));
   const covered = mappings.filter((mapping) => revisions.get(mapping.albumId) === mapping.catalogRevision).length;
   const oldest = await MappingCase.findOne({ status: "pending" }).sort({ createdAt: 1 }).select("createdAt").lean();
   return {

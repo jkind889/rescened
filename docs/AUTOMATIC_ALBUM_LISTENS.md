@@ -2,7 +2,7 @@
 
 Status: Persistent Last.fm syncing and reviewed name-mapping pilot implemented behind disabled flags. Automatic diary publication remains unimplemented. No deployment or data import is implied.
 
-Last reviewed: 2026-09-25.
+Last reviewed: 2026-09-26.
 
 The current release verifies Last.fm accounts, retains future scrobbles privately, and builds moderator-reviewed album-name coverage. **It creates no diary entries and performs no album-completion counting.** See the [persistent pilot runbook](LASTFM_SYNC.md) for its contracts, controls, and rollout requirements.
 
