@@ -95,7 +95,7 @@ The apply rechecks all target/case revisions and creates mappings, audit records
 
 ## Monitoring and verification
 
-`listening:metrics` emits aggregates, not individual names or listening histories. Review sync lag, incomplete windows, deferred jobs/provider errors, unresolved observed names, queue age, revoked mappings and baseline-unavailable names. The coverage denominator is **distinct eligible names observed in retained evidence for active connections**. Its numerator requires an active reviewed mapping with a current existing catalog target. An empty denominator is reported as null coverage.
+`listening:metrics` emits aggregates, not individual names or listening histories. Review sync lag, incomplete windows, deferred jobs/provider errors, unresolved observed names, queue age, revoked mappings, baseline-ready and baseline-unavailable names, and `baselineReviews` status counts ([details](TRACKLIST_BASELINES.md#validation-and-operations)). The coverage denominator is **distinct eligible names observed in retained evidence for active connections**. Its numerator requires an active reviewed mapping with a current existing catalog target. An empty denominator is reported as null coverage.
 
 Normal checks remain offline:
 

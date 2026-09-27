@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { preparePlan, verifyPlan, applyPlan, digest } = require('../lib/baselines/backfill');
+const { preparePlan, summarizePlan, verifyPlan, applyPlan, digest } = require('../lib/baselines/backfill');
 const { parseArgs } = require('../scripts/enrichAlbumTracklists');
 const albumId = 'aab1557c-cc11-478b-832e-60fc8046d949';
 const group = '11223344-5566-7788-99aa-bbccddeeff00';
@@ -32,4 +32,18 @@ test('operator CLI defaults to dry run and requires explicit matching apply targ
   assert.equal(parseArgs(['--environment', 'pilot', '--output', '/private/tmp/report.json']).mode, 'dry-run');
   assert.throws(() => parseArgs(['--apply', '--environment', 'production']), /EXPLICIT/);
   assert.throws(() => parseArgs(['--environment', 'pilot', '--output', '/tmp/report', '--limit', '101']), /INVALID_LIMIT/);
+});
+test('batch summary counts outcomes and failure codes without naming albums', async () => {
+  const other = { ...album, albumId: 'bbb1557c-cc11-478b-832e-60fc8046d949' };
+  const third = { ...album, albumId: 'ccc1557c-cc11-478b-832e-60fc8046d949', externalReferences: [] };
+  const fourth = { ...album, albumId: 'ddd1557c-cc11-478b-832e-60fc8046d949' };
+  const results = [
+    async () => { throw Object.assign(new Error('x'), { code: 'MUSICBRAINZ_RATE_LIMITED' }); },
+    async () => ({ candidate: { releaseGroupMbid: group, tracklistHash: 'b'.repeat(64) }, incomplete: true, ambiguous: true }),
+    async () => ({ candidate: null }),
+  ];
+  const plan = await preparePlan({ albums: [album, other, third, fourth], environment: 'pilot', fingerprint, baselineForAlbum: async () => null, provider: { recommend: () => results.shift()() } });
+  const summary = summarizePlan(plan);
+  assert.deepEqual(summary, { entries: 4, byStatus: { candidate: 1, reviewed: 0, conflict: 0, group_required: 1, unavailable: 2 }, failureCodes: { MUSICBRAINZ_RATE_LIMITED: 1, NO_COMPLETE_RELEASE: 1 }, incompleteDiscovery: 1, ambiguousRecommendations: 1 });
+  assert.equal(JSON.stringify(summary).includes(album.albumId), false);
 });

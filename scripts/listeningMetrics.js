@@ -28,6 +28,7 @@ async function collectMetrics(now = new Date()) {
     unresolvedObservedNames: names.length - covered,
     baselineUnavailableNames: covered - baselineReady,
     baselineReadyNames: baselineReady,
+    baselineReviews: await baselineService.reviewStatusCounts(),
     pendingCases: await MappingCase.countDocuments({ status: "pending" }),
     oldestQueueAgeSeconds: oldest ? Math.max(0, (now - oldest.createdAt) / 1000) : 0,
     revokedMappings: await AlbumMapping.countDocuments({ status: "revoked" }),

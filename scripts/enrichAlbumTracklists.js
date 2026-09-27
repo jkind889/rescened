@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const fs = require('node:fs');
 const mongoose = require('mongoose');
-const { preparePlan, verifyPlan, applyPlan, digest, targetFingerprint } = require('../lib/baselines/backfill');
+const { preparePlan, summarizePlan, verifyPlan, applyPlan, digest, targetFingerprint } = require('../lib/baselines/backfill');
 function parseArgs(args) {
   const options = { mode: 'dry-run', limit: 20 };
   let modeSeen = false;
@@ -48,7 +48,7 @@ async function main(args = process.argv.slice(2)) {
       const plan = await preparePlan({ albums, environment: options['--environment'], fingerprint, provider, baselineForAlbum: service.baselineForAlbum });
       const bytes = JSON.stringify(plan, null, 2) + '\n';
       fs.writeFileSync(options['--output'], bytes, { flag: 'wx', mode: 0o600 });
-      console.log(JSON.stringify({ mode: 'dry-run', environment: plan.environment, entries: plan.entries.length, sha256: digest(bytes), nextAfter: albums.at(-1)?.albumId || null }));
+      console.log(JSON.stringify({ mode: 'dry-run', environment: plan.environment, ...summarizePlan(plan), sha256: digest(bytes), nextAfter: albums.at(-1)?.albumId || null }));
     } else {
       if (fs.statSync(options['--plan']).size > 10_000_000) throw new Error('ENRICHMENT_PLAN_TOO_LARGE');
       const bytes = fs.readFileSync(options['--plan'], 'utf8');

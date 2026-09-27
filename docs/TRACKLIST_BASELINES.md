@@ -43,7 +43,7 @@ npm run catalog:enrich-tracklists -- --dry-run --environment pilot \
   --limit 20 --output /private/path/tracklist-plan.json
 ```
 
-The default mode is dry-run. It performs catalog reads and explicit MusicBrainz requests, using private process-local pacing/cache rather than writing provider-budget/cache collections. It never activates baselines or fills tracks. Keep the report and printed SHA-256. Use the printed `nextAfter` with `--after UUID` to scan another batch.
+The default mode is dry-run. It performs catalog reads and explicit MusicBrainz requests, using private process-local pacing/cache rather than writing provider-budget/cache collections. It never activates baselines or fills tracks. Keep the report and printed SHA-256. The printed summary counts each batch's outcomes (`byStatus`), groups unavailable results by `failureCodes` (`NO_COMPLETE_RELEASE` when MusicBrainz returned no complete official release), and counts incomplete discovery and ambiguous recommendations; it names no albums. These summaries are the pilot's enrichment-failure record, so keep them with the reports. Use the printed `nextAfter` with `--after UUID` to scan another batch.
 
 After inspecting the exact report and receiving explicit authorization for the named target:
 
@@ -57,6 +57,6 @@ Apply verifies checksum, target fingerprint, and catalog revisions, then queues 
 
 ## Validation and operations
 
-Run `npm test`, `npm run test:integration`, `npm run check:catalog-contract`, frontend lint/build, and browser review checks. Live-provider checks and database applies require separate explicit authorization. Start with a small album/EP pilot. Monitor the review queue, stale/deferred/unavailable baselines, and `listening:metrics` baseline-ready/unavailable observed-name counts. No production rollout or apply occurred during implementation.
+Run `npm test`, `npm run test:integration`, `npm run check:catalog-contract`, frontend lint/build, and browser review checks. Live-provider checks and database applies require separate explicit authorization. Start with a small album/EP pilot. Monitor the review queue, per-batch enrichment summaries, and `listening:metrics`. Its `baselineReviews` block counts albums and pending new-album suggestions by effective review status (`pending`, `reviewed`, `stale`, `deferred`, `revoked`), using the same staleness rule as the queue; `pendingWithCandidate` separates candidates queued by an enrichment apply from untouched albums. `baselineReadyNames` and `baselineUnavailableNames` cover approved observed names. Interactive provider failures in the review panel are returned to the moderator and are not persisted. No production rollout or apply occurred during implementation.
 
 Provider contract references: [MusicBrainz API](https://musicbrainz.org/doc/MusicBrainz_API), [data licensing](https://musicbrainz.org/doc/About/Data_License). Recommendations inspect one bounded release page and hydrate at most three official candidates; additional alternatives use explicit pagination/preview. Partial discovery is visible and never implies that all editions were compared.

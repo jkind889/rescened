@@ -39,6 +39,10 @@ test('reviewed baseline availability follows confirmation, revocation, and catal
     let rows = await listEvents({ userId: conn.userId });
     assert.equal(rows.items[0].baselineAvailable, true);
     assert.equal((await Listening.Scrobble.findOne({ connectionId: conn._id })).baselineAvailable, true);
+    const metrics = await require('../scripts/listeningMetrics').collectMetrics(new Date());
+    assert.equal(metrics.baselineReadyNames, 1);
+    assert.equal(metrics.baselineUnavailableNames, 0);
+    assert.equal(metrics.baselineReviews.albums.reviewed, 1);
     const current = await service.detail('albums', album.albumId);
     await service.performCommand({ kind: 'albums', id: album.albumId, action: 'revoke', actorUserId: 'moderator', body: { expectedRevision: current.revision, expectedTargetRevision: current.target.catalogRevision, reason: 'Wrong standard release', requestId: crypto.randomUUID() } });
     rows = await listEvents({ userId: conn.userId });

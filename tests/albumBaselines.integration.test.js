@@ -9,7 +9,7 @@ const AlbumSubmission = require("../models/AlbumSubmission");
 const Models = require("../models/AlbumBaseline");
 const Listening = require("../models/Listening");
 const { hashCandidateTracklist } = require("../lib/baselines/musicBrainz");
-const { baselineForAlbum, invalidateAlbumBaseline, list, performCommand, queueEnrichmentCandidate, storeCandidate } = require("../lib/baselines/service");
+const { baselineForAlbum, invalidateAlbumBaseline, list, performCommand, queueEnrichmentCandidate, reviewStatusCounts, storeCandidate } = require("../lib/baselines/service");
 const { approveAlbumSubmission } = require("../routes/utils/approval");
 const { findDuplicateSignals, normalizeSubmissionPayload, snapshotForSubmission } = require("../routes/utils/submissions");
 
@@ -166,4 +166,28 @@ test("defer is limited to albums without a current reviewed baseline", { skip: !
   assert.equal(current.tracklistHash, candidate.tracklistHash, "a rejected defer leaves readiness intact");
   await AlbumCatalog.updateOne({ albumId: album.albumId }, { $inc: { catalogRevision: 1 } });
   assert.equal((await command("albums", album.albumId, "defer", 1, 3, null)).status, "deferred");
+});
+
+test("pilot review counts match queue statuses, including derived staleness and queued work", { skip: !enabled }, async () => {
+  const make = async () => { const group = mbid(); const album = await AlbumCatalog.create(albumInput({ releaseGroupMbid: group })); return { album, group }; };
+  const reviewed = await make(); const stale = await make(); const deferred = await make(); const revoked = await make(); const queued = await make(); await make();
+  await AlbumCatalog.create({ ...albumInput(), releaseType: "single" });
+  for (const target of [reviewed, stale, revoked]) { const candidate = makeCandidate({ releaseGroupMbid: target.group }); await storeCandidate("albums", target.album, candidate); await command("albums", target.album.albumId, "confirm", 0, 1, candidate); }
+  await AlbumCatalog.updateOne({ albumId: stale.album.albumId }, { $inc: { catalogRevision: 1 } });
+  await command("albums", revoked.album.albumId, "revoke", 1, 2, null);
+  await command("albums", deferred.album.albumId, "defer", 0, 1, null);
+  const session = await mongoose.startSession();
+  await session.withTransaction(() => queueEnrichmentCandidate({ albumId: queued.album.albumId, expectedCatalogRevision: 1, candidate: makeCandidate({ releaseGroupMbid: queued.group }), reviewer: "integration-moderator", planHash: "f".repeat(64), session }));
+  await session.endSession();
+  const submission = await createSubmission(mbid());
+  const candidate = makeCandidate({ releaseGroupMbid: submission.externalReferences[0].externalId }); await storeCandidate("submissions", submission, candidate);
+  await command("submissions", submission.submissionId, "confirm", 0, 1, candidate);
+  await createSubmission(mbid());
+  const counts = await reviewStatusCounts();
+  assert.deepEqual(counts.albums, { pending: 2, reviewed: 1, stale: 1, deferred: 1, revoked: 1, pendingWithCandidate: 1 });
+  assert.deepEqual(counts.submissions, { pending: 1, reviewed: 1, stale: 0, deferred: 0, revoked: 0, pendingWithCandidate: 0 });
+  for (const status of ["pending", "reviewed", "stale", "deferred", "revoked"]) {
+    const rows = (await list({ status, limit: 50 })).items;
+    assert.equal(rows.filter((row) => row.kind === "albums").length, counts.albums[status], `albums ${status}`);
+  }
 });
