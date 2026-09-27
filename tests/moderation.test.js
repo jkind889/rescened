@@ -8,6 +8,7 @@ const rateLimitPath = require.resolve("../routes/utils/rateLimit");
 const moderationPath = require.resolve("../routes/moderation");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
+const BaselineService = require("../lib/baselines/service");
 
 const ORIGINALS = {
   startSession: mongoose.startSession,
@@ -17,6 +18,8 @@ const ORIGINALS = {
   submissionFind: AlbumSubmission.find,
   submissionFindOne: AlbumSubmission.findOne,
   submissionFindOneAndUpdate: AlbumSubmission.findOneAndUpdate,
+  publishSubmissionBaseline: BaselineService.publishSubmissionBaseline,
+  invalidateAlbumBaseline: BaselineService.invalidateAlbumBaseline,
 };
 
 function validMetadata(title = "Kind of Blue") {
@@ -107,6 +110,8 @@ function installMocks({ userId = "user_mod", documents = [], catalogs = [] } = {
   let currentDocuments = documents;
   let currentCatalogs = catalogs;
   const pass = (req, res, next) => next();
+  BaselineService.publishSubmissionBaseline = async () => null;
+  BaselineService.invalidateAlbumBaseline = async () => false;
   require.cache[clerkPath] = {
     id: clerkPath,
     filename: clerkPath,
@@ -189,6 +194,8 @@ test.afterEach(() => {
   AlbumSubmission.find = ORIGINALS.submissionFind;
   AlbumSubmission.findOne = ORIGINALS.submissionFindOne;
   AlbumSubmission.findOneAndUpdate = ORIGINALS.submissionFindOneAndUpdate;
+  BaselineService.publishSubmissionBaseline = ORIGINALS.publishSubmissionBaseline;
+  BaselineService.invalidateAlbumBaseline = ORIGINALS.invalidateAlbumBaseline;
   delete require.cache[moderationPath];
   delete require.cache[clerkPath];
   delete require.cache[rateLimitPath];

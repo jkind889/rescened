@@ -1,0 +1,227 @@
+.baseline-review-panel {
+  display: grid;
+  gap: 1.25rem;
+  padding: 1.35rem;
+}
+
+.baseline-review-panel-compact {
+  margin-top: 1rem;
+  padding: 1rem;
+}
+
+.baseline-panel-heading,
+.baseline-section-heading,
+.baseline-group-selected,
+.baseline-flag-row,
+.baseline-candidate-facts,
+.baseline-actions,
+.baseline-inline-form {
+  align-items: center;
+  display: flex;
+  gap: .75rem;
+}
+
+.baseline-panel-heading,
+.baseline-section-heading {
+  justify-content: space-between;
+}
+
+.baseline-panel-heading h2,
+.baseline-section-heading h3,
+.baseline-group-picker h3,
+.baseline-decision h3,
+.baseline-alternative-list h4 {
+  margin: 0;
+}
+
+.baseline-panel-heading p,
+.baseline-section-heading p,
+.baseline-candidate-preview p,
+.baseline-group-picker p,
+.baseline-decision p {
+  margin: .25rem 0 0;
+}
+
+.baseline-flag-row,
+.baseline-candidate-facts {
+  color: var(--app-soft);
+  flex-wrap: wrap;
+  font-size: .82rem;
+}
+
+.baseline-flag-row span,
+.baseline-candidate-facts span,
+.baseline-candidate-count {
+  border: 1px solid var(--app-line-strong);
+  border-radius: 999px;
+  padding: .28rem .55rem;
+}
+
+.baseline-group-picker,
+.baseline-discovery,
+.baseline-decision,
+.baseline-candidate-preview {
+  border-top: 1px solid var(--app-line-strong);
+  padding-top: 1rem;
+}
+
+.baseline-inline-form {
+  align-items: stretch;
+  margin-top: .7rem;
+}
+
+.baseline-inline-form input,
+.baseline-decision textarea {
+  border: 1px solid var(--app-line-strong);
+  border-radius: .55rem;
+  font: inherit;
+  min-width: 0;
+  padding: .7rem .8rem;
+  width: 100%;
+}
+
+.baseline-decision label {
+  display: grid;
+  gap: .45rem;
+  margin-top: .8rem;
+}
+
+.baseline-decision textarea {
+  resize: vertical;
+}
+
+.baseline-group-selected {
+  background: var(--app-surface-strong);
+  border-radius: .65rem;
+  flex-wrap: wrap;
+  padding: .65rem .75rem;
+}
+
+.baseline-group-selected span {
+  color: var(--app-soft);
+  font-size: .78rem;
+  text-transform: uppercase;
+}
+
+.baseline-group-selected code {
+  color: var(--app-text);
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.baseline-group-results,
+.baseline-alternative-list {
+  display: grid;
+  gap: .55rem;
+  margin-top: .8rem;
+}
+
+.baseline-choice {
+  color: var(--app-text);
+  background: var(--app-surface);
+  border: 1px solid var(--app-line-strong);
+  border-radius: .6rem;
+  cursor: pointer;
+  display: grid;
+  gap: .2rem;
+  padding: .7rem .8rem;
+  text-align: left;
+}
+
+.baseline-choice:hover,
+.baseline-choice-selected {
+  border-color: var(--app-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-accent) 15%, transparent);
+}
+
+.baseline-choice small {
+  color: var(--app-soft);
+}
+
+.baseline-candidate-preview {
+  display: grid;
+  gap: .7rem;
+}
+
+.baseline-warning,
+.baseline-success,
+.baseline-rationale {
+  border-radius: .55rem;
+  padding: .65rem .75rem;
+}
+
+.baseline-warning {
+  background: color-mix(in srgb, #c99a24 12%, var(--app-surface));
+  color: var(--app-text);
+  border-left: 2px solid #c99a24;
+}
+
+.baseline-success {
+  background: color-mix(in srgb, var(--app-success) 10%, var(--app-surface));
+  color: var(--app-text);
+}
+
+.baseline-rationale {
+  background: var(--app-surface-strong);
+  color: var(--app-soft);
+}
+
+.baseline-source-link {
+  color: var(--app-accent);
+  font-size: .9rem;
+  justify-self: start;
+}
+
+.baseline-track-table-wrap {
+  max-height: 26rem;
+  overflow: auto;
+}
+
+.baseline-track-table {
+  border-collapse: collapse;
+  min-width: 100%;
+  width: max-content;
+}
+
+.baseline-track-table th,
+.baseline-track-table td {
+  border-bottom: 1px solid var(--app-line-strong);
+  padding: .5rem .45rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.baseline-track-table th {
+  color: var(--app-soft);
+  font-size: .76rem;
+  background: var(--app-surface);
+  position: sticky;
+  text-transform: uppercase;
+  top: 0;
+}
+
+.baseline-muted {
+  color: var(--app-soft);
+}
+
+@media (max-width: 640px) {
+  .baseline-panel-heading,
+  .baseline-section-heading,
+  .baseline-inline-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .baseline-inline-form button {
+    width: 100%;
+  }
+}
+
+.baseline-queue-page .mapping-filter-row input {
+  width: 100%;
+  min-width: 0;
+  padding: .6rem;
+  border: 1px solid var(--app-line-strong);
+  background: var(--app-surface);
+  color: var(--app-text);
+}

@@ -3,6 +3,7 @@ import { useAuth } from "@clerk/react";
 import { useNavigate, useParams } from "react-router-dom";
 import SubmissionDetails from "../Components/Community/SubmissionDetails.jsx";
 import ModeratorDecision from "../Components/Community/ModeratorDecision.jsx";
+import BaselineReviewPanel from "../Components/Community/BaselineReviewPanel.jsx";
 import { API_BASE_URL } from "../config/api.js";
 import {
   formatCommunityDate,
@@ -135,6 +136,7 @@ export function ModerationSuggestions() {
     error: null,
   });
   const [commandState, setCommandState] = useState(EMPTY_COMMAND_STATE);
+  const [baselineBusy, setBaselineBusy] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
   const queueRequestIdRef = useRef(0);
   const isNarrowWorkspace = useMediaQuery("(max-width: 900px)");
@@ -300,6 +302,15 @@ export function ModerationSuggestions() {
     const endpoint = COMMAND_ENDPOINTS[action];
     const targetSubmissionId = submissionId;
     if (!endpoint || !targetSubmissionId || activeCommandState.pendingAction) return;
+    if (baselineBusy) {
+      setCommandState({
+        submissionId: targetSubmissionId,
+        pendingAction: "",
+        error: { message: "Wait for the MusicBrainz release preview to finish before approving this suggestion.", code: "BASELINE_REVIEW_IN_PROGRESS" },
+        success: null,
+      });
+      return;
+    }
 
     setCommandState({
       submissionId: targetSubmissionId,
@@ -408,6 +419,21 @@ export function ModerationSuggestions() {
           submission={selectedSuggestion}
         />
       );
+      const baselineReview = selectedSuggestion.submissionType === "new_album" ? (
+        <BaselineReviewPanel
+          compact
+          id={selectedSuggestion.submissionId}
+          kind="submissions"
+          key="moderation-baseline-review"
+          onBusyChange={setBaselineBusy}
+          onStateChange={() => setDetailRefreshIndex((currentIndex) => currentIndex + 1)}
+          target={{
+            artistDisplayName: queueArtist(selectedSuggestion),
+            releaseGroupMbid: selectedSuggestion.proposedMetadata?.externalReferences?.find((reference) => reference.provider === "musicbrainz" && reference.entityType === "release-group")?.externalId || "",
+            title: queueTitle(selectedSuggestion),
+          }}
+        />
+      ) : null;
       const decision = (
         <ModeratorDecision
           duplicateCandidates={selectedDuplicateCandidates}
@@ -421,8 +447,8 @@ export function ModerationSuggestions() {
         />
       );
       detailChildren = isMobileDecisionLayout
-        ? [toolbar, decision, submissionDetail]
-        : [toolbar, submissionDetail, decision];
+        ? [toolbar, baselineReview, decision, submissionDetail]
+        : [toolbar, submissionDetail, baselineReview, decision];
     }
 
     return (
@@ -516,6 +542,9 @@ export function ModerationSuggestions() {
         <div className="moderation-page-actions">
           <button className="community-secondary-button" onClick={() => navigate("/moderation/album-mappings")} type="button">
             Album name mappings
+          </button>
+          <button className="community-secondary-button" onClick={() => navigate("/moderation/album-baselines")} type="button">
+            Tracklist baselines
           </button>
           <button className="community-secondary-button" onClick={() => navigate("/suggestions")} type="button">
             My suggestions

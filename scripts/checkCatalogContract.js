@@ -10,6 +10,7 @@ const roots = [
   "lib/catalogImport",
   "lib/listeningStudy",
   "lib/listening",
+  "lib/baselines",
   "scripts/lastfmStudy.js",
   "scripts/listeningWorker.js",
   "scripts/listeningMappingSeeds.js",

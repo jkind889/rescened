@@ -23,6 +23,7 @@ const Suggestions = lazy(() => import("./Pages/Suggestions"));
 const SuggestionEditor = lazy(() => import("./Pages/SuggestionEditor"));
 const ApprovedSuggestions = lazy(() => import("./Pages/ApprovedSuggestions"));
 const ModerationSuggestions = lazy(() => import("./Pages/ModerationSuggestions"));
+const AlbumBaselines = lazy(() => import("./Pages/AlbumBaselines"));
 
 export function App() {
    return (
@@ -89,6 +90,14 @@ export function App() {
             <Route path="/moderation/album-mappings/:caseId" element={
               <ProtectedRoute>
                 <AlbumMappings />
+              </ProtectedRoute>} />
+            <Route path="/moderation/album-baselines" element={
+              <ProtectedRoute>
+                <AlbumBaselines />
+              </ProtectedRoute>} />
+            <Route path="/moderation/album-baselines/:albumId" element={
+              <ProtectedRoute>
+                <AlbumBaselines />
               </ProtectedRoute>} />
             <Route path="/profile/:userId/reviews" element={<ViewReviews />} />
             <Route path="/profile/:userId/network" element={<ProfileNetwork />} />

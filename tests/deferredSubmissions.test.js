@@ -6,6 +6,7 @@ const mongoose = require("mongoose");
 const suggestionsPath = require.resolve("../routes/suggestions");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
+const BaselineService = require("../lib/baselines/service");
 const {
   decodeApprovedCursor,
   encodeApprovedCursor,
@@ -27,6 +28,8 @@ const originals = {
   submissionFind: AlbumSubmission.find,
   submissionFindOne: AlbumSubmission.findOne,
   submissionFindOneAndUpdate: AlbumSubmission.findOneAndUpdate,
+  publishSubmissionBaseline: BaselineService.publishSubmissionBaseline,
+  invalidateAlbumBaseline: BaselineService.invalidateAlbumBaseline,
 };
 
 function chain(rows) {
@@ -105,7 +108,14 @@ test.afterEach(() => {
   AlbumSubmission.find = originals.submissionFind;
   AlbumSubmission.findOne = originals.submissionFindOne;
   AlbumSubmission.findOneAndUpdate = originals.submissionFindOneAndUpdate;
+  BaselineService.publishSubmissionBaseline = originals.publishSubmissionBaseline;
+  BaselineService.invalidateAlbumBaseline = originals.invalidateAlbumBaseline;
   delete require.cache[suggestionsPath];
+});
+
+test.beforeEach(() => {
+  BaselineService.publishSubmissionBaseline = async () => null;
+  BaselineService.invalidateAlbumBaseline = async () => false;
 });
 
 test("correction normalization captures a typed baseline and refuses client-owned track IDs", () => {

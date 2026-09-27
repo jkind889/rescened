@@ -14,6 +14,10 @@ async function collectMetrics(now = new Date()) {
   const albums = await AlbumCatalog.find({ albumId: { $in: mappings.map((mapping) => mapping.albumId) } }).select("albumId catalogRevision").lean();
   const revisions = new Map(albums.map((album) => [album.albumId, catalogRevisionOf(album)]));
   const covered = mappings.filter((mapping) => revisions.get(mapping.albumId) === mapping.catalogRevision).length;
+  const baselineService = require("../lib/baselines/service");
+  const readyAlbums = new Set();
+  for (const album of albums) if (await baselineService.baselineForAlbum(album)) readyAlbums.add(album.albumId);
+  const baselineReady = mappings.filter((mapping) => revisions.get(mapping.albumId) === mapping.catalogRevision && readyAlbums.has(mapping.albumId)).length;
   const oldest = await MappingCase.findOne({ status: "pending" }).sort({ createdAt: 1 }).select("createdAt").lean();
   return {
     observedAt: now.toISOString(), activeConnections: active.length,
@@ -22,7 +26,8 @@ async function collectMetrics(now = new Date()) {
     eligibleObservedNames: names.length, approvedObservedNames: covered,
     approvedNameCoverage: names.length ? covered / names.length : null,
     unresolvedObservedNames: names.length - covered,
-    baselineUnavailableNames: covered,
+    baselineUnavailableNames: covered - baselineReady,
+    baselineReadyNames: baselineReady,
     pendingCases: await MappingCase.countDocuments({ status: "pending" }),
     oldestQueueAgeSeconds: oldest ? Math.max(0, (now - oldest.createdAt) / 1000) : 0,
     revokedMappings: await AlbumMapping.countDocuments({ status: "revoked" }),

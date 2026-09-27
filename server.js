@@ -61,6 +61,7 @@ app.use("/suggestions", suggestionRoutes)
 app.use("/moderation/album-suggestions", moderationRoutes)
 app.use("/connections/lastfm", require("./routes/lastfmConnections"));
 app.use("/moderation/album-mappings", require("./routes/albumMappings"));
+app.use("/moderation/album-baselines", require("./routes/albumBaselines"));
 
 async function startServer({
   connect = mongoose.connect.bind(mongoose),
@@ -74,6 +75,11 @@ async function startServer({
       await Promise.all(Object.values(require("./models/Listening")).map((Model) => Model.init()));
     }
   },
+  initializeBaselines = async () => {
+    if ([process.env.TRACKLIST_ENRICHMENT_ENABLED, process.env.TRACKLIST_BASELINE_MODERATION_ENABLED].some((value) => value === "true")) {
+      await Promise.all(Object.values(require("./models/AlbumBaseline")).map((Model) => Model.init()));
+    }
+  },
   listen = app.listen.bind(app),
   mongoUri = process.env.MONGO_URI,
   port = parsePort(),
@@ -81,6 +87,7 @@ async function startServer({
   await connect(mongoUri);
   await initializeDiary();
   await initializeListening();
+  await initializeBaselines();
   console.log("MongoDB Connected");
   return listen(port, () => {
     console.log(`server running on port ${port}`);

@@ -20,6 +20,13 @@ const {
 
 const MBID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function baselineService() {
+  // Baseline state is optional for existing deployments and is loaded only at
+  // the transactional publication boundary.
+  // eslint-disable-next-line global-require
+  return require("../../lib/baselines/service");
+}
+
 // Keep the resolver lazy so direct-cover and linked-album approvals do not load
 // or call the provider, and callers can inject a deterministic resolver in tests.
 function defaultCoverResolver() {
@@ -497,6 +504,11 @@ async function approveCatalogCorrection({ preliminary, submissionId, actorUserId
         { returnDocument: "after", runValidators: true, session },
       );
       if (!updatedAlbum) throw new ModerationConflictError("Catalog album changed while the correction was being applied", "CATALOG_CHANGED");
+      await baselineService().invalidateAlbumBaseline(updatedAlbum, {
+        session,
+        actorUserId,
+        reason: `Catalog correction ${current.submissionId} changed revisioned metadata`,
+      });
 
       const updated = await AlbumSubmission.findOneAndUpdate(
         { _id: current._id, submissionId, status: "pending", currentRevision: preliminaryRevision },
@@ -680,6 +692,12 @@ async function approveAlbumSubmission({
         if (!album) throw new ModerationConflictError("Catalog album not found", "CATALOG_ALBUM_NOT_FOUND");
       } else {
         album = await createCatalogAlbum(buildCatalogInput(current, actorUserId, approvedAt, coverResolution), { session });
+        await baselineService().publishSubmissionBaseline({
+          submission: current,
+          album,
+          actorUserId,
+          session,
+        });
       }
 
       const updated = await AlbumSubmission.findOneAndUpdate(

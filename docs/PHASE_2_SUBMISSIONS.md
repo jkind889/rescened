@@ -940,3 +940,9 @@ The UI mirrors those boundaries: contributors edit only supported public fields 
 
 - MusicBrainz-assisted suggestion prefill. Broad catalog import remains the separate artifact-driven workflow documented in `CATALOG_IMPORT.md`.
 - Album merges, editions, and contributor reputation.
+
+## Reviewed standard tracklists during moderation
+
+Pending new-album suggestions can now receive a private MusicBrainz baseline selection from the shared moderator review panel. The selection binds to the current submission revision and remains separate from the contributor's proposed tracks. Moderator approval of a new album publishes an eligible selected baseline in the same transaction; approving without one remains allowed. Linking an existing album never applies the selection or proposed tracks to that album.
+
+MusicBrainz discovery and baseline decisions have separate disabled-by-default flags. Confirmation fills empty public catalog tracks only; nonempty tracks still require explicit correction. Catalog corrections invalidate existing baseline readiness conservatively. See [the maintained tracklist baseline guide](TRACKLIST_BASELINES.md) for release selection, alternatives, API, provenance, and backfill operations. The provider enrichment step is optional and unavailable providers do not block ordinary approval.

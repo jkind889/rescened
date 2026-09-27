@@ -59,13 +59,11 @@ The [benchmark guide](../benchmarks/README.md#initial-baseline-and-adding-cases)
 
 ## Automatic album listens
 
-**Direction:** Optional listening-service connection that automatically creates diary entries when a session covers 80% of the distinct tracks on the edition actually played. The user chose automatic logging with undo/delete rather than a confirmation inbox. Manual logging remains available. Last.fm is the candidate first source, subject to verifying that its evidence supports edition matching.
+**Direction:** Optional automatic diary logging after a session covers 80% of one reviewed standard tracklist per album, with undo/delete and independent manual entries. Edition-specific detection is deferred.
 
-The [first-release scope](AUTOMATIC_ALBUM_LISTENS.md) now starts with a prerequisite discovery phase: resolve complete edition tracklists and the relationship between existing release-group albums and specific editions before implementing automatic listening. The current importer deliberately omits tracklists, and its representative release is chosen from cover data. Preserve public album IDs while evaluating subordinate edition identities, provider evidence, and a reviewed enrichment workflow. The document retains the later connection, sync, diary, UI, and verification scope. This is planned work, not shipped behavior.
+Persistent Last.fm sync and reviewed album-name mappings establish listening evidence and canonical album identity. MusicBrainz standard-baseline review adds moderator-confirmed release selection, alternatives, and tracklist enrichment. These foundations do not count sessions or write diary entries. See [automatic listens](AUTOMATIC_ALBUM_LISTENS.md), [sync operations](LASTFM_SYNC.md), and [baseline enrichment](TRACKLIST_BASELINES.md).
 
-### Automatic-listen feasibility study
-
-The [Last.fm study](LASTFM_LISTENING_STUDY.md) now has a standalone offline evaluator, frozen 20-pair sample, 40 reviewed MusicBrainz reference lists, and explicitly gated live capture commands. The first Last.fm metadata run misses the frozen strict coverage gates, and real controlled-session evidence is still pending; no catalog/schema changes or automatic diary writes are authorized by this experiment. Choose edition-specific or shared-standard counting only after the independent pilot gates are scored.
+The historical [feasibility study](LASTFM_LISTENING_STUDY.md) retains its frozen evidence and separately reviewed playback experiments. Study IDs/references are never automatically promoted into production. Private shadow counting and measured pilot validation come before diary publication.
 
 
 ## Other feature ideas

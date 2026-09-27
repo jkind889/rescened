@@ -124,7 +124,7 @@ test("event serialization exposes owner data without connection or Mongo identif
     Listening.Scrobble.find = () => ({ sort() { return this; }, limit() { return this; }, exec: async () => [{ _id: id, eventId: crypto.randomUUID(), artist: "Artist", album: "Album", track: "Track", playedAt: new Date("2026-09-25T12:00:00Z"), resolution: "unresolved", albumId: "", baselineAvailable: false }] });
     Listening.AlbumMapping.find = async () => [];
     AlbumCatalog.find = async () => [];
-    const result = await connections.listEvents({ userId: "user_1", limit: 1 });
+    const result = await connections.listEvents({ baselineLookup: async () => null, userId: "user_1", limit: 1 });
     assert.equal(result.items.length, 1);
     assert.equal(result.items[0].artist, "Artist");
     assert.equal("_id" in result.items[0], false);
@@ -162,11 +162,17 @@ test("event status filters use effective mapping and catalog revisions", async (
       baselineAvailable: false,
     }] });
     Listening.AlbumMapping.find = async () => [{ mappingId, status: "active", revision: 1, albumId: "7f3aa2f7-b252-4b6a-91aa-4a0e2f7a2bf7" }];
-    AlbumCatalog.find = async () => [{ albumId: "7f3aa2f-b252-4b6a-91aa-4a0e2f7a2bf7", catalogRevision: 3 }];
-    const result = await connections.listEvents({ userId: "user_1", status: "unavailable", limit: 1 });
+    AlbumCatalog.find = async () => [{ albumId: "7f3aa2f7-b252-4b6a-91aa-4a0e2f7a2bf7", catalogRevision: 3 }];
+    const result = await connections.listEvents({ baselineLookup: async () => null, userId: "user_1", status: "unavailable", limit: 1 });
     assert.equal(result.items.length, 1);
     assert.equal(result.items[0].resolution, "unavailable");
     assert.equal(result.items[0].albumId, null);
+    AlbumCatalog.find = async () => [{ albumId: "7f3aa2f7-b252-4b6a-91aa-4a0e2f7a2bf7", catalogRevision: 2 }];
+    const ready = await connections.listEvents({ baselineLookup: async () => ({ baselineId: "reviewed" }), userId: "user_1" });
+    assert.equal(ready.items[0].baselineAvailable, true);
+    const revoked = await connections.listEvents({ baselineLookup: async () => null, userId: "user_1" });
+    assert.equal(revoked.items[0].resolution, "matched");
+    assert.equal(revoked.items[0].baselineAvailable, false);
   } finally {
     Listening.Connection.findOne = originalFindOne;
     Listening.Scrobble.find = originalScrobbleFind;
