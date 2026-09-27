@@ -9,7 +9,7 @@ const AlbumSubmission = require("../models/AlbumSubmission");
 const Models = require("../models/AlbumBaseline");
 const Listening = require("../models/Listening");
 const { hashCandidateTracklist } = require("../lib/baselines/musicBrainz");
-const { baselineForAlbum, invalidateAlbumBaseline, list, performCommand, queueEnrichmentCandidate, reviewStatusCounts, storeCandidate } = require("../lib/baselines/service");
+const { baselineForAlbum, detail, invalidateAlbumBaseline, list, performCommand, queueEnrichmentCandidate, reviewStatusCounts, storeCandidate } = require("../lib/baselines/service");
 const { approveAlbumSubmission } = require("../routes/utils/approval");
 const { findDuplicateSignals, normalizeSubmissionPayload, snapshotForSubmission } = require("../routes/utils/submissions");
 
@@ -190,4 +190,48 @@ test("pilot review counts match queue statuses, including derived staleness and 
     const rows = (await list({ status, limit: 50 })).items;
     assert.equal(rows.filter((row) => row.kind === "albums").length, counts.albums[status], `albums ${status}`);
   }
+});
+
+test("a suggestion revised after its baseline selection is approved without that baseline", { skip: !enabled }, async () => {
+  const group = mbid(); const submission = await createSubmission(group); const candidate = makeCandidate({ releaseGroupMbid: group, title: "Submitted Pilot" });
+  await storeCandidate("submissions", submission, candidate); await command("submissions", submission.submissionId, "confirm", 0, 1, candidate);
+  // Mirror the contributor revise route: new revision snapshot, currentRevision advanced, back to pending.
+  const payload = normalizeSubmissionPayload({ proposedMetadata: { title: "Submitted Pilot (Revised)", artistCredits: [{ name: "Artist" }], releaseType: "album", releaseDate: "2026" }, supportingSources: [{ type: "musicbrainz", url: `https://musicbrainz.org/release-group/${group}` }], externalReferences: [{ provider: "musicbrainz", entityType: "release-group", externalId: group, url: `https://musicbrainz.org/release-group/${group}` }] });
+  const duplicate = await findDuplicateSignals(payload); const revisedAt = new Date();
+  await AlbumSubmission.updateOne({ submissionId: submission.submissionId, currentRevision: 1 }, { $set: { proposedMetadata: payload.proposedMetadata, normalizedFingerprint: duplicate.fingerprint, currentRevision: 2, status: "pending" }, $push: { revisions: snapshotForSubmission(payload, duplicate, revisedAt, 2), moderationHistory: { actorUserId: "integration-user", action: "revised", reason: "", createdAt: revisedAt } } });
+  assert.equal((await list({ status: "stale" })).items.some((item) => item.kind === "submissions" && item.id === submission.submissionId), true);
+  const approved = await approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "integration-moderator", confirmPossibleDuplicate: true, reason: "Revised metadata reviewed", coverResolver: null });
+  const album = await AlbumCatalog.findOne({ albumId: approved.album.albumId });
+  assert.equal(album.tracks.length, 0, "the stale selection's tracks are not published");
+  assert.equal(await baselineForAlbum(album), null);
+  assert.equal(await Models.Baseline.countDocuments({}), 0);
+  assert.equal(await Models.Head.countDocuments({ targetKind: "albums", targetId: album.albumId }), 0, "enrichment stays pending");
+  assert.equal((await Models.Head.findOne({ targetKind: "submissions", targetId: submission.submissionId })).status, "reviewed", "the unused selection is left as history, not consumed");
+});
+
+test("linking a suggestion to an existing album never applies its baseline or tracks", { skip: !enabled }, async () => {
+  const group = mbid();
+  const emptyAlbum = await AlbumCatalog.create(albumInput({ releaseGroupMbid: group }));
+  const submission = await createSubmission(group); const candidate = makeCandidate({ releaseGroupMbid: group, title: "Submitted Pilot" });
+  await storeCandidate("submissions", submission, candidate); await command("submissions", submission.submissionId, "confirm", 0, 1, candidate);
+  const approved = await approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "integration-moderator", albumId: emptyAlbum.albumId, reason: "Existing catalog match", coverResolver: null });
+  assert.equal(approved.album.albumId, emptyAlbum.albumId);
+  const album = await AlbumCatalog.findOne({ albumId: emptyAlbum.albumId });
+  assert.equal(album.tracks.length, 0, "empty tracks stay empty on a linked album");
+  assert.equal(album.catalogRevision, 1);
+  assert.equal(await Models.Baseline.countDocuments({}), 0);
+  assert.equal(await Models.Head.countDocuments({ targetKind: "albums" }), 0, "the linked album needs its own baseline review");
+  assert.equal((await list({ status: "pending", q: "Pilot" })).items.some((item) => item.id === emptyAlbum.albumId), true);
+});
+
+test("legacy albums without a stored catalog revision are reviewable from the detail revision", { skip: !enabled }, async () => {
+  const group = mbid(); const album = await AlbumCatalog.create(albumInput({ releaseGroupMbid: group }));
+  await AlbumCatalog.collection.updateOne({ albumId: album.albumId }, { $unset: { catalogRevision: "" } });
+  const legacy = await AlbumCatalog.findOne({ albumId: album.albumId }).lean();
+  assert.equal(legacy.catalogRevision, undefined);
+  const view = await detail("albums", album.albumId);
+  assert.equal(view.target.catalogRevision, 1);
+  const candidate = makeCandidate({ releaseGroupMbid: group }); await storeCandidate("albums", legacy, candidate);
+  const result = await command("albums", album.albumId, "confirm", view.revision, view.target.catalogRevision, candidate);
+  assert.equal(result.status, "reviewed"); assert.equal(result.target.catalogRevision, 2);
 });

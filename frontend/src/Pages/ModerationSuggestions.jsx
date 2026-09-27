@@ -426,7 +426,6 @@ export function ModerationSuggestions() {
           kind="submissions"
           key="moderation-baseline-review"
           onBusyChange={setBaselineBusy}
-          onStateChange={() => setDetailRefreshIndex((currentIndex) => currentIndex + 1)}
           target={{
             artistDisplayName: queueArtist(selectedSuggestion),
             releaseGroupMbid: selectedSuggestion.proposedMetadata?.externalReferences?.find((reference) => reference.provider === "musicbrainz" && reference.entityType === "release-group")?.externalId || "",
