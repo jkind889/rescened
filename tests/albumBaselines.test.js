@@ -3,7 +3,7 @@ const crypto = require("node:crypto");
 const test = require("node:test");
 
 const Models = require("../models/AlbumBaseline");
-const { BaselineError, flags, validateCandidate } = require("../lib/baselines/service");
+const { BaselineError, flags, list, validateCandidate } = require("../lib/baselines/service");
 const { hashCandidateTracklist } = require("../lib/baselines/musicBrainz");
 
 function mbid() { return crypto.randomUUID(); }
@@ -68,4 +68,9 @@ test("enrichment and moderation flags are independent and disabled by default", 
   process.env.COMMUNITY_MODERATION_ENABLED = "true";
   assert.deepEqual(flags(), { discovery: true, moderation: true });
   for (const [key, value] of Object.entries(previous)) { const env = { enrichment: "TRACKLIST_ENRICHMENT_ENABLED", baseline: "TRACKLIST_BASELINE_MODERATION_ENABLED", moderation: "COMMUNITY_MODERATION_ENABLED" }[key]; if (value === undefined) delete process.env[env]; else process.env[env] = value; }
+});
+
+test("baseline queue readiness validates supported filters and status combinations", async () => {
+  await assert.rejects(list({ readiness: "candidate-backed" }), (error) => error instanceof BaselineError && error.code === "INVALID_BASELINE_REQUEST");
+  await assert.rejects(list({ status: "reviewed", readiness: "ready" }), (error) => error instanceof BaselineError && error.code === "INVALID_BASELINE_REQUEST");
 });

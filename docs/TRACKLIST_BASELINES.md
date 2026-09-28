@@ -26,7 +26,7 @@ A pending submission's selection remains private and binds to its revision. Appr
 
 Moderator API prefix: `/moderation/album-baselines`.
 
-- `GET /`: filtered queue with cursor pagination; `GET /:kind/:id`: target, current review, history, and capability flags. Kind is `albums` or `submissions`; IDs are public UUIDs.
+- `GET /`: filtered queue with cursor pagination; pending work additionally accepts `readiness=ready|unprepared` so candidate-backed enrichment can be reviewed separately from targets that still need discovery. `GET /:kind/:id`: target, current review, history, and capability flags. Kind is `albums` or `submissions`; IDs are public UUIDs.
 - `GET /groups?q=...`: release-group discovery.
 - `POST /:kind/:id/candidates`: suggested release or another browse page.
 - `POST /:kind/:id/preview`: alternative release preview.
@@ -54,6 +54,8 @@ npm run catalog:enrich-tracklists -- --apply --environment pilot \
 ```
 
 Apply verifies checksum, target fingerprint, and catalog revisions, then queues the captured candidates transactionally. It does not fetch replacement data, confirm baselines, or overwrite tracks. Moderators still inspect and confirm each candidate. Preserve command output with the plan; a committed result is distinct from a rollback.
+
+The moderator workspace opens on **Ready for review**, which contains pending targets with an enrichment-selected candidate snapshot. **Needs discovery** contains the remaining pending albums and suggestions without a selected candidate. Reviewed, stale, deferred, and revoked decisions retain their existing status views. This split changes presentation only: all eligible albums and pending new-album suggestions remain part of the overall baseline backlog.
 
 ## Validation and operations
 

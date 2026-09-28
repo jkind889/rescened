@@ -6,17 +6,62 @@ import { API_BASE_URL } from "../config/api.js";
 import { communityErrorFrom, requestCommunityJson } from "../features/community/community.js";
 
 const BASE_PATH = "/moderation/album-baselines";
-const STATUS_OPTIONS = ["pending", "reviewed", "stale", "deferred", "revoked"];
+const QUEUE_VIEWS = {
+  ready: {
+    label: "Ready for review",
+    status: "pending",
+    readiness: "ready",
+    emptyTitle: "No enriched tracklists are ready for review.",
+    emptyDescription: "Apply a reviewed enrichment plan to place a prepared candidate here.",
+  },
+  unprepared: {
+    label: "Needs discovery",
+    status: "pending",
+    readiness: "unprepared",
+    emptyTitle: "No pending records or suggestions need discovery.",
+    emptyDescription: "Pending catalog records and suggestions without an attached candidate will appear here.",
+  },
+  reviewed: {
+    label: "Reviewed",
+    status: "reviewed",
+    emptyTitle: "No reviewed baselines in this view.",
+    emptyDescription: "Confirmed tracklist baselines will appear here.",
+  },
+  stale: {
+    label: "Stale",
+    status: "stale",
+    emptyTitle: "No stale baselines in this view.",
+    emptyDescription: "Catalog records that changed after review will appear here.",
+  },
+  deferred: {
+    label: "Deferred",
+    status: "deferred",
+    emptyTitle: "No deferred baselines in this view.",
+    emptyDescription: "Baselines set aside for later review will appear here.",
+  },
+  revoked: {
+    label: "Revoked",
+    status: "revoked",
+    emptyTitle: "No revoked baselines in this view.",
+    emptyDescription: "Revoked baselines will appear here.",
+  },
+};
+
+const QUEUE_VIEW_OPTIONS = Object.entries(QUEUE_VIEWS).map(([value, definition]) => ({ value, ...definition }));
 
 function errorState(error, fallback) {
   return communityErrorFrom(error, fallback) || { message: fallback, code: "REQUEST_FAILED", status: 0 };
+}
+
+function isReadyForReview(item) {
+  return item?.readyForReview === true && item?.status === "pending";
 }
 
 export default function AlbumBaselines() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const { albumId = "" } = useParams();
   const navigate = useNavigate();
-  const [status, setStatus] = useState("pending");
+  const [queueView, setQueueView] = useState("ready");
   const [query, setQuery] = useState("");
   const [appliedQuery, setAppliedQuery] = useState("");
   const [items, setItems] = useState([]);
@@ -26,10 +71,16 @@ export default function AlbumBaselines() {
   const [error, setError] = useState(null);
   const [refresh, setRefresh] = useState(0);
   const queueSequence = useRef(0);
+  const queueDefinition = QUEUE_VIEWS[queueView] || QUEUE_VIEWS.ready;
 
   const loadQueue = useCallback(async ({ cursor = "", append = false, signal } = {}) => {
     const sequence = queueSequence.current + 1;
     queueSequence.current = sequence;
+    if (!append) {
+      setItems([]);
+      setNextCursor("");
+      setLoadingMore(false);
+    }
     if (!isLoaded || !isSignedIn) {
       setLoading(false);
       return;
@@ -38,7 +89,8 @@ export default function AlbumBaselines() {
     setError(null);
     try {
       const token = await getToken();
-      const params = new URLSearchParams({ status, limit: "20" });
+      const params = new URLSearchParams({ status: queueDefinition.status, limit: "20" });
+      if (queueDefinition.readiness) params.set("readiness", queueDefinition.readiness);
       if (appliedQuery.trim()) params.set("q", appliedQuery.trim());
       if (cursor) params.set("cursor", cursor);
       const data = await requestCommunityJson(`${API_BASE_URL}${BASE_PATH}?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` }, signal }, "The baseline queue could not be loaded.");
@@ -53,7 +105,7 @@ export default function AlbumBaselines() {
         setLoadingMore(false);
       }
     }
-  }, [appliedQuery, getToken, isLoaded, isSignedIn, status]);
+  }, [appliedQuery, getToken, isLoaded, isSignedIn, queueDefinition]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -86,15 +138,15 @@ export default function AlbumBaselines() {
       <div className="mapping-workspace">
         <aside className="mapping-queue-panel community-panel" aria-label="Baseline queue">
           <form className="mapping-filter-row" onSubmit={(event) => { event.preventDefault(); setAppliedQuery(query.trim()); setRefresh((value) => value + 1); }}>
-            <label>Review status<select value={status} onChange={(event) => setStatus(event.target.value)}>{STATUS_OPTIONS.map((value) => <option key={value} value={value}>{value[0].toUpperCase() + value.slice(1)}</option>)}</select></label>
+            <label htmlFor="baseline-queue-view">Queue view<select id="baseline-queue-view" value={queueView} onChange={(event) => setQueueView(event.target.value)}>{QUEUE_VIEW_OPTIONS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}</select></label>
             <label>Search<input onChange={(event) => setQuery(event.target.value)} placeholder="Album or artist" value={query} /></label>
             <button className="community-secondary-button" type="submit">Apply</button>
           </form>
           {error ? <div className="community-message community-message-error" role="alert"><strong>{error.message}</strong>{error.code ? <code>{error.code}</code> : null}<button className="community-text-button" onClick={() => setRefresh((value) => value + 1)} type="button">Try again</button></div> : null}
           {loading && items.length === 0 ? <div className="community-loading" role="status">Loading baseline queue…</div> : null}
-          {!loading && !error && items.length === 0 ? <div className="community-empty-state"><h2>No baselines in this view.</h2><p>Albums without a reviewed standard release will appear here after enrichment discovery.</p></div> : null}
-          {items.length ? <ol className="mapping-queue-list">{items.map((item) => <li key={`${item.kind || "albums"}:${item.id}`}><button className={`mapping-queue-card${item.id === albumId && item.kind === "albums" ? " mapping-queue-card-selected" : ""}`} onClick={() => navigate(item.kind === "submissions" ? `/moderation/album-suggestions/${encodeURIComponent(item.id)}` : `${BASE_PATH}/${encodeURIComponent(item.id)}`)} type="button"><span className="mapping-queue-topline"><span className="community-status">{item.status || "pending"}</span><span>{item.kind === "submissions" ? "Suggestion" : "Album"} · Rev. {item.revision || 0}</span></span><strong>{item.title || "Untitled album"}</strong><span>{item.artistDisplayName || "Unknown artist"}</span><small>{item.releaseGroupMbid || "Release group not selected"}</small></button></li>)}</ol> : null}
-          {nextCursor ? <button className="community-secondary-button mapping-load-more" disabled={loadingMore} onClick={() => loadQueue({ cursor: nextCursor, append: true })} type="button">{loadingMore ? "Loading…" : "Load more"}</button> : null}
+          {!loading && !error && items.length === 0 ? <div className="community-empty-state"><h2>{queueDefinition.emptyTitle}</h2><p>{queueDefinition.emptyDescription}</p></div> : null}
+          {items.length ? <ol className="mapping-queue-list">{items.map((item) => { const ready = isReadyForReview(item); return <li key={`${item.kind || "albums"}:${item.id}`}><button className={`mapping-queue-card${item.id === albumId && item.kind === "albums" ? " mapping-queue-card-selected" : ""}`} onClick={() => navigate(item.kind === "submissions" ? `/moderation/album-suggestions/${encodeURIComponent(item.id)}` : `${BASE_PATH}/${encodeURIComponent(item.id)}`)} type="button"><span className="mapping-queue-topline"><span className={`community-status${ready ? " community-status-pending" : ""}`}>{ready ? "Ready for review" : item.status || "pending"}</span><span>{item.kind === "submissions" ? "Suggestion" : "Album"} · Rev. {item.revision || 0}</span></span><strong>{item.title || "Untitled album"}</strong><span>{item.artistDisplayName || "Unknown artist"}</span><small>{ready ? "Enriched candidate attached · " : ""}{item.releaseGroupMbid || "Release group not selected"}</small></button></li>; })}</ol> : null}
+          {nextCursor ? <button className="community-secondary-button mapping-load-more" disabled={loading || loadingMore} onClick={() => loadQueue({ cursor: nextCursor, append: true })} type="button">{loadingMore ? "Loading…" : "Load more"}</button> : null}
         </aside>
         <section className="mapping-detail-panel" aria-label="Selected baseline">
           {!albumId ? <div className="community-empty-state"><p className="community-eyebrow">No selection</p><h2>Choose an album to review.</h2><p>The recommended MusicBrainz edition and complete ordered tracklist will appear here.</p></div> : null}

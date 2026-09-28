@@ -42,6 +42,22 @@ test('unknown query keys are rejected before queue reads', async () => {
   assert.equal(result.statusCode, 400);
   assert.equal(called, false);
 });
+test('queue readiness is strict and only applies to pending work', async () => {
+  let received;
+  service.list = async (options) => { received = options; return { items: [] }; };
+  const ready = await invoke('get', '/', { testUserId: 'baseline-moderator', query: { readiness: 'ready', limit: '10' } });
+  assert.equal(ready.statusCode, 200);
+  assert.equal(received.readiness, 'ready');
+  assert.equal(received.status, 'pending');
+
+  const invalidValue = await invoke('get', '/', { testUserId: 'baseline-moderator', query: { readiness: 'candidate-backed' } });
+  assert.equal(invalidValue.statusCode, 400);
+  assert.equal(invalidValue.body.code, 'INVALID_BASELINE_REQUEST');
+
+  const invalidStatus = await invoke('get', '/', { testUserId: 'baseline-moderator', query: { status: 'reviewed', readiness: 'ready' } });
+  assert.equal(invalidStatus.statusCode, 400);
+  assert.equal(invalidStatus.body.code, 'INVALID_BASELINE_REQUEST');
+});
 test('provider rate limits preserve the stable code and expose Retry-After', async () => {
   const { BaselineMusicBrainzError } = require('../lib/baselines/musicBrainz');
   service.candidates = async () => { throw new BaselineMusicBrainzError('MusicBrainz is unavailable', { code: 'MUSICBRAINZ_RATE_LIMITED', status: 503, retryAfterMs: 2500 }); };

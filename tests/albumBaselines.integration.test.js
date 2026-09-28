@@ -117,6 +117,71 @@ test("reviewed backfill apply is exact, idempotent, and only queues", { skip: !e
   assert.equal(first.status, "pending"); assert.equal(retry.idempotent, true); assert.equal(await Models.Candidate.countDocuments({ targetId: album.albumId }), 1); assert.equal(await Models.Baseline.countDocuments({}), 0); assert.equal((await AlbumCatalog.findOne({ albumId: album.albumId })).tracks.length, 0);
 });
 
+test("pending queue readiness partitions candidate-backed work before pagination", { skip: !enabled }, async () => {
+  const first = await AlbumCatalog.create(albumInput({ title: "Ready First" }));
+  const second = await AlbumCatalog.create(albumInput({ title: "Ready Second" }));
+  const unprepared = await AlbumCatalog.create(albumInput({ title: "Needs Discovery" }));
+  await AlbumCatalog.collection.updateOne({ albumId: first.albumId }, { $set: { updatedAt: new Date("2026-01-01T00:00:00.000Z") } });
+  await AlbumCatalog.collection.updateOne({ albumId: second.albumId }, { $set: { updatedAt: new Date("2026-01-02T00:00:00.000Z") } });
+  await AlbumCatalog.collection.updateOne({ albumId: unprepared.albumId }, { $set: { updatedAt: new Date("2026-01-03T00:00:00.000Z") } });
+  const queue = async (album, planHash) => {
+    const session = await mongoose.startSession();
+    const releaseGroupMbid = album.externalReferences[0].externalId;
+    const candidate = makeCandidate({ releaseGroupMbid });
+    await session.withTransaction(() => queueEnrichmentCandidate({ albumId: album.albumId, expectedCatalogRevision: 1, candidate, reviewer: "integration-moderator", planHash, session }));
+    await session.endSession();
+    return candidate;
+  };
+  const firstCandidate = await queue(first, "1".repeat(64));
+  await queue(second, "2".repeat(64));
+
+  const readyPage = await list({ status: "pending", readiness: "ready", limit: 1 });
+  assert.equal(readyPage.items.length, 1);
+  assert.equal(readyPage.items[0].id, first.albumId);
+  assert.equal(readyPage.items[0].readyForReview, true);
+  assert.ok(readyPage.nextCursor);
+  const readyRemainder = await list({ status: "pending", readiness: "ready", cursor: readyPage.nextCursor, limit: 1 });
+  assert.deepEqual(readyRemainder.items.map((item) => item.id), [second.albumId]);
+  assert.equal(readyRemainder.items[0].readyForReview, true);
+
+  const unpreparedRows = await list({ status: "pending", readiness: "unprepared", limit: 50 });
+  assert.deepEqual(unpreparedRows.items.map((item) => item.id), [unprepared.albumId]);
+  assert.equal(unpreparedRows.items[0].readyForReview, false);
+  const allRows = await list({ status: "pending", readiness: "all", limit: 50 });
+  assert.deepEqual(allRows.items.map((item) => item.id), [first.albumId, second.albumId, unprepared.albumId]);
+  assert.deepEqual(allRows.items.map((item) => item.readyForReview), [true, true, false]);
+
+  await command("albums", first.albumId, "confirm", 1, 1, firstCandidate);
+  const reviewed = await list({ status: "reviewed", limit: 50 });
+  assert.equal(reviewed.items.find((item) => item.id === first.albumId).readyForReview, false);
+});
+
+test("pending readiness rejects expired, dangling, and mismatched candidate snapshots", { skip: !enabled }, async () => {
+  const makeQueued = async (album, planHash) => {
+    const candidate = makeCandidate({ releaseGroupMbid: album.externalReferences[0].externalId });
+    const session = await mongoose.startSession();
+    await session.withTransaction(() => queueEnrichmentCandidate({ albumId: album.albumId, expectedCatalogRevision: 1, candidate, reviewer: "integration-moderator", planHash, session }));
+    await session.endSession();
+    return Models.Head.findOne({ targetKind: "albums", targetId: album.albumId });
+  };
+  const expired = await AlbumCatalog.create(albumInput({ releaseGroupMbid: mbid() }));
+  const dangling = await AlbumCatalog.create(albumInput({ releaseGroupMbid: mbid() }));
+  const mismatched = await AlbumCatalog.create(albumInput({ releaseGroupMbid: mbid() }));
+  const expiredHead = await makeQueued(expired, "3".repeat(64));
+  const danglingHead = await makeQueued(dangling, "4".repeat(64));
+  const mismatchedHead = await makeQueued(mismatched, "5".repeat(64));
+  await Models.Candidate.updateOne({ _id: expiredHead.selectedSnapshotId }, { $set: { expiresAt: new Date("2020-01-01T00:00:00.000Z") } });
+  await Models.Head.updateOne({ _id: danglingHead._id }, { $set: { selectedSnapshotId: new mongoose.Types.ObjectId() } });
+  await Models.Candidate.updateOne({ _id: mismatchedHead.selectedSnapshotId }, { $set: { targetRevision: 2 } });
+
+  const ready = await list({ status: "pending", readiness: "ready", limit: 50 });
+  assert.equal(ready.items.some((item) => [expired.albumId, dangling.albumId, mismatched.albumId].includes(item.id)), false);
+  const unprepared = await list({ status: "pending", readiness: "unprepared", limit: 50 });
+  assert.deepEqual(new Set(unprepared.items.map((item) => item.id)), new Set([expired.albumId, dangling.albumId, mismatched.albumId]));
+  assert.equal(unprepared.items.every((item) => item.readyForReview === false), true);
+  assert.equal((await reviewStatusCounts()).albums.pendingWithCandidate, 0);
+});
+
 test("pending queue searches unheaded albums beyond the former 250-row boundary", { skip: !enabled }, async () => {
   const rows = Array.from({ length: 260 }, (_, index) => ({ albumId: crypto.randomUUID(), title: index === 259 ? "Needle Album" : `Queue Album ${String(index).padStart(3, "0")}`, artistDisplayName: "Queue Artist", releaseType: "album", catalogRevision: 1 }));
   rows.push({ albumId: crypto.randomUUID(), title: "Needle Single", artistDisplayName: "Queue Artist", releaseType: "single", catalogRevision: 1 });

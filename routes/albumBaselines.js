@@ -29,11 +29,15 @@ function sendError(res, error) {
   return res.status(status).json(body);
 }
 function parseList(query = {}) {
-  allowedKeys(query, new Set(["status", "limit", "cursor", "q"]), "query");
-  for (const key of ["status", "limit", "cursor", "q"]) {
+  allowedKeys(query, new Set(["status", "readiness", "limit", "cursor", "q"]), "query");
+  for (const key of ["status", "readiness", "limit", "cursor", "q"]) {
     if (query[key] !== undefined && typeof query[key] !== "string") throw new service.BaselineError(`query.${key} must be a string`, "INVALID_BASELINE_REQUEST");
   }
-  return { status: query.status || "pending", limit: query.limit === undefined ? 20 : Number(query.limit), cursor: query.cursor, q: query.q || "" };
+  const status = query.status || "pending";
+  const readiness = query.readiness || "all";
+  if (!["all", "ready", "unprepared"].includes(readiness)) throw new service.BaselineError("query.readiness is invalid", "INVALID_BASELINE_REQUEST");
+  if (readiness !== "all" && status !== "pending") throw new service.BaselineError("query.readiness filters are only valid for pending status", "INVALID_BASELINE_REQUEST");
+  return { status, readiness, limit: query.limit === undefined ? 20 : Number(query.limit), cursor: query.cursor, q: query.q || "" };
 }
 
 router.get("/", authenticate, moderatorOnly, async (req, res) => { try { return res.json(await service.list(parseList(req.query))); } catch (error) { return sendError(res, error); } });
