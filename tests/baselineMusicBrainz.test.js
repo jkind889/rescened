@@ -95,6 +95,39 @@ function client(fetchFn, options = {}) {
   });
 }
 
+test("release-group discovery reuses cross-field search for Korean artist names", async () => {
+  let requestedUrl;
+  const api = client(async (url) => {
+    requestedUrl = new URL(url);
+    return response({
+      "release-groups": [{
+        id: GROUP,
+        title: "숨바꼭질",
+        "artist-credit": credits("반설희"),
+        "first-release-date": "2020-01-24",
+        score: 100,
+      }],
+    });
+  });
+
+  const items = await api.searchReleaseGroups("반설희", 10);
+  const query = requestedUrl.searchParams.get("query");
+
+  assert.match(query, /releasegroup:"반설희"/u);
+  assert.match(query, /artistname:"반설희"/u);
+  assert.match(query, /artist:"반설희"/u);
+  assert.match(query, /alias:"반설희"/u);
+  assert.equal(requestedUrl.searchParams.get("limit"), "50");
+  assert.deepEqual(items, [{
+    releaseGroupMbid: GROUP,
+    title: "숨바꼭질",
+    artistDisplayName: "반설희",
+    date: "2020-01-24",
+    score: 100,
+    sourceUrl: `https://musicbrainz.org/release-group/${GROUP}`,
+  }]);
+});
+
 test("release normalizes complete multi-disc media, preserves repeated recordings, hashes, and caches", async () => {
   const cache = memoryCache(() => 0);
   let calls = 0;
@@ -209,10 +242,64 @@ test('recommendation has a finite interactive lookup budget and exposes remainin
     return response(rawRelease(parsed.pathname.split('/').at(-1)));
   });
   const result = await api.recommend(GROUP, { title: 'Album' });
-  assert.equal(calls, 4);
-  assert.equal(result.nextOffset, 20);
+  assert.equal(calls, 6);
+  assert.equal(result.nextOffset, 60);
   assert.equal(result.incomplete, true);
-  assert.equal(result.ambiguous, true);
+  // Equal-ranked alternatives without a differing track count are not ambiguous.
+  assert.equal(result.ambiguous, false);
+});
+
+function recommendationClient(releases) {
+  const byId = new Map(releases.map((item) => [item.id, item]));
+  return client(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/release')) {
+      assert.equal(parsed.searchParams.get('limit'), '50');
+      return response({ 'release-count': releases.length, releases });
+    }
+    const item = byId.get(parsed.pathname.split('/').at(-1));
+    return response(rawRelease(item.id, { title: item.title, date: item.date, status: item.status, disambiguation: item.disambiguation || '' }));
+  });
+}
+
+const RELEASE_FOUR = '44444444-4444-4444-8444-444444444444';
+const RELEASE_FIVE = '55555555-5555-4555-8555-555555555555';
+const digital = [{ position: 1, format: 'Digital Media', 'track-count': 2 }];
+const vinyl = [{ position: 1, format: '12" Vinyl', 'track-count': 2 }];
+const group = (date) => ({ id: GROUP, 'first-release-date': date });
+
+test('recommendation ranks retailer, signed, clean, and copy-protected variants below the standard release', async () => {
+  const releases = [
+    browseRelease(RELEASE_ONE, { date: '2024-05-17', disambiguation: 'Walmart exclusive', media: vinyl, 'release-group': group('2024-05-17') }),
+    browseRelease(RELEASE_TWO, { date: '2024-05-17', disambiguation: 'exclusive 180‐gram vinyl, signed', media: vinyl, 'release-group': group('2024-05-17') }),
+    browseRelease(RELEASE_THREE, { date: '2024-05-17', disambiguation: 'clean', media: digital, 'release-group': group('2024-05-17') }),
+    browseRelease(RELEASE_FOUR, { date: '2024-05-17', disambiguation: '', media: [{ position: 1, format: 'Copy Control CD', 'track-count': 2 }], 'release-group': group('2024-05-17') }),
+    browseRelease(RELEASE_FIVE, { date: '2024-05-17', disambiguation: 'explicit', media: digital, 'release-group': group('2024-05-17') }),
+  ];
+  const result = await recommendationClient(releases).recommend(GROUP, { title: 'Album' });
+  assert.equal(result.candidate.releaseMbid, RELEASE_FIVE);
+  assert.equal(result.ambiguous, false);
+});
+
+test("recommendation prefers the release group's original year and digital or CD formats over earlier-listed reissues", async () => {
+  const releases = [
+    browseRelease(RELEASE_ONE, { date: '2016-03-01', media: vinyl, 'release-group': group('2016-11-25') }),
+    browseRelease(RELEASE_TWO, { date: '2016-11-25', media: vinyl, 'release-group': group('2016-11-25') }),
+    browseRelease(RELEASE_THREE, { date: '2016-11-25', media: digital, 'release-group': group('2016-11-25') }),
+    browseRelease(RELEASE_FOUR, { date: '2021-01-01', media: digital, disambiguation: 'remastered', 'release-group': group('2016-11-25') }),
+  ];
+  const result = await recommendationClient(releases).recommend(GROUP, { title: 'Album' });
+  assert.equal(result.candidate.releaseMbid, RELEASE_THREE);
+});
+
+test('recommendation is ambiguous only when an equally ranked release has a different track count', async () => {
+  const same = [
+    browseRelease(RELEASE_ONE, { date: '2020-01-01', media: digital, 'release-group': group('2020-01-01') }),
+    browseRelease(RELEASE_TWO, { date: '2020-02-01', media: digital, 'release-group': group('2020-01-01') }),
+  ];
+  assert.equal((await recommendationClient(same).recommend(GROUP, { title: 'Album' })).ambiguous, false);
+  const differing = [same[0], browseRelease(RELEASE_TWO, { date: '2020-02-01', media: [{ position: 1, format: 'Digital Media', 'track-count': 3 }], 'release-group': group('2020-01-01') })];
+  assert.equal((await recommendationClient(differing).recommend(GROUP, { title: 'Album' })).ambiguous, true);
 });
 
 test('invalid complete-release responses are not cached and empty pages cannot loop', async () => {

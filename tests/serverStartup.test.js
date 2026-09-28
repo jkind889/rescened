@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const serverPath = require.resolve("../server");
-const REQUIRED_ENV = ["MONGO_URI", "CLERK_SECRET_KEY", "CLERK_PUBLISHABLE_KEY", "NODE_ENV", "LASTFM_CONNECTION_ENABLED", "LASTFM_SYNC_ENABLED", "LASTFM_DISCOVERY_ENABLED", "ALBUM_MAPPING_MODERATION_ENABLED"];
+const REQUIRED_ENV = ["MONGO_URI", "CLERK_SECRET_KEY", "CLERK_PUBLISHABLE_KEY", "NODE_ENV", "LASTFM_CONNECTION_ENABLED", "LASTFM_SYNC_ENABLED", "LASTFM_DISCOVERY_ENABLED", "ALBUM_MAPPING_MODERATION_ENABLED", "TRACKLIST_ENRICHMENT_ENABLED", "TRACKLIST_BASELINE_MODERATION_ENABLED"];
 
 function loadServer(t) {
   const previous = Object.fromEntries(REQUIRED_ENV.map((key) => [key, process.env[key]]));
@@ -15,6 +15,8 @@ function loadServer(t) {
     LASTFM_SYNC_ENABLED: "false",
     LASTFM_DISCOVERY_ENABLED: "false",
     ALBUM_MAPPING_MODERATION_ENABLED: "false",
+    TRACKLIST_ENRICHMENT_ENABLED: "false",
+    TRACKLIST_BASELINE_MODERATION_ENABLED: "false",
   });
   delete require.cache[serverPath];
   const server = require("../server");
