@@ -10,7 +10,8 @@ const {
   startAuthorization,
 } = require("../lib/listening/connections");
 const { safeError } = require("../lib/listening/common");
-const { detectionEnabledFor, listDetections, setTimeZone } = require("../lib/listening/detectionView");
+const { detectionEnabledFor, listDetections, revalidateDetection, setTimeZone } = require("../lib/listening/detectionView");
+const { resolvePlay, setAutoDiary } = require("../lib/listening/publication");
 const { getAuthenticatedUserRateLimitKey, createRateLimiter, createRateLimitMiddleware } = require("./utils/rateLimit");
 
 const router = express.Router();
@@ -114,6 +115,21 @@ router.delete("/", authenticate, connectionRateLimit, async (req, res) => {
 router.put("/time-zone", authenticate, connectionRateLimit, async (req, res) => {
   try {
     return res.json(await setTimeZone({ userId: req.userId, body: req.body }));
+  } catch (error) { return errorResponse(res, error); }
+});
+
+router.put("/auto-diary", authenticate, connectionRateLimit, async (req, res) => {
+  try {
+    return res.json(await setAutoDiary({ userId: req.userId, body: req.body }));
+  } catch (error) { return errorResponse(res, error); }
+});
+
+router.post("/detections/:sessionId/plays/:playId/:action", authenticate, connectionRateLimit, async (req, res) => {
+  try {
+    const { sessionId, playId, action } = req.params;
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuid.test(sessionId) || !uuid.test(playId) || !["confirm", "dismiss"].includes(action)) throw safeError("INVALID_REQUEST", 400);
+    return res.json(await resolvePlay({ userId: req.userId, sessionId: sessionId.toLowerCase(), playId: playId.toLowerCase(), action, body: req.body, revalidate: revalidateDetection }));
   } catch (error) { return errorResponse(res, error); }
 });
 

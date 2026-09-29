@@ -1,7 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/react";
 import { API_BASE_URL } from "../config/api";
 import { getApiErrorMessage } from "../utils/apiErrors";
+
+function shiftDate(date, days) {
+    const value = new Date(`${date}T00:00:00Z`);
+    value.setUTCDate(value.getUTCDate() + days);
+    return value.toISOString().slice(0, 10);
+}
 
 export default function ListenForm({ album, boardId, onSubmitted, onBusyChange }) {
     const { getToken } = useAuth();
@@ -12,6 +18,28 @@ export default function ListenForm({ album, boardId, onSubmitted, onBusyChange }
     const [request, setRequest] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState("");
+    const [automaticNearby, setAutomaticNearby] = useState({ key: "", date: "" });
+    const nearbyKey = `${album.albumId}:${listenedOn}`;
+
+    // Best-effort, non-blocking: point out an automatic entry within a day of this date.
+    useEffect(() => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(listenedOn)) return undefined;
+        const controller = new AbortController();
+        (async () => {
+            try {
+                const token = await getToken();
+                const query = new URLSearchParams({ albumId: album.albumId, from: shiftDate(listenedOn, -1), to: shiftDate(listenedOn, 1), limit: "10" });
+                const response = await fetch(`${API_BASE_URL}/diary?${query}`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
+                if (!response.ok || controller.signal.aborted) return;
+                const data = await response.json();
+                const match = (data.listens || []).find((listen) => listen.source === "automatic");
+                if (!controller.signal.aborted) setAutomaticNearby({ key: `${album.albumId}:${listenedOn}`, date: match?.listenedOn || "" });
+            } catch {
+                // The notice is optional; logging still works without it.
+            }
+        })();
+        return () => controller.abort();
+    }, [album.albumId, getToken, listenedOn]);
 
     async function submit(event) {
         event.preventDefault();
@@ -52,6 +80,9 @@ export default function ListenForm({ album, boardId, onSubmitted, onBusyChange }
                 <input type="date" required value={listenedOn} disabled={isSubmitting || Boolean(request)} onChange={(event) => setListenedOn(event.target.value)} />
             </label>
             <p>{boardId ? "This listen will be added to your diary and this board." : "Each entry records one listen. Use Boards to add it to a board afterward."}</p>
+            {automaticNearby.key === nearbyKey && automaticNearby.date ? (
+                <p className="listen-form-notice" role="status">This album was already logged automatically on {automaticNearby.date}. Logging it here adds a separate entry.</p>
+            ) : null}
             {error && <p className="review-action-message" role="alert">{error}</p>}
             <button className="review-submit-button" type="submit" disabled={isSubmitting}>{isSubmitting ? "Logging…" : "Log listen"}</button>
         </form>

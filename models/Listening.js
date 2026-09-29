@@ -31,6 +31,8 @@ const connectionSchema = new mongoose.Schema({
   lastSweepAt: { type: Date, default: null },
   // Owner-selected IANA zone for proposed diary dates; snapshotted per detection.
   timeZone: { type: String, default: null, maxlength: 100 },
+  // Automatic diary opt-in. Only plays qualifying at or after this time publish.
+  autoDiaryEnabledAt: { type: Date, default: null },
   // Internal optimistic-write fence. Never serialize it from an owner API.
   workerFence: { type: String, default: "", select: false },
 }, { timestamps: true });
@@ -159,8 +161,10 @@ const detectionPlaySchema = new mongoose.Schema({
   proposedDate: { type: String, default: null },
   // When coverage would fall below the threshold as credited evidence expires.
   evidenceExpiresAt: { type: Date, default: null },
-  // Reserved for diary publication; a published play is a fixed boundary.
+  // A published play is a fixed boundary.
   publishedAt: { type: Date, default: null },
+  listenId: { type: String, default: null },
+  publication: { type: String, default: null, enum: [null, "published", "needs_confirmation", "manual_duplicate", "dismissed", "suppressed"] },
 }, { _id: false });
 
 const detectionSchema = new mongoose.Schema({

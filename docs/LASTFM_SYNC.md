@@ -8,7 +8,7 @@ Account settings contain a Last.fm pilot section. Start authorization while sign
 
 A Last.fm account can have only one active or paused connection, and a Rescened user can have only one connection. Another user cannot take over an existing connection. Pause closes the activation window; resume begins another. Reconnection starts from the new connection time. Paused-period listening and history before connection are excluded.
 
-Last.fm's recent-track endpoint is public. Revoking authorization at Last.fm does not reliably stop those reads. Users must use Rescened's pause or disconnect controls. Disconnect fences in-flight jobs and schedules private evidence cleanup. Signed Clerk `user.deleted` events and owner-existence checks provide account-deletion cleanup.
+Last.fm's recent-track endpoint is public. Revoking authorization at Last.fm does not reliably stop those reads. Users must use Rescened's pause or disconnect controls. Disconnect fences in-flight jobs and schedules private evidence cleanup. Signed Clerk `user.deleted` events and owner-existence checks provide account-deletion cleanup. The webhook runs one transaction that deletes auth attempts, automatic-listen receipts and fences, diary entries (`Listen`), their board memberships (`BoardListen`), and `ListenCreation` receipts, then disconnects connections and queues private-evidence cleanup. Without transaction-capable MongoDB it returns `503 CLEANUP_UNAVAILABLE` and changes nothing, so Clerk retries delivery. Boards, saved albums, reviews, likes, follows, notifications, and profiles are not removed by this webhook.
 
 Normalized scrobbles retain exact timestamps only in owner-private records for at most 30 days from playback. Reads enforce expiration as well as MongoDB TTL deletion, since TTL deletion is asynchronous. Production does not retain complete raw provider responses. Moderator cases retain reusable artist/album metadata, source evidence, and encounter totals, without usernames, listening sequences, or exact listening timestamps. Case and decision dates are review provenance, not playback dates.
 
@@ -23,6 +23,7 @@ All four feature flags default to disabled:
 | `LASTFM_DISCOVERY_ENABLED=true` | Permit candidate discovery and provider metadata reads. |
 | `ALBUM_MAPPING_MODERATION_ENABLED=true` | Permit mapping decisions by existing moderators. |
 | `LISTENING_DETECTION_ENABLED=true` | Permit private album-listen detection jobs for pilot users. Detection never writes diary entries. |
+| `LISTENING_AUTO_DIARY_ENABLED=true` | With detection enabled, let pilot owners opt in to automatic diary entries. Off by default; each owner must also opt in. |
 | `LASTFM_DEEP_SWEEP_ENABLED=true` | With sync enabled, permit the daily 14-day refetch for late, back-dated scrobbles. |
 | `LASTFM_PILOT_USER_IDS` | Explicit comma-separated Clerk user IDs eligible for the pilot. An empty list admits nobody. |
 | `MODERATOR_USER_IDS` | Existing moderator allowlist, also used for mapping review. |

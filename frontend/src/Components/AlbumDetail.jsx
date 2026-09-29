@@ -1087,7 +1087,7 @@ export function AlbumDetail()
                             <span>What to add</span>
                             <select value={boardListenId} onChange={(event) => { setBoardListenId(event.target.value); setBoardSaveMessage(""); }} disabled={isSavingBoard}>
                                 <option value="">Save album</option>
-                                {listens.map((listen) => <option key={listen.listenId} value={listen.listenId}>Listen · {listen.listenedOn} · {new Date(listen.createdAt).toLocaleTimeString()}</option>)}
+                                {listens.map((listen) => <option key={listen.listenId} value={listen.listenId}>Listen · {listen.listenedOn} · {listen.source === "automatic" ? "automatically logged" : new Date(listen.createdAt).toLocaleTimeString()}</option>)}
                             </select>
                         </label>
                         {isLoadingListens && <p role="status">Loading listens…</p>}

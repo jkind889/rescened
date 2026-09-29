@@ -154,6 +154,16 @@ Before enabling publication, prove atomic listen/receipt creation, pause/disconn
 
 Durable receipts retain only the identity/suppression data needed to prevent recreation, not listening sequences or exact playback timestamps. Existing diary entries can outlive a disconnected provider connection; account deletion removes user-owned receipts along with the user's data. Receipt matching and expiry behavior are publication release gates, not deferred cleanup work.
 
+**Implemented (increment 4):** Publication requires `LISTENING_AUTO_DIARY_ENABLED`, detection, pilot access, and an owner opt-in (`PUT /connections/lastfm/auto-diary` with `{ enabled }`). Opting in requires a saved time zone and records `autoDiaryEnabledAt`; re-enabling starts a new window. Plays that qualified before that time never publish.
+
+The publication pass runs inside each detect transaction, after reconciliation. An unpublished qualified play with no holds, unexpired evidence, and a proposed date becomes a `Listen` with server-authored `source: "automatic"`, together with an `AutomaticListenReceipt`. That requires an active connection (pause blocks it) and a qualifying event within 7 days. Otherwise the play is marked `needs_confirmation`, or `manual_duplicate` when a manual entry for the album falls within one day of the proposed date.
+
+Receipts match by play ID, first event, or qualifying event. They survive listen deletion, and neither retries nor a lost lineage republish (`suppressed`). They hold opaque IDs only and expire, day-rounded, 60 days after the play's last event, once its evidence can no longer be re-ingested. Manual and automatic creation both write a per-user, per-album `DiaryAlbumFence`, so a duplicate check and a concurrent insert conflict and retry; there is no user/album/date unique constraint.
+
+Owners confirm or dismiss suggestions with `POST /connections/lastfm/detections/:sessionId/plays/:playId/confirm|dismiss`. Confirmation revalidates holds and expiry, and a dismissal writes a `dismissed` receipt. Published plays stay fixed boundaries, and owner date corrections and deletions are never rewritten.
+
+Owner diary responses include `source`, and the network activity feed does not. The account panel adds the opt-in, publication states, and confirm/dismiss actions. Board and album listen lists label automatic entries, and the manual log form shows a non-blocking notice when an automatic entry exists within a day. Account deletion removes receipts and fences with the other listening data, and in the same transaction deletes the user's diary entries (manual and automatic), their board memberships, and manual `ListenCreation` receipts.
+
 ### Build and verification order
 
 | Increment | Acceptance criterion |

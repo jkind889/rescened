@@ -32,6 +32,14 @@ function connection(overrides = {}) {
   };
 }
 
+function diaryModels() {
+  return [
+    ["boardListens", require("../models/BoardListen")],
+    ["listens", require("../models/Listen")],
+    ["listenCreations", require("../models/ListenCreation")],
+  ];
+}
+
 function sessionFactory() {
   return {
     startTransaction() {},
@@ -221,6 +229,16 @@ test("Clerk user deletion webhook rejects unsigned requests and accepts a valid 
   const webhookRoute = require("../routes/listeningWebhook");
   const originalFind = Listening.Connection.find;
   const originalDeleteMany = Listening.AuthAttempt.deleteMany;
+  const automatic = require("../models/AutomaticListen");
+  const originalAutomatic = [automatic.AutomaticListenReceipt.deleteMany, automatic.DiaryAlbumFence.deleteMany];
+  const diary = diaryModels();
+  const originalDiary = diary.map(([, Model]) => Model.deleteMany);
+  const automaticCleanup = [];
+  automatic.AutomaticListenReceipt.deleteMany = async (filter) => { automaticCleanup.push(["receipts", filter.userId]); return { deletedCount: 0 }; };
+  automatic.DiaryAlbumFence.deleteMany = async (filter) => { automaticCleanup.push(["fences", filter.userId]); return { deletedCount: 0 }; };
+  for (const [name, Model] of diary) {
+    Model.deleteMany = async (filter, options) => { automaticCleanup.push([name, filter.userId, Boolean(options?.session)]); return { deletedCount: 0 }; };
+  }
   process.env.CLERK_WEBHOOK_SIGNING_SECRET = `whsec_${Buffer.from("synthetic-webhook-secret").toString("base64")}`;
   const response = () => ({ statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } });
   try {
@@ -239,9 +257,50 @@ test("Clerk user deletion webhook rejects unsigned requests and accepts a valid 
     await webhookRoute.handleWebhook({ method: "POST", url: "/", originalUrl: "/", headers: { "svix-id": id, "svix-timestamp": String(Math.floor(timestamp.getTime() / 1000)), "svix-signature": signature }, body: payload, connection: {} }, signed, { cleanupOptions: { sessionFactory } });
     assert.equal(signed.statusCode, 200);
     assert.equal(cleanupUser, "user_deleted");
+    assert.deepEqual(automaticCleanup, [
+      ["receipts", "user_deleted"], ["fences", "user_deleted"],
+      ["boardListens", "user_deleted", true], ["listens", "user_deleted", true], ["listenCreations", "user_deleted", true],
+    ]);
   } finally {
     Listening.Connection.find = originalFind;
     Listening.AuthAttempt.deleteMany = originalDeleteMany;
+    [automatic.AutomaticListenReceipt.deleteMany, automatic.DiaryAlbumFence.deleteMany] = originalAutomatic;
+    diary.forEach(([, Model], index) => { Model.deleteMany = originalDiary[index]; });
     delete process.env.CLERK_WEBHOOK_SIGNING_SECRET;
+  }
+});
+
+test("account cleanup aborts and reports unavailable when a diary delete cannot run in a transaction", async () => {
+  const automatic = require("../models/AutomaticListen");
+  const originalAutomatic = [automatic.AutomaticListenReceipt.deleteMany, automatic.DiaryAlbumFence.deleteMany];
+  const diary = diaryModels();
+  const originalDiary = diary.map(([, Model]) => Model.deleteMany);
+  const calls = [];
+  const noop = async () => ({ deletedCount: 0 });
+  Listening.AuthAttempt.deleteMany = noop;
+  automatic.AutomaticListenReceipt.deleteMany = noop;
+  automatic.DiaryAlbumFence.deleteMany = noop;
+  for (const [name, Model] of diary) {
+    Model.deleteMany = async () => {
+      calls.push(name);
+      if (name === "listens") throw Object.assign(new Error("Transaction numbers are only allowed on a replica set member or mongos"), { code: 20 });
+      return { deletedCount: 0 };
+    };
+  }
+  Listening.Connection.find = async () => { throw new Error("connections must not be read after a failed diary delete"); };
+  const session = { ...sessionFactory(), committed: false, aborted: false };
+  session.commitTransaction = async () => { session.committed = true; };
+  session.abortTransaction = async () => { session.aborted = true; };
+  try {
+    await assert.rejects(
+      connections.cleanupUserData("user_deleted", { sessionFactory: () => session }),
+      (error) => error.status === 503 && error.code === "LASTFM_CLEANUP_UNAVAILABLE",
+    );
+    assert.deepEqual(calls, ["boardListens", "listens"]);
+    assert.equal(session.committed, false);
+    assert.equal(session.aborted, true);
+  } finally {
+    [automatic.AutomaticListenReceipt.deleteMany, automatic.DiaryAlbumFence.deleteMany] = originalAutomatic;
+    diary.forEach(([, Model], index) => { Model.deleteMany = originalDiary[index]; });
   }
 });

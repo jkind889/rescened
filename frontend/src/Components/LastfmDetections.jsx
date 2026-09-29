@@ -51,7 +51,22 @@ function formatCalendarDate(value) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" }).format(date);
 }
 
+const PUBLICATION_STATUS = {
+  published: { label: "Logged to diary", tone: "matched" },
+  needs_confirmation: { label: "Needs your confirmation", tone: "unresolved" },
+  manual_duplicate: { label: "Possible duplicate", tone: "unresolved" },
+  dismissed: { label: "Dismissed", tone: "unavailable" },
+  suppressed: { label: "Previously removed", tone: "unavailable" },
+};
+
+const PUBLICATION_NOTES = {
+  needs_confirmation: "This listen qualified more than 7 days ago, so it waits for you instead of being logged automatically.",
+  manual_duplicate: "You already logged this album within a day of this date. Log it anyway only if this was a separate listen.",
+  suppressed: "A diary entry for this listen was removed earlier, so it won't be logged again.",
+};
+
 function playStatus(play, holds) {
+  if (PUBLICATION_STATUS[play.publication]) return PUBLICATION_STATUS[play.publication];
   if (play.coverage !== "qualified") return { label: "Not enough yet", tone: "unresolved" };
   if (holds.includes("evidence_expired")) return { label: "Expired", tone: "unavailable" };
   if (holds.length) return { label: "On hold", tone: "unavailable" };
@@ -111,7 +126,50 @@ function TimeZoneSetting({ savedTimeZone, onSaved }) {
   );
 }
 
-function DetectionCard({ detection }) {
+function AutoDiarySetting({ autoDiary, savedTimeZone, onChanged }) {
+  const { getToken } = useAuth();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const enabled = Boolean(autoDiary?.enabled);
+
+  async function toggle() {
+    setSaving(true);
+    setError("");
+    try {
+      const token = await getToken();
+      const data = await requestLastfmJson(
+        lastfmUrl(`${LASTFM_CONNECTION_PATH}/auto-diary`),
+        apiOptions(token, { method: "PUT", body: JSON.stringify({ enabled: !enabled }) }),
+        "Could not change automatic logging.",
+      );
+      onChanged(data.autoDiary);
+    } catch (toggleError) {
+      setError(toggleError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="lastfm-auto-diary">
+      <div>
+        <strong>{enabled ? "Automatic logging is on" : "Automatic logging is off"}</strong>
+        <span>
+          {enabled
+            ? `Listens that qualify after ${formatLastfmDate(autoDiary.enabledAt)} are added to your diary, labeled as automatically logged. You can change their date or delete them.`
+            : "Turn this on to add qualifying listens to your diary. Listens detected before you turn it on are not imported."}
+        </span>
+      </div>
+      <button className="profile-secondary-button" disabled={saving || (!enabled && !savedTimeZone)} onClick={toggle} type="button">
+        {saving ? "Saving…" : enabled ? "Turn off" : "Turn on"}
+      </button>
+      {!enabled && !savedTimeZone ? <p className="edit-profile-current-value">Save a time zone first so listens get the right date.</p> : null}
+      {error ? <p className="edit-profile-error" role="alert">{error}</p> : null}
+    </div>
+  );
+}
+
+function DetectionCard({ detection, onResolve, resolving }) {
   const held = detection.holds.length > 0;
   const { album, countable } = detection;
   return (
@@ -137,6 +195,17 @@ function DetectionCard({ detection }) {
                 {play.coverage === "qualified" ? (
                   <span>{play.proposedDate ? `Dated ${formatCalendarDate(play.proposedDate)}` : "Save a time zone to see its date"}</span>
                 ) : null}
+                {PUBLICATION_NOTES[play.publication] ? <span className="lastfm-play-note">{PUBLICATION_NOTES[play.publication]}</span> : null}
+                {["needs_confirmation", "manual_duplicate"].includes(play.publication) && !held ? (
+                  <span className="lastfm-action-row">
+                    <button className="profile-secondary-button" disabled={Boolean(resolving)} onClick={() => onResolve(detection, play, "confirm")} type="button">
+                      {resolving === `${play.playId}:confirm` ? "Logging…" : play.publication === "manual_duplicate" ? "Log anyway" : "Log to diary"}
+                    </button>
+                    <button className="profile-secondary-button" disabled={Boolean(resolving)} onClick={() => onResolve(detection, play, "dismiss")} type="button">
+                      {resolving === `${play.playId}:dismiss` ? "Dismissing…" : "Dismiss"}
+                    </button>
+                  </span>
+                ) : null}
                 {held && play.evidenceExpiresAt && !detection.holds.includes("evidence_expired") ? (
                   <span>Evidence expires {formatLastfmDate(play.evidenceExpiresAt)}</span>
                 ) : null}
@@ -157,9 +226,11 @@ function DetectionCard({ detection }) {
   );
 }
 
-export default function LastfmDetections({ savedTimeZone, onTimeZoneSaved }) {
+export default function LastfmDetections({ savedTimeZone, onTimeZoneSaved, autoDiaryAllowed, autoDiary, onAutoDiaryChanged }) {
   const { getToken } = useAuth();
   const [items, setItems] = useState([]);
+  const [resolving, setResolving] = useState("");
+  const [notice, setNotice] = useState("");
   const [cursor, setCursor] = useState("");
   const [coverage, setCoverage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -187,6 +258,26 @@ export default function LastfmDetections({ savedTimeZone, onTimeZoneSaved }) {
 
   useEffect(() => { load(); }, [load, savedTimeZone]);
 
+  async function resolve(detection, play, action) {
+    setResolving(`${play.playId}:${action}`);
+    setError("");
+    setNotice("");
+    try {
+      const token = await getToken();
+      await requestLastfmJson(
+        lastfmUrl(`${LASTFM_CONNECTION_PATH}/detections/${detection.sessionId}/plays/${play.playId}/${action}`),
+        apiOptions(token, { method: "POST", body: JSON.stringify({}) }),
+        action === "confirm" ? "Could not log this listen." : "Could not dismiss this listen.",
+      );
+      setNotice(action === "confirm" ? `Logged ${detection.album.title || "this album"} to your diary.` : "Dismissed. It won't be suggested again.");
+      await load();
+    } catch (resolveError) {
+      setError(resolveError.message);
+    } finally {
+      setResolving("");
+    }
+  }
+
   return (
     <div className="lastfm-events lastfm-detections">
       <div className="profile-section-header">
@@ -196,13 +287,16 @@ export default function LastfmDetections({ savedTimeZone, onTimeZoneSaved }) {
         </select>
       </div>
       <p className="edit-profile-current-value">
-        A listen counts once you play at least 80% of an album's standard tracks. This is a private preview; nothing is added to your diary.
+        A listen counts once you play at least 80% of an album's standard tracks.
+        {autoDiary?.enabled ? " Qualifying listens are added to your diary automatically." : " Nothing is added to your diary unless you turn on automatic logging."}
       </p>
       <TimeZoneSetting savedTimeZone={savedTimeZone} onSaved={onTimeZoneSaved} />
+      {autoDiaryAllowed ? <AutoDiarySetting autoDiary={autoDiary} savedTimeZone={savedTimeZone} onChanged={onAutoDiaryChanged} /> : null}
+      {notice ? <p className="edit-profile-status" role="status">{notice}</p> : null}
       {error ? <p className="edit-profile-error" role="alert">{error}</p> : null}
       {loading && items.length === 0 ? <p className="edit-profile-current-value">Loading detected listens…</p> : null}
       {!loading && !error && items.length === 0 ? <p className="edit-profile-current-value">No album sessions detected yet.</p> : null}
-      {items.length > 0 ? <div className="lastfm-event-list">{items.map((item) => <DetectionCard detection={item} key={item.sessionId} />)}</div> : null}
+      {items.length > 0 ? <div className="lastfm-event-list">{items.map((item) => <DetectionCard detection={item} key={item.sessionId} onResolve={resolve} resolving={resolving} />)}</div> : null}
       {cursor ? (
         <button className="profile-secondary-button" disabled={loading} onClick={() => load({ next: cursor, append: true })} type="button">
           {loading ? "Loading…" : "Load older sessions"}

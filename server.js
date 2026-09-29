@@ -69,6 +69,7 @@ async function startServer({
     require("./models/Listen").init(),
     require("./models/BoardListen").init(),
     require("./models/ListenCreation").init(),
+    ...Object.values(require("./models/AutomaticListen")).map((Model) => Model.init()),
   ]),
   initializeListening = async () => {
     if (Object.values(require("./lib/listening/common").flags()).some(Boolean)) {

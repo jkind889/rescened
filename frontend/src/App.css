@@ -9742,6 +9742,39 @@ label.moderation-candidate-choice {
   color: #fbbf24;
 }
 
+.lastfm-auto-diary {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.lastfm-auto-diary > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.lastfm-auto-diary span,
+.lastfm-play-note {
+  color: #9fb0c4;
+  font-size: 0.72rem;
+}
+
+.lastfm-auto-diary .profile-secondary-button {
+  justify-self: start;
+}
+
+.lastfm-play-note {
+  max-width: 28rem;
+  text-align: right;
+}
+
+.listen-source-label,
+.listen-form-notice {
+  color: #9fb0c4;
+  font-size: 0.72rem;
+}
+
 .lastfm-callback-page {
   max-width: 780px;
   margin: 2rem auto;
@@ -10052,6 +10085,10 @@ label.moderation-candidate-choice {
 
   .lastfm-event-meta {
     justify-items: start;
+  }
+
+  .lastfm-play-note {
+    text-align: left;
   }
 
   .mapping-filter-row {

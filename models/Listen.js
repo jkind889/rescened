@@ -10,6 +10,8 @@ const schema = new mongoose.Schema({
   userId: { type: String, required: true, immutable: true },
   albumCatalogId: { type: mongoose.Schema.Types.ObjectId, ref: "AlbumCatalog", required: true, immutable: true },
   listenedOn: { type: String, required: true, validate: isCalendarDate },
+  // Server-authored; manual creation input cannot set it.
+  source: { type: String, enum: ["manual", "automatic"], default: "manual", immutable: true },
   interactionRevision: { type: Number, default: 0, select: false },
 }, { timestamps: true });
 

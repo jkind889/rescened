@@ -12,7 +12,10 @@ test("time zones are canonical IANA names", () => {
 });
 
 test("detection reads follow the detection flag and pilot allowlist", () => {
-  assert.deepEqual(detectionEnabledFor("user", {}), { enabled: false, pilotAllowed: false });
-  assert.deepEqual(detectionEnabledFor("user", { LISTENING_DETECTION_ENABLED: "true" }), { enabled: true, pilotAllowed: false });
-  assert.deepEqual(detectionEnabledFor("user", { LISTENING_DETECTION_ENABLED: "true", LASTFM_PILOT_USER_IDS: "user" }), { enabled: true, pilotAllowed: true });
+  assert.deepEqual(detectionEnabledFor("user", {}), { enabled: false, pilotAllowed: false, autoDiary: false });
+  assert.deepEqual(detectionEnabledFor("user", { LISTENING_DETECTION_ENABLED: "true" }), { enabled: true, pilotAllowed: false, autoDiary: false });
+  assert.deepEqual(detectionEnabledFor("user", { LISTENING_DETECTION_ENABLED: "true", LASTFM_PILOT_USER_IDS: "user" }), { enabled: true, pilotAllowed: true, autoDiary: false });
+  // Automatic diary publication needs its own flag on top of detection.
+  assert.deepEqual(detectionEnabledFor("user", { LISTENING_AUTO_DIARY_ENABLED: "true", LASTFM_PILOT_USER_IDS: "user" }), { enabled: false, pilotAllowed: false, autoDiary: false });
+  assert.deepEqual(detectionEnabledFor("user", { LISTENING_DETECTION_ENABLED: "true", LISTENING_AUTO_DIARY_ENABLED: "true", LASTFM_PILOT_USER_IDS: "user" }), { enabled: true, pilotAllowed: true, autoDiary: true });
 });

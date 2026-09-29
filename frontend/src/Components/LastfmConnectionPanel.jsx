@@ -160,6 +160,9 @@ export default function LastfmConnectionPanel() {
   const saveTimeZone = useCallback((timeZone) => {
     setStatus((current) => (current?.connection ? { ...current, connection: { ...current.connection, timeZone } } : current));
   }, []);
+  const saveAutoDiary = useCallback((autoDiary) => {
+    setStatus((current) => (current?.connection ? { ...current, connection: { ...current.connection, autoDiary } } : current));
+  }, []);
 
   return (
     <section className="edit-profile-panel lastfm-panel" aria-labelledby="lastfm-heading">
@@ -173,7 +176,7 @@ export default function LastfmConnectionPanel() {
 
       <p className="edit-profile-current-value">
         Connect <a href="https://www.last.fm/" rel="noreferrer" target="_blank">Last.fm</a> to collect listening data from the time you connect onward and improve album-name matching.
-        This pilot does not create diary entries. Rescened retains normalized listening evidence for up to 30 days and reads public recent tracks with your connection controls;
+        {" "}{status?.detection?.autoDiary ? "Diary entries are created only if you turn on automatic logging below. " : "This pilot does not create diary entries. "}Rescened retains normalized listening evidence for up to 30 days and reads public recent tracks with your connection controls;
         revoking Last.fm authorization alone does not pause those reads.
       </p>
 
@@ -215,7 +218,15 @@ export default function LastfmConnectionPanel() {
         </div>
       ) : null}
 
-      {showDetections ? <LastfmDetections savedTimeZone={connection.timeZone || ""} onTimeZoneSaved={saveTimeZone} /> : null}
+      {showDetections ? (
+        <LastfmDetections
+          savedTimeZone={connection.timeZone || ""}
+          onTimeZoneSaved={saveTimeZone}
+          autoDiaryAllowed={Boolean(status?.detection?.autoDiary)}
+          autoDiary={connection.autoDiary}
+          onAutoDiaryChanged={saveAutoDiary}
+        />
+      ) : null}
 
       {connection && connection.state !== "disconnected" ? (
         <div className="lastfm-events">
