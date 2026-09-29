@@ -10,6 +10,7 @@ const {
   startAuthorization,
 } = require("../lib/listening/connections");
 const { safeError } = require("../lib/listening/common");
+const { detectionEnabledFor, listDetections, setTimeZone } = require("../lib/listening/detectionView");
 const { getAuthenticatedUserRateLimitKey, createRateLimiter, createRateLimitMiddleware } = require("./utils/rateLimit");
 
 const router = express.Router();
@@ -63,7 +64,7 @@ router.get("/", authenticate, async (req, res) => {
     const connection = await (query?.exec ? query.exec() : query);
     // Keep an existing private connection visible when a rollout flag or pilot
     // allowlist entry is removed so the owner can still pause or disconnect it.
-    return res.json({ enabled: state.enabled, pilotAllowed: state.pilotAllowed, connection: serializeConnection(connection) });
+    return res.json({ enabled: state.enabled, pilotAllowed: state.pilotAllowed, detection: detectionEnabledFor(req.userId), connection: serializeConnection(connection) });
   } catch (error) {
     return errorResponse(res, error);
   }
@@ -107,6 +108,22 @@ router.delete("/", authenticate, connectionRateLimit, async (req, res) => {
   try {
     assertEmptyBody(req.body);
     return res.json(await mutateConnection({ userId: req.userId, action: "disconnect" }));
+  } catch (error) { return errorResponse(res, error); }
+});
+
+router.put("/time-zone", authenticate, connectionRateLimit, async (req, res) => {
+  try {
+    return res.json(await setTimeZone({ userId: req.userId, body: req.body }));
+  } catch (error) { return errorResponse(res, error); }
+});
+
+router.get("/detections", authenticate, async (req, res) => {
+  try {
+    const allowed = new Set(["cursor", "coverage", "limit"]);
+    for (const key of Object.keys(req.query || {})) if (!allowed.has(key)) throw safeError("INVALID_REQUEST", 400);
+    for (const key of allowed) if (req.query?.[key] !== undefined && (typeof req.query[key] !== "string" || req.query[key].length > 512)) throw safeError("INVALID_REQUEST", 400);
+    const limit = req.query?.limit === undefined ? 20 : Number(req.query.limit);
+    return res.json(await listDetections({ userId: req.userId, cursor: req.query?.cursor, coverage: req.query?.coverage, limit }));
   } catch (error) { return errorResponse(res, error); }
 });
 

@@ -9553,6 +9553,10 @@ label.moderation-candidate-choice {
   margin: 0;
 }
 
+.lastfm-panel .profile-section-header {
+  flex-wrap: wrap;
+}
+
 .lastfm-state,
 .lastfm-resolution,
 .mapping-queue-topline .community-status {
@@ -9671,6 +9675,71 @@ label.moderation-candidate-choice {
 .lastfm-event-meta {
   justify-items: end;
   flex: 0 0 auto;
+}
+
+.lastfm-time-zone {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.lastfm-time-zone label,
+.lastfm-detection-heading span,
+.lastfm-play-list span,
+.lastfm-detection-note {
+  color: #9fb0c4;
+  font-size: 0.72rem;
+}
+
+.lastfm-time-zone select,
+.lastfm-time-zone input {
+  min-height: 34px;
+  max-width: 100%;
+  padding: 0.35rem;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: #050505;
+  color: #f8fafc;
+}
+
+.lastfm-detection {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.lastfm-detection-heading,
+.lastfm-play-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.lastfm-detection-heading > div,
+.lastfm-play-list li > div:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.lastfm-detection-heading a {
+  color: inherit;
+}
+
+.lastfm-play-list {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lastfm-detection-note {
+  margin: 0;
+}
+
+.lastfm-detection-hold {
+  color: #fbbf24;
 }
 
 .lastfm-callback-page {
@@ -9974,6 +10043,8 @@ label.moderation-candidate-choice {
   }
 
   .lastfm-event,
+  .lastfm-detection-heading,
+  .lastfm-play-list li,
   .mapping-detail-heading {
     align-items: start;
     flex-direction: column;

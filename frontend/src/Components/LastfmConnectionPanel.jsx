@@ -8,6 +8,7 @@ import {
   LASTFM_CONNECTION_PATH,
   requestLastfmJson,
 } from "../features/lastfm/lastfm.js";
+import LastfmDetections from "./LastfmDetections.jsx";
 
 const EVENT_STATUSES = [
   { value: "", label: "All resolution states" },
@@ -155,6 +156,10 @@ export default function LastfmConnectionPanel() {
   const canChange = Boolean(connection && connection.state !== "disconnected");
   const canConnect = enabled && allowed && (!connection || connection.state === "disconnected");
   const resumeDisabled = !enabled || !allowed;
+  const showDetections = Boolean(status?.detection?.pilotAllowed && connection && connection.state !== "disconnected");
+  const saveTimeZone = useCallback((timeZone) => {
+    setStatus((current) => (current?.connection ? { ...current, connection: { ...current.connection, timeZone } } : current));
+  }, []);
 
   return (
     <section className="edit-profile-panel lastfm-panel" aria-labelledby="lastfm-heading">
@@ -209,6 +214,8 @@ export default function LastfmConnectionPanel() {
           </button>
         </div>
       ) : null}
+
+      {showDetections ? <LastfmDetections savedTimeZone={connection.timeZone || ""} onTimeZoneSaved={saveTimeZone} /> : null}
 
       {connection && connection.state !== "disconnected" ? (
         <div className="lastfm-events">

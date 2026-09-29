@@ -8,6 +8,7 @@ const Listen = require("../models/Listen");
 const Listening = require("../models/Listening");
 const Baselines = require("../models/AlbumBaseline");
 const { mappingKey, normalize } = require("../lib/listening/common");
+const { listDetections, setTimeZone } = require("../lib/listening/detectionView");
 const { enqueueJob, runWorkerOnce, scheduleDueDetectionJobs, scheduleDueSweepJobs, SWEEP_INTERVAL_MS } = require("../lib/listening/worker");
 
 const { Connection, Scrobble, AlbumMapping, Job, Detection, DetectionEvidence } = Listening;
@@ -220,6 +221,72 @@ test("listening detection MongoDB integration", { skip: !enabled }, async (t) =>
     assert.equal((await runWorkerOnce(options(provider([]), at(4 * HOUR), ["detect"]))).status, "pending");
     assert.equal((await runWorkerOnce(options(provider([]), at(4 * HOUR), ["detect"]))).status, "done");
     assert.equal(await Detection.countDocuments(), 1);
+  });
+
+  await t.test("a saved time zone dates sessions, and later changes date only later sessions", async () => {
+    const conn = await reset();
+    await sync(conn, provider(rows(range(1, 10), 10 * MINUTE)), at(4 * HOUR));
+    await detect(conn, at(4 * HOUR));
+    assert.equal((await Detection.findOne().lean()).plays[0].proposedDate, null);
+    const saved = await setTimeZone({ userId: "user-1", body: { timeZone: "america/new_york" }, env: ENV, clock: () => at(4 * HOUR) });
+    assert.equal(saved.timeZone, "America/New_York");
+    assert.equal((await Job.findOne({ key: `detect:${conn._id}` }).lean()).status, "pending");
+    await runWorkerOnce(options(provider([]), at(4 * HOUR), ["detect"]));
+    const dated = await Detection.findOne().lean();
+    assert.equal(dated.timeZone, "America/New_York");
+    assert.equal(dated.plays[0].proposedDate, "2026-09-25");
+    await setTimeZone({ userId: "user-1", body: { timeZone: "Asia/Tokyo" }, env: ENV, clock: () => at(5 * HOUR) });
+    // 23:00 UTC on September 26 is already September 27 in Tokyo.
+    const later = rows(range(1, 10), 35 * HOUR);
+    await sync(conn, provider([...rows(range(1, 10), 10 * MINUTE), ...later]), at(40 * HOUR));
+    await detect(conn, at(40 * HOUR));
+    const sessions = await Detection.find().sort({ startedAt: 1 }).lean();
+    assert.deepEqual(sessions.map((item) => [item.timeZone, item.plays[0].proposedDate]), [["America/New_York", "2026-09-25"], ["Asia/Tokyo", "2026-09-27"]]);
+  });
+
+  await t.test("time zone input accepts only IANA names for connected pilot owners", async () => {
+    await reset();
+    for (const timeZone of ["Mars/Olympus", "+05:00", "", 5]) {
+      await assert.rejects(setTimeZone({ userId: "user-1", body: { timeZone }, env: ENV }), { code: "INVALID_TIME_ZONE" });
+    }
+    await assert.rejects(setTimeZone({ userId: "user-1", body: { timeZone: "UTC", extra: true }, env: ENV }), { code: "INVALID_REQUEST" });
+    await assert.rejects(setTimeZone({ userId: "user-2", body: { timeZone: "UTC" }, env: ENV }), { code: "LASTFM_PILOT_REQUIRED" });
+    await assert.rejects(setTimeZone({ userId: "user-2", body: { timeZone: "UTC" }, env: { ...ENV, LASTFM_PILOT_USER_IDS: "user-1,user-2" } }), { code: "LASTFM_NOT_CONNECTED" });
+    await assert.rejects(setTimeZone({ userId: "user-1", body: { timeZone: "UTC" }, env: { ...ENV, LISTENING_DETECTION_ENABLED: "false" } }), { code: "LISTENING_DETECTION_DISABLED" });
+  });
+
+  await t.test("owner reads summarize detections and revalidate without persisting", async () => {
+    const conn = await reset();
+    await setTimeZone({ userId: "user-1", body: { timeZone: "UTC" }, env: ENV, clock: () => START });
+    await sync(conn, provider([...rows(range(1, 10), 10 * MINUTE), ...rows([1, 2, 3], 5 * HOUR)]), at(8 * HOUR));
+    await detect(conn, at(8 * HOUR));
+    const first = await listDetections({ userId: "user-1", limit: 1, env: ENV, clock: () => at(8 * HOUR) });
+    assert.equal(first.items.length, 1);
+    assert.ok(first.nextCursor);
+    const [latest] = first.items;
+    assert.equal(latest.album.title, "Album");
+    assert.equal(latest.coverage, "below_threshold");
+    assert.deepEqual(latest.plays.map((item) => [item.distinct, item.required, item.proposedDate]), [[3, 8, "2026-09-25"]]);
+    assert.deepEqual(Object.keys(latest).sort(), ["album", "countable", "coverage", "holds", "lifecycle", "plays", "sessionId", "timeZone"]);
+    assert.ok(!JSON.stringify(first).includes("eventId"));
+    const second = await listDetections({ userId: "user-1", cursor: first.nextCursor, env: ENV, clock: () => at(8 * HOUR) });
+    assert.equal(second.items[0].coverage, "qualified");
+    assert.equal((await listDetections({ userId: "user-1", coverage: "qualified", env: ENV, clock: () => at(8 * HOUR) })).items.length, 1);
+
+    await AlbumMapping.updateOne({}, { $set: { status: "revoked" }, $inc: { revision: 1 } });
+    const revoked = await listDetections({ userId: "user-1", coverage: "qualified", env: ENV, clock: () => at(8 * HOUR) });
+    assert.deepEqual(revoked.items[0].holds, ["stale_mapping"]);
+    await AlbumMapping.updateOne({}, { $set: { status: "active" } });
+    const lapsed = await listDetections({ userId: "user-1", coverage: "qualified", env: ENV, clock: () => at(31 * DAY) });
+    assert.deepEqual(lapsed.items[0].holds, ["evidence_expired"]);
+    assert.ok((await Detection.find().lean()).every((item) => item.holds.length === 0), "reads never persist holds");
+
+    await assert.rejects(listDetections({ userId: "user-1", env: { ...ENV, LISTENING_DETECTION_ENABLED: "false" } }), { code: "LISTENING_DETECTION_DISABLED" });
+    await assert.rejects(listDetections({ userId: "user-2", env: ENV }), { code: "LASTFM_PILOT_REQUIRED" });
+    assert.deepEqual(await listDetections({ userId: "user-2", env: { ...ENV, LASTFM_PILOT_USER_IDS: "user-1,user-2" } }), { items: [], nextCursor: null });
+    await assert.rejects(listDetections({ userId: "user-1", coverage: "held", env: ENV }), { code: "INVALID_STATUS" });
+    await assert.rejects(listDetections({ userId: "user-1", limit: 51, env: ENV }), { code: "INVALID_LIMIT" });
+    await assert.rejects(listDetections({ userId: "user-1", cursor: "bogus", env: ENV }), { code: "INVALID_CURSOR" });
   });
 
   await t.test("disconnect cleanup removes private detections and evidence", async () => {

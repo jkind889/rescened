@@ -70,7 +70,7 @@ Evidence includes provider links and retrieval dates, track counts, shared/missi
 
 The mapping workspace is `/moderation/album-mappings`, beside album-submission moderation. Existing moderators can filter the queue, inspect evidence, select another existing catalog album, approve, reject, mark no match, refresh or revoke. Reasons and expected revisions are mandatory. Approval/revocation updates the mapping, case and append-only audit in one transaction; stale commands return 409 and unavailable transactions return 503.
 
-Approvals queue retained-event reprocessing for active connections only. Revocation and changed catalog revisions invalidate cached resolution and schedule reevaluation. Owner event reads also check current mapping/catalog validity, so stale cached matches do not remain authoritative while a worker catches up. Reviewed mappings are separate from `AlbumCatalog`; discovery and moderation never create catalog albums.
+Approvals queue retained-event reprocessing for active connections only. Revocation and changed catalog revisions invalidate cached resolution and schedule reevaluation. Owner event reads also check current mapping/catalog validity, so stale cached matches do not remain authoritative while a worker catches up. With `LISTENING_DETECTION_ENABLED=true`, pilot owners can save an IANA time zone (`PUT /connections/lastfm/time-zone`) and read their private detected sessions (`GET /connections/lastfm/detections`); see [automatic album listens](AUTOMATIC_ALBUM_LISTENS.md). Reviewed mappings are separate from `AlbumCatalog`; discovery and moderation never create catalog albums.
 
 ## Reviewed seed workflow
 
