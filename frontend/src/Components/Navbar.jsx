@@ -83,6 +83,15 @@ function Navbar()
                                 <li className="nav-item">
                                     <Link to="/community/approved" className={`nav-link${location.pathname === "/community/approved" ? " nav-link-current" : ""}`}>Community</Link>
                                 </li>
+                                <li className="nav-item">
+                                    <Link
+                                        to="/patch-notes"
+                                        className={`nav-link${location.pathname === "/patch-notes" ? " nav-link-current" : ""}`}
+                                        aria-current={location.pathname === "/patch-notes" ? "page" : undefined}
+                                    >
+                                        Patch notes
+                                    </Link>
+                                </li>
                                 <Show when="signed-in">
                                     <li className="nav-item">
                                         <Link

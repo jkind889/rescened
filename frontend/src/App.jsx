@@ -17,6 +17,7 @@ import ProfileNetwork from "./Pages/ProfileNetwork";
 import Boards from "./Pages/Boards";
 import BoardDetail from "./Pages/BoardDetail";
 import Notifications from "./Pages/Notifications";
+import PatchNotes from "./Pages/PatchNotes";
 import ProtectedRoute from "./Components/ProtectedRoute";
 
 const Suggestions = lazy(() => import("./Pages/Suggestions"));
@@ -49,6 +50,7 @@ export function App() {
             <Route path="/review-dispatches" element={<ReviewDispatches />} />
             <Route path="/popular-albums" element={<PopularAlbums />} />
             <Route path="/community/approved" element={<ApprovedSuggestions />} />
+            <Route path="/patch-notes" element={<PatchNotes />} />
             <Route path="/account" element={<Account />} />
             <Route path="/account/network" element={<ProfileNetwork />} />
             <Route path="/notifications" element={
