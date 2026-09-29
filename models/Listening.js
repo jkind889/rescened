@@ -28,6 +28,7 @@ const connectionSchema = new mongoose.Schema({
   nextSyncAt: { type: Date, default: null },
   error: { type: errorSchema, default: null },
   retentionGap: { type: gapSchema, default: null },
+  lastSweepAt: { type: Date, default: null },
   // Internal optimistic-write fence. Never serialize it from an owner API.
   workerFence: { type: String, default: "", select: false },
 }, { timestamps: true });
@@ -67,6 +68,8 @@ const scrobbleSchema = new mongoose.Schema({
   mappingRevision: { type: Number, default: null },
   catalogRevision: { type: Number, default: null },
   baselineAvailable: { type: Boolean, default: false },
+  // Set when a repeated delivery disagrees on a populated identifier.
+  identityConflict: { type: Boolean, default: false },
 }, { timestamps: true });
 scrobbleSchema.index({ connectionId: 1, identityKey: 1 }, { unique: true });
 scrobbleSchema.index({ artistKey: 1, albumKey: 1, resolution: 1 });
@@ -125,7 +128,7 @@ const mappingAuditSchema = new mongoose.Schema({
 
 const jobSchema = new mongoose.Schema({
   key: { type: String, required: true, unique: true, immutable: true },
-  type: { type: String, required: true, enum: ["sync", "discovery", "reprocess", "cleanup"] },
+  type: { type: String, required: true, enum: ["sync", "discovery", "reprocess", "cleanup", "detect", "sweep"] },
   payload: { type: mongoose.Schema.Types.Mixed, required: true, default: {} },
   status: { type: String, required: true, enum: ["pending", "running", "done"], default: "pending" },
   runAt: { type: Date, required: true, default: Date.now },
@@ -136,6 +139,73 @@ const jobSchema = new mongoose.Schema({
   error: { type: String, default: "" },
 }, { timestamps: true });
 jobSchema.index({ status: 1, runAt: 1, leaseUntil: 1 });
+
+// Private detected sessions. Never serialized into public activity.
+const DETECTION_HOLDS = ["sync_incomplete", "stale_baseline", "stale_mapping", "stale_rule", "evidence_expired", "reconciliation_required"];
+const detectionPlaySchema = new mongoose.Schema({
+  playId: { ...uuid, unique: false },
+  ordinal: { type: Number, required: true, min: 1 },
+  distinct: { type: Number, required: true, min: 0 },
+  required: { type: Number, required: true, min: 1 },
+  eventCount: { type: Number, required: true, min: 0 },
+  firstEventId: { type: String, required: true },
+  firstEventAt: { type: Date, required: true },
+  lastEventAt: { type: Date, required: true },
+  qualifiedAt: { type: Date, default: null },
+  qualifyingEventId: { type: String, default: "" },
+  coverage: { type: String, required: true, enum: ["below_threshold", "qualified"] },
+  // When coverage would fall below the threshold as credited evidence expires.
+  evidenceExpiresAt: { type: Date, default: null },
+  // Reserved for diary publication; a published play is a fixed boundary.
+  publishedAt: { type: Date, default: null },
+}, { _id: false });
+
+const detectionSchema = new mongoose.Schema({
+  sessionId: uuid,
+  userId: { type: String, required: true },
+  connectionId: { type: mongoose.Schema.Types.ObjectId, ref: "ListeningConnection", required: true, index: true },
+  window: { type: windowSchema, required: true },
+  windowKey: { type: String, required: true },
+  albumId: { type: String, required: true, lowercase: true },
+  baseline: {
+    baselineId: { type: String, required: true },
+    version: { type: Number, default: null },
+    tracklistHash: { type: String, required: true },
+  },
+  ruleVersion: { type: Number, required: true, min: 1 },
+  matchingVersion: { type: Number, required: true, min: 1 },
+  countable: { type: mongoose.Schema.Types.Mixed, required: true },
+  mappings: { type: [new mongoose.Schema({ mappingId: String, revision: Number }, { _id: false })], default: [] },
+  timeZone: { type: String, default: null },
+  lifecycle: { type: String, required: true, enum: ["open", "closed"] },
+  coverage: { type: String, required: true, enum: ["below_threshold", "qualified"] },
+  holds: { type: [{ type: String, enum: DETECTION_HOLDS }], default: [] },
+  startedAt: { type: Date, required: true },
+  lastEventAt: { type: Date, required: true },
+  plays: { type: [detectionPlaySchema], default: [] },
+  // Retained event membership links recomputed sessions to stored ones.
+  eventIds: { type: [String], default: [] },
+  predecessorSessionIds: { type: [String], default: [] },
+  evaluatedThrough: { type: Date, required: true },
+  connectionRevision: { type: Number, required: true, min: 1 },
+  processingRevision: { type: Number, required: true, min: 1, default: 1 },
+  // Derived from evidence expiry plus a visible expired period; never refreshed by recomputation.
+  expiresAt: { type: Date, required: true, index: { expires: 0 } },
+}, { timestamps: true });
+detectionSchema.index({ connectionId: 1, eventIds: 1 });
+detectionSchema.index({ userId: 1, startedAt: -1 });
+
+const detectionEvidenceSchema = new mongoose.Schema({
+  sessionId: { type: String, required: true, index: true },
+  connectionId: { type: mongoose.Schema.Types.ObjectId, ref: "ListeningConnection", required: true, index: true },
+  eventId: { type: String, required: true },
+  trackId: { type: String, required: true },
+  play: { type: Number, default: null },
+  credit: { type: String, required: true, enum: ["credited", "repeat", "excluded_position"] },
+  rules: { type: [String], default: [] },
+  playedAt: { type: Date, required: true },
+  expiresAt: { type: Date, required: true, index: { expires: 0 } },
+}, { timestamps: { createdAt: true, updatedAt: false } });
 
 const providerBudgetSchema = new mongoose.Schema({
   key: { type: String, required: true, unique: true, immutable: true },
@@ -162,6 +232,8 @@ module.exports = {
   AlbumMapping: model("ListeningAlbumMapping", albumMappingSchema),
   MappingAudit: model("ListeningMappingAudit", mappingAuditSchema),
   Job: model("ListeningJob", jobSchema),
+  Detection: model("ListeningDetection", detectionSchema),
+  DetectionEvidence: model("ListeningDetectionEvidence", detectionEvidenceSchema),
   ProviderBudget: model("ListeningProviderBudget", providerBudgetSchema),
   ProviderCache: model("ListeningProviderCache", providerCacheSchema),
 };

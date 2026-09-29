@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const mongoose = require("mongoose");
 const ListeningModels = require("../models/Listening");
-const { runWorkerOnce, scheduleDueSyncJobs, scheduleStaleMappingJobs } = require("../lib/listening/worker");
+const { runWorkerOnce, scheduleDueDetectionJobs, scheduleDueSweepJobs, scheduleDueSyncJobs, scheduleStaleMappingJobs } = require("../lib/listening/worker");
 
 function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
@@ -18,6 +18,8 @@ async function main(options = {}) {
   try {
     while (!stopping) {
       await scheduleDueSyncJobs({ env });
+      await scheduleDueSweepJobs({ env });
+      await scheduleDueDetectionJobs({ env });
       await scheduleStaleMappingJobs();
       let processed = 0;
       for (; processed < 100 && !stopping; processed += 1) {

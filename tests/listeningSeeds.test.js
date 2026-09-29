@@ -15,7 +15,7 @@ test("production normalization preserves edition and performance distinctions", 
 });
 
 test("rollout flags default closed and pilot allowlist is explicit", () => {
-  assert.deepEqual(flags({}), { connection: false, sync: false, discovery: false, moderation: false });
+  assert.deepEqual(flags({}), { connection: false, sync: false, discovery: false, moderation: false, detection: false, deepSweep: false });
   assert.equal(pilotAllowed("user", {}), false);
   assert.equal(pilotAllowed("user", { LASTFM_PILOT_USER_IDS: "another,user" }), true);
 });

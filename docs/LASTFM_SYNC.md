@@ -22,6 +22,8 @@ All four feature flags default to disabled:
 | `LASTFM_SYNC_ENABLED=true` | Permit background recent-track reads. |
 | `LASTFM_DISCOVERY_ENABLED=true` | Permit candidate discovery and provider metadata reads. |
 | `ALBUM_MAPPING_MODERATION_ENABLED=true` | Permit mapping decisions by existing moderators. |
+| `LISTENING_DETECTION_ENABLED=true` | Permit private album-listen detection jobs for pilot users. Detection never writes diary entries. |
+| `LASTFM_DEEP_SWEEP_ENABLED=true` | With sync enabled, permit the daily 14-day refetch for late, back-dated scrobbles. |
 | `LASTFM_PILOT_USER_IDS` | Explicit comma-separated Clerk user IDs eligible for the pilot. An empty list admits nobody. |
 | `MODERATOR_USER_IDS` | Existing moderator allowlist, also used for mapping review. |
 | `LASTFM_API_KEY`, `LASTFM_API_SECRET` | Server-only Last.fm application credentials. Legacy `LAST_FM_API` and `LAST_FM_SECRET` names are accepted by the adapter. |
@@ -50,9 +52,9 @@ Keep the worker running for disconnect cleanup even when reads are disabled. Sup
 
 ## Sync and resolution behavior
 
-Active connections are due approximately every five minutes, subject to provider budget and capacity. Each job captures fixed `from`/`to` bounds and paginates the complete window, using a 48-hour overlap for delayed scrobbles. Job progress survives restart; completed cursors never skip unprocessed pages. Now-playing rows are excluded, and repeated pages/retries do not create duplicate events or inflate encounter counts. A same-second identical artist/album/track event is conservatively treated as one event.
+Active connections are due approximately every five minutes, subject to provider budget and capacity. Each job captures fixed `from`/`to` bounds and paginates the complete window, using a 48-hour overlap for delayed scrobbles. Job progress survives restart; completed cursors never skip unprocessed pages. Now-playing rows are excluded, and repeated pages/retries do not create duplicate events or inflate encounter counts. A same-second identical artist/album/track event is conservatively treated as one event. A repeated delivery that disagrees on a populated MusicBrainz identifier keeps the first values and is marked `identityConflict`; detection does not count it.
 
-Catch-up stops at the 30-day retention boundary and exposes older gaps. Events delayed beyond the 48-hour overlap may be missed. Provider pagination changing during a fetch leaves the window incomplete rather than silently advancing it. Revision and lease fences prevent paused, disconnected, replaced, or expired work from committing. Provider outages leave the normal catalog and manual diary usable.
+Catch-up stops at the 30-day retention boundary and exposes older gaps. Regular sync refetches only a 48-hour overlap. When `LASTFM_DEEP_SWEEP_ENABLED=true`, each active pilot connection also gets a daily sweep job that refetches from the later of 14 days ago and `connectedAt` up to `completedThrough`. It picks up offline or late-uploaded scrobbles, never moves the cursor, records `lastSweepAt`, and runs only when no other job is due. Without the sweep, events delayed beyond the overlap may be missed. The sweep shares the global `lastfm` request budget. If `lastfm_request_budget_exhausted` or `lastfm_rate_limited` errors, cooldowns, or regular-sync lag increase, investigate the sweep first; see [automatic album listens](AUTOMATIC_ALBUM_LISTENS.md). Provider pagination changing during a fetch leaves the window incomplete rather than silently advancing it. Revision and lease fences prevent paused, disconnected, replaced, or expired work from committing. Provider outages leave the normal catalog and manual diary usable.
 
 Only an exact approved normalized provider/track-artist/album-label key resolves at runtime. Normalization applies Unicode NFKC, case folding, trimming and whitespace collapsing; it preserves punctuation and edition qualifiers. Artist names from recent tracks are not assumed to be album artists. Guest-credit variations remain unresolved unless separately reviewed.
 
