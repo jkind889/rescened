@@ -8,7 +8,7 @@ function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 async function main(options = {}) {
   const env = options.env || process.env;
   const uri = env.MONGO_URI;
-  if (!uri) throw new Error("MONGO_URI is required");
+  if (!uri) throw Object.assign(new Error("MONGO_URI is required"), { code: "MONGO_URI_REQUIRED" });
   await mongoose.connect(uri);
   await Promise.all(Object.values(ListeningModels).map((Model) => Model.init()));
   let stopping = false;
@@ -37,7 +37,8 @@ async function main(options = {}) {
 
 if (require.main === module) {
   main().catch((error) => {
-    process.stderr.write(`Listening worker stopped: ${String(error?.code || "LISTENING_WORKER_STOPPED")}\n`);
+    // Codes and error class names only: messages can carry connection strings.
+    process.stderr.write(`Listening worker stopped: ${String(error?.code || error?.name || "LISTENING_WORKER_STOPPED")}\n`);
     process.exitCode = 1;
   });
 }

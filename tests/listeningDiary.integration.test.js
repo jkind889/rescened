@@ -16,18 +16,12 @@ const Review = require("../models/Reviews");
 const Follow = require("../models/Follow");
 const Like = require("../models/Like");
 const Notification = require("../models/Notification");
-const Listening = require("../models/Listening");
-const Automatic = require("../models/AutomaticListen");
-const { cleanupUserData } = require("../lib/listening/connections");
 const { createListen, deleteListen, updateListen, listListens } = require("../routes/utils/listeningDiary");
 const { setMembership, deleteBoard, saveAlbum, removeAlbum, transaction, claimBoard } = require("../routes/utils/boardMutations");
 const { formatBoard, savedAlbums, savedUserCount, albumBoards } = require("../routes/utils/boardLibrary");
 
 const enabled = process.env.RUN_MONGO_INTEGRATION === "true";
-const models = [
-  AlbumCatalog, Board, BoardItem, BoardListen, Listen, ListenCreation, UserProfile, Review, Follow, Like, Notification,
-  ...Object.values(Listening), ...Object.values(Automatic),
-];
+const models = [AlbumCatalog, Board, BoardItem, BoardListen, Listen, ListenCreation, UserProfile, Review, Follow, Like, Notification];
 let replSet;
 let server;
 let baseUrl;
@@ -494,52 +488,4 @@ integration("activity caps mixed events globally and excludes missing catalog li
     assert.equal(response.body.at(-1).createdAt, "2026-01-07T00:00:00.000Z");
     assert.ok(response.body.every((item) => item.album.albumId === album.albumId));
   }
-});
-
-async function diaryCounts(userId) {
-  const [listens, memberships, receipts] = await Promise.all([
-    Listen.countDocuments({ userId }), BoardListen.countDocuments({ userId }), ListenCreation.countDocuments({ userId }),
-  ]);
-  return { listens, memberships, receipts };
-}
-
-integration("account deletion removes only the deleted user's diary entries, memberships, and creation receipts", async () => {
-  const other = `diary-${crypto.randomUUID()}`;
-  const otherBoard = await Board.create({ userId: other, title: "Other" });
-  const first = await log({ boardIds: [board.boardId, secondBoard.boardId] });
-  await log({ listenedOn: "2020-01-03" });
-  await setMembership(owner, board.boardId, (await log({ listenedOn: "2020-01-04" })).listen.listenId, true);
-  await createListen(other, input({ boardIds: [otherBoard.boardId] }), crypto.randomUUID());
-  await saveAlbum(owner, board.boardId, album._id);
-  await Review.create({ userId: owner, albumCatalogId: album._id, rating: 4, reviewText: "Kept outside diary cleanup" });
-  assert.deepEqual(await diaryCounts(owner), { listens: 3, memberships: 3, receipts: 3 });
-
-  await cleanupUserData(owner);
-
-  assert.deepEqual(await diaryCounts(owner), { listens: 0, memberships: 0, receipts: 0 });
-  assert.equal(await BoardListen.countDocuments({ listenId: { $nin: await Listen.distinct("_id") } }), 0);
-  assert.deepEqual(await diaryCounts(other), { listens: 1, memberships: 1, receipts: 1 });
-  // Non-diary account data is outside this cleanup's scope.
-  assert.equal(await Board.countDocuments({ userId: owner }), 2);
-  assert.equal(await BoardItem.countDocuments({ userId: owner }), 1);
-  assert.equal(await Review.countDocuments({ userId: owner }), 1);
-  // A retried deletion webhook is idempotent.
-  await cleanupUserData(owner);
-  assert.deepEqual(await diaryCounts(other), { listens: 1, memberships: 1, receipts: 1 });
-  assert.equal(await Listen.exists({ listenId: first.listen.listenId }), null);
-});
-
-integration("account deletion rolls back diary removal when the cleanup transaction does not commit", async () => {
-  await log({ boardIds: [board.boardId] });
-  await Automatic.DiaryAlbumFence.updateOne({ userId: owner, albumCatalogId: album._id }, { $inc: { revision: 1 } }, { upsert: true });
-  const before = await diaryCounts(owner);
-  const sessionFactory = async () => {
-    const session = await mongoose.startSession();
-    session.commitTransaction = async () => { throw new Error("synthetic commit failure"); };
-    return session;
-  };
-  await assert.rejects(cleanupUserData(owner, { sessionFactory }), /synthetic commit failure/);
-  assert.deepEqual(await diaryCounts(owner), before);
-  assert.deepEqual(before, { listens: 1, memberships: 1, receipts: 1 });
-  assert.equal(await Automatic.DiaryAlbumFence.countDocuments({ userId: owner }), 1);
 });

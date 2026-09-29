@@ -528,7 +528,7 @@ export function AlbumDetail()
      }
 
     const artistNames = album.artistCredits?.length ? album.artistCredits.map((credit) => credit.name) : [album.artistDisplayName];
-    const userReviews = reviews.filter((review) => review.userId);
+    const userReviews = reviews.filter((review) => review.reviewId);
     const socialReviewCount = Number(albumSocial.reviewCount) || userReviews.length;
     const socialSavedCount = Number(albumSocial.savedCount) || 0;
     const localAverageRating = userReviews.length

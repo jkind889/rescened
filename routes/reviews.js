@@ -25,6 +25,7 @@ const {
 
 const router = express.Router();
 const DEFAULT_AUTHOR = "rescened user";
+const DELETED_AUTHOR = Object.freeze({ userId: null, username: "deleted user", imageUrl: "" });
 const MAX_REVIEW_TEXT_LENGTH = 300;
 
 function plain(value) { return typeof value?.toObject === "function" ? value.toObject() : value; }
@@ -54,11 +55,11 @@ async function serializeReviews(reviews, viewerId) {
   const albumIds = [...new Set(sources.map((review) => String(review.albumCatalogId?._id || review.albumCatalogId || "")).filter(Boolean))];
   const albums = albumIds.length ? await AlbumCatalog.find({ _id: { $in: albumIds } }) : [];
   const albumMap = new Map(albums.map((album) => [String(album._id), normalizeCatalogAlbum(album)]));
-  const authors = await authorMap(sources.map((review) => review.userId));
+  const authors = await authorMap(sources.map((review) => review.userId).filter((id) => !Review.isDeletedAuthor(id)));
   const stats = await likeStats(sources, viewerId);
   return sources.map((review) => ({
     reviewId: persistedReviewId(review),
-    userId: review.userId,
+    userId: Review.isDeletedAuthor(review.userId) ? null : review.userId,
     albumId: albumMap.get(String(review.albumCatalogId?._id || review.albumCatalogId))?.albumId || "",
     album: albumMap.get(String(review.albumCatalogId?._id || review.albumCatalogId)) || null,
     title: albumMap.get(String(review.albumCatalogId?._id || review.albumCatalogId))?.title || "",
@@ -68,7 +69,9 @@ async function serializeReviews(reviews, viewerId) {
     reviewText: review.reviewText,
     rating: review.rating,
     date: review.date,
-    author: authors.get(review.userId) || { userId: review.userId, username: DEFAULT_AUTHOR, imageUrl: "" },
+    author: Review.isDeletedAuthor(review.userId)
+      ? { ...DELETED_AUTHOR }
+      : authors.get(review.userId) || { userId: review.userId, username: DEFAULT_AUTHOR, imageUrl: "" },
     ...(stats.get(String(review._id)) || { likeCount: 0, likedByViewer: false }),
   }));
 }
@@ -158,6 +161,8 @@ router.get("/review/user/", auth, async (req, res) => {
 router.get("/review/user/:userId", async (req, res) => {
   try {
     const target = String(req.params.userId || "").trim();
+    // Anonymized reviews do not form a listable author.
+    if (Review.isDeletedAuthor(target)) return res.json({ reviews: [], nextCursor: null });
     await sendReviewPage(req, res, { match: { userId: target }, scope: `user:${target}`, viewerId: viewer(req) });
   } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch reviews", ...(error.code ? { code: error.code } : {}) }); }
 });

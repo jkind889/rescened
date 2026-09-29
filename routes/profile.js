@@ -110,7 +110,7 @@ async function formatPrivateProfile(profile) {
     pinnedBoard: null,
   };
 }
-async function followable(userId) { return Boolean(await UserProfile.exists({ userId }) || await Review.exists({ userId })); }
+async function followable(userId) { if (Review.isDeletedAuthor(userId)) return false; return Boolean(await UserProfile.exists({ userId }) || await Review.exists({ userId })); }
 async function profileAccess(target, viewerId) { if (!(await followable(target))) return { status: 404, body: { error: "User not found" } }; const profile = await ensureProfile(target); if (profile.isPrivate && target !== viewerId) return { status: 403, body: PRIVATE_ERROR, profile }; return { status: 200, profile }; }
 async function activity(userId, includePrivate = false, viewerId = "") {
   const profileAuthors = await authors([userId]); const actor = profileAuthors.get(userId) || author(userId);

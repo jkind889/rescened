@@ -109,13 +109,35 @@ test("a track ID is used only once it is established on the reviewed baseline", 
   assert.equal(byRecording.trackId, uuid(1));
   assert.deepEqual(byRecording.rules, ["recording_id"]);
   assert.deepEqual(matchOne("Two", album, { trackMbid: releaseTrack(2) }).rules, ["release_track_id"]);
-  // Unknown or malformed IDs leave the event unresolved instead of falling back to text.
-  assert.equal(matchOne("One", album, { trackMbid: uuid(999) }).status, "unverified_track_id");
+  // An ID from another release falls back to text and is recorded; malformed IDs stay unresolved.
+  const foreign = matchOne("One", album, { trackMbid: uuid(999) });
+  assert.equal(foreign.trackId, uuid(1));
+  assert.deepEqual(foreign.rules, ["foreign_track_id"]);
+  assert.equal(matchOne("Unrelated", album, { trackMbid: uuid(999) }).status, "unmatched_track");
   assert.equal(matchOne("One", album, { trackMbid: "not-an-id" }).status, "unverified_track_id");
+  // An ID present as both a recording and a release-track ID stays unresolved.
+  const both = baseline([{ title: "One", recordingMbid: releaseTrack(2) }, "Two"]);
+  assert.equal(matchOne("One", both, { trackMbid: releaseTrack(2) }).status, "unverified_track_id");
   // Text that points only at another position contradicts an established ID.
   assert.equal(matchOne("Two", album, { trackMbid: recording(1) }).status, "identity_conflict");
   // An established unique ID identifies the position even when the text rules do not.
   assert.deepEqual(matchOne("One (2011 Stereo Mix)", album, { trackMbid: recording(1) }).rules, ["recording_id"]);
+});
+
+test("the approved mapping vouches for a differently spelled album artist", () => {
+  const album = baseline([{ title: "So What", artist: "이달의 소녀" }, { title: "Butterfly", artist: "이달의 소녀 feat. Guest" }, { title: "Other", artist: "Someone Else" }], { artistDisplayName: "이달의 소녀" });
+  const loona = [mapping("[#]", ALBUM, "Loona")];
+  const romanized = matchOne("So What", album, { artist: "Loona", album: "[#]" }, loona);
+  assert.equal(romanized.trackId, uuid(1));
+  assert.deepEqual(romanized.rules, ["mapped_album_artist"]);
+  assert.deepEqual(matchOne("Butterfly (feat. Guest)", album, { artist: "Loona", album: "[#]" }, loona).rules, ["featured_artist", "mapped_album_artist"]);
+  // Positions credited to someone other than the album artist still need their own credit.
+  assert.equal(matchOne("Other", album, { artist: "Loona", album: "[#]" }, loona).status, "unmatched_track");
+  // Without a baseline album credit, nothing is assumed.
+  const uncredited = baseline([{ title: "So What", artist: "이달의 소녀" }]);
+  assert.equal(matchOne("So What", uncredited, { artist: "Loona", album: "[#]" }, loona).status, "unmatched_track");
+  // Combined with a Last.fm ID from another release.
+  assert.deepEqual(matchOne("So What", album, { artist: "Loona", album: "[#]", trackMbid: uuid(777) }, loona).rules, ["foreign_track_id", "mapped_album_artist"]);
 });
 
 test("a recording shared by several positions is resolved only by text", () => {

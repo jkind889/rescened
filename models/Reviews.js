@@ -36,6 +36,12 @@ const reviewSchema = new mongoose.Schema({
   creationKey: { type: String, select: false, immutable: true },
 });
 
+// Server-only author kept on reviews after their account is deleted. The colon
+// places it outside Clerk's user ID format; serializers never expose it.
+const DELETED_AUTHOR_ID = "rescened:deleted-user";
+reviewSchema.statics.DELETED_AUTHOR_ID = DELETED_AUTHOR_ID;
+reviewSchema.statics.isDeletedAuthor = function isDeletedAuthor(userId) { return userId === DELETED_AUTHOR_ID; };
+
 reviewSchema.index({ albumCatalogId: 1, date: -1, _id: -1 });
 reviewSchema.index({ userId: 1, date: -1, _id: -1 });
 reviewSchema.index({ date: -1, _id: -1 });

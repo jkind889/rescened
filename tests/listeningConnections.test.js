@@ -32,12 +32,32 @@ function connection(overrides = {}) {
   };
 }
 
-function diaryModels() {
-  return [
-    ["boardListens", require("../models/BoardListen")],
-    ["listens", require("../models/Listen")],
-    ["listenCreations", require("../models/ListenCreation")],
-  ];
+// Stubs every model write account deletion performs and records it in order.
+function stubAccountModels(calls, { failOn } = {}) {
+  const names = {
+    Board: "../models/Board", BoardItem: "../models/BoardItem", BoardListen: "../models/BoardListen", Follow: "../models/Follow",
+    Like: "../models/Like", Listen: "../models/Listen", ListenCreation: "../models/ListenCreation",
+    Notification: "../models/Notification", Review: "../models/Reviews", UserProfile: "../models/UserProfile",
+  };
+  const restores = [];
+  for (const [name, path] of Object.entries(names)) {
+    const Model = require(path);
+    for (const method of ["deleteMany", "deleteOne", "updateMany"]) {
+      const original = Model[method];
+      restores.push(() => { Model[method] = original; });
+      Model[method] = async (filter, update, options) => {
+        const opts = method === "updateMany" ? options : update;
+        calls.push([`${name}.${method}`, filter, Boolean(opts?.session)]);
+        if (failOn === `${name}.${method}`) throw Object.assign(new Error("Transaction numbers are only allowed on a replica set member or mongos"), { code: 20 });
+        return { deletedCount: 0, modifiedCount: 0 };
+      };
+    }
+  }
+  const Board = require(names.Board);
+  const originalDistinct = Board.distinct;
+  restores.push(() => { Board.distinct = originalDistinct; });
+  Board.distinct = () => ({ session: async (session) => { calls.push(["Board.distinct", Boolean(session)]); return ["board-1"]; } });
+  return () => restores.forEach((restore) => restore());
 }
 
 function sessionFactory() {
@@ -231,14 +251,11 @@ test("Clerk user deletion webhook rejects unsigned requests and accepts a valid 
   const originalDeleteMany = Listening.AuthAttempt.deleteMany;
   const automatic = require("../models/AutomaticListen");
   const originalAutomatic = [automatic.AutomaticListenReceipt.deleteMany, automatic.DiaryAlbumFence.deleteMany];
-  const diary = diaryModels();
-  const originalDiary = diary.map(([, Model]) => Model.deleteMany);
   const automaticCleanup = [];
+  const accountCalls = [];
+  const restoreAccount = stubAccountModels(accountCalls);
   automatic.AutomaticListenReceipt.deleteMany = async (filter) => { automaticCleanup.push(["receipts", filter.userId]); return { deletedCount: 0 }; };
   automatic.DiaryAlbumFence.deleteMany = async (filter) => { automaticCleanup.push(["fences", filter.userId]); return { deletedCount: 0 }; };
-  for (const [name, Model] of diary) {
-    Model.deleteMany = async (filter, options) => { automaticCleanup.push([name, filter.userId, Boolean(options?.session)]); return { deletedCount: 0 }; };
-  }
   process.env.CLERK_WEBHOOK_SIGNING_SECRET = `whsec_${Buffer.from("synthetic-webhook-secret").toString("base64")}`;
   const response = () => ({ statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } });
   try {
@@ -257,37 +274,42 @@ test("Clerk user deletion webhook rejects unsigned requests and accepts a valid 
     await webhookRoute.handleWebhook({ method: "POST", url: "/", originalUrl: "/", headers: { "svix-id": id, "svix-timestamp": String(Math.floor(timestamp.getTime() / 1000)), "svix-signature": signature }, body: payload, connection: {} }, signed, { cleanupOptions: { sessionFactory } });
     assert.equal(signed.statusCode, 200);
     assert.equal(cleanupUser, "user_deleted");
-    assert.deepEqual(automaticCleanup, [
-      ["receipts", "user_deleted"], ["fences", "user_deleted"],
-      ["boardListens", "user_deleted", true], ["listens", "user_deleted", true], ["listenCreations", "user_deleted", true],
+    assert.deepEqual(automaticCleanup, [["receipts", "user_deleted"], ["fences", "user_deleted"]]);
+    const user = "user_deleted";
+    const userOrBoard = { $or: [{ userId: user }, { boardId: { $in: ["board-1"] } }] };
+    assert.deepEqual(accountCalls, [
+      ["Board.distinct", true],
+      ["BoardListen.deleteMany", userOrBoard, true],
+      ["Listen.deleteMany", { userId: user }, true],
+      ["ListenCreation.deleteMany", { userId: user }, true],
+      ["BoardItem.deleteMany", userOrBoard, true],
+      ["UserProfile.updateMany", { pinnedBoardId: { $in: ["board-1"] } }, true],
+      ["Board.deleteMany", { userId: user }, true],
+      ["Like.deleteMany", { userId: user }, true],
+      ["Follow.deleteMany", { $or: [{ followerId: user }, { followingId: user }] }, true],
+      ["Notification.deleteMany", { $or: [{ recipientUserId: user }, { actorUserId: user }] }, true],
+      ["UserProfile.deleteOne", { userId: user }, true],
+      ["Review.updateMany", { userId: user }, true],
     ]);
   } finally {
     Listening.Connection.find = originalFind;
     Listening.AuthAttempt.deleteMany = originalDeleteMany;
     [automatic.AutomaticListenReceipt.deleteMany, automatic.DiaryAlbumFence.deleteMany] = originalAutomatic;
-    diary.forEach(([, Model], index) => { Model.deleteMany = originalDiary[index]; });
+    restoreAccount();
     delete process.env.CLERK_WEBHOOK_SIGNING_SECRET;
   }
 });
 
-test("account cleanup aborts and reports unavailable when a diary delete cannot run in a transaction", async () => {
+test("account cleanup aborts and reports unavailable when an account-data write cannot run in a transaction", async () => {
   const automatic = require("../models/AutomaticListen");
   const originalAutomatic = [automatic.AutomaticListenReceipt.deleteMany, automatic.DiaryAlbumFence.deleteMany];
-  const diary = diaryModels();
-  const originalDiary = diary.map(([, Model]) => Model.deleteMany);
   const calls = [];
+  const restoreAccount = stubAccountModels(calls, { failOn: "Listen.deleteMany" });
   const noop = async () => ({ deletedCount: 0 });
   Listening.AuthAttempt.deleteMany = noop;
   automatic.AutomaticListenReceipt.deleteMany = noop;
   automatic.DiaryAlbumFence.deleteMany = noop;
-  for (const [name, Model] of diary) {
-    Model.deleteMany = async () => {
-      calls.push(name);
-      if (name === "listens") throw Object.assign(new Error("Transaction numbers are only allowed on a replica set member or mongos"), { code: 20 });
-      return { deletedCount: 0 };
-    };
-  }
-  Listening.Connection.find = async () => { throw new Error("connections must not be read after a failed diary delete"); };
+  Listening.Connection.find = async () => { throw new Error("connections must not be read after a failed account-data write"); };
   const session = { ...sessionFactory(), committed: false, aborted: false };
   session.commitTransaction = async () => { session.committed = true; };
   session.abortTransaction = async () => { session.aborted = true; };
@@ -296,11 +318,36 @@ test("account cleanup aborts and reports unavailable when a diary delete cannot 
       connections.cleanupUserData("user_deleted", { sessionFactory: () => session }),
       (error) => error.status === 503 && error.code === "LASTFM_CLEANUP_UNAVAILABLE",
     );
-    assert.deepEqual(calls, ["boardListens", "listens"]);
+    assert.deepEqual(calls.map(([name]) => name), ["Board.distinct", "BoardListen.deleteMany", "Listen.deleteMany"]);
     assert.equal(session.committed, false);
     assert.equal(session.aborted, true);
   } finally {
     [automatic.AutomaticListenReceipt.deleteMany, automatic.DiaryAlbumFence.deleteMany] = originalAutomatic;
-    diary.forEach(([, Model], index) => { Model.deleteMany = originalDiary[index]; });
+    restoreAccount();
+  }
+});
+
+test("account deletion anonymizes reviews with a server-only author and clears the private creation key", async () => {
+  const Review = require("../models/Reviews");
+  const { removeAccountData } = require("../lib/accountDeletion");
+  const calls = [];
+  const restoreAccount = stubAccountModels(calls);
+  const original = Review.updateMany;
+  let captured;
+  Review.updateMany = async (filter, update, options) => { captured = { filter, update, options }; return { modifiedCount: 1 }; };
+  try {
+    await assert.rejects(removeAccountData("user_deleted"), /transaction session/);
+    await removeAccountData("user_deleted", { id: "session" });
+    assert.deepEqual(captured.filter, { userId: "user_deleted" });
+    assert.deepEqual(captured.update, {
+      $set: { userId: Review.DELETED_AUTHOR_ID }, $unset: { creationKey: 1 }, $inc: { interactionRevision: 1 },
+    });
+    assert.equal(captured.options.overwriteImmutable, true);
+    assert.deepEqual(captured.options.session, { id: "session" });
+    assert.equal(Review.isDeletedAuthor(Review.DELETED_AUTHOR_ID), true);
+    assert.equal(Review.isDeletedAuthor("user_deleted"), false);
+  } finally {
+    Review.updateMany = original;
+    restoreAccount();
   }
 });

@@ -56,13 +56,17 @@ function AlbumReviewCard({
                 <div className="album-review-meta">
                     <p>
                         Review by{" "}
-                        <Link
-                            className="album-review-author-link"
-                            to={`/profile/${review.userId}`}
-                            state={profileState}
-                        >
-                            {username}
-                        </Link>
+                        {review.userId ? (
+                            <Link
+                                className="album-review-author-link"
+                                to={`/profile/${review.userId}`}
+                                state={profileState}
+                            >
+                                {username}
+                            </Link>
+                        ) : (
+                            <span className="album-review-author-link">{username}</span>
+                        )}
                     </p>
                     <span>{review.rating}/5</span>
                     <span>{formatReviewDate(review.date)}</span>

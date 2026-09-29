@@ -183,7 +183,7 @@ function ReviewDispatch({ review }) {
             </Link>
             <div className="front-review-copy">
                 <p>
-                    <Link to={`/profile/${review.userId}`}>{username}</Link>
+                    {review.userId ? <Link to={`/profile/${review.userId}`}>{username}</Link> : <span>{username}</span>}
                     <span>{formatRating(review.rating)}/5</span>
                     <span>{review.likeCount || 0} likes</span>
                 </p>

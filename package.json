@@ -27,6 +27,7 @@
     "check:catalog-contract": "node scripts/checkCatalogContract.js",
     "listening:study": "node scripts/lastfmStudy.js",
     "listening:worker": "node scripts/listeningWorker.js",
+    "listening:worker:dev": "node --env-file=.env scripts/listeningWorker.js",
     "listening:mapping-seeds": "node scripts/listeningMappingSeeds.js",
     "catalog:enrich-tracklists": "node scripts/enrichAlbumTracklists.js",
     "listening:metrics": "node scripts/listeningMetrics.js",

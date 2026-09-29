@@ -86,7 +86,7 @@ export function PopularReviews({ limit = 4 }) {
                         </Link>
                         <div>
                             <div className="front-review-meta">
-                                <Link to={`/profile/${review.userId}`}>{username}</Link>
+                                {review.userId ? <Link to={`/profile/${review.userId}`}>{username}</Link> : <span>{username}</span>}
                                 <span>{formatRatingStars(review.rating)}</span>
                                 <span>{formatReviewDate(review.date)}</span>
                             </div>
