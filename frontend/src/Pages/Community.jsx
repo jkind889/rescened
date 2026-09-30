@@ -1,19 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import SearchBar from "../Components/Searchbar";
 import {
     AlbumCover,
-    ArrowIcon,
     DispatchList,
     EmptySignal,
-    Masthead,
     RankedAlbumList,
     SignalPanel,
 } from "../features/home/SignalPanels";
+import { PeopleToFollow } from "../features/home/PeopleToFollow";
 import { fetchJson, formatShortDate, getAlbumId, settledArray, uniqueAlbums } from "../features/home/signals";
 import "../features/home/home.css";
 
-const EMPTY_SIGNALS = { featured: [], popular: [], recent: [], reviews: [], catalog: [] };
+const EMPTY_SIGNALS = { featured: [], popular: [], recent: [], reviews: [] };
 
 function useCommunitySignals() {
     const [signals, setSignals] = useState(EMPTY_SIGNALS);
@@ -23,31 +21,24 @@ function useCommunitySignals() {
         const controller = new AbortController();
 
         async function fetchSignals() {
-            setStatus("loading");
             const options = { signal: controller.signal };
             const results = await Promise.allSettled([
                 fetchJson("/reviews/featured?limit=10", options),
                 fetchJson("/reviews/popular?limit=5&window=30d", options),
                 fetchJson("/reviews/recent-albums?limit=6", options),
                 fetchJson("/reviews/popular-reviews?limit=4", options),
-                fetchJson("/albums/catalog?page=1&limit=12", options),
             ]);
 
             if (controller.signal.aborted) {
                 return;
             }
 
-            const [featured, popular, recent, reviews, catalog] = results;
-            const catalogRows = catalog.status === "fulfilled" && Array.isArray(catalog.value)
-                ? catalog.value
-                : settledArray(catalog, "results");
-
+            const [featured, popular, recent, reviews] = results;
             setSignals({
                 featured: settledArray(featured),
                 popular: settledArray(popular),
                 recent: settledArray(recent),
                 reviews: settledArray(reviews),
-                catalog: catalogRows,
             });
             setStatus(results.some((result) => result.status === "fulfilled") ? "ready" : "error");
         }
@@ -85,21 +76,17 @@ function LeadAlbum({ album, isLoading }) {
 export function Community() {
     const { signals, status } = useCommunitySignals();
     const isLoading = status === "loading";
-    const discoveryAlbums = useMemo(() => uniqueAlbums([
+    const leadAlbum = useMemo(() => uniqueAlbums([
         ...signals.featured,
         ...signals.popular,
         ...signals.recent,
-        ...signals.catalog,
-    ]), [signals]);
+    ])[0], [signals]);
 
     return (
-        <div className="home-page community-signals-page">
+        <div className="home-page home-page-open community-signals-page">
             <div className="home-rail">
-                <LeadAlbum album={discoveryAlbums[0]} isLoading={isLoading} />
-                <Masthead edition="Community Signals" reference={discoveryAlbums.length} />
-                <Link to="/community/approved" className="home-community-link">
-                    Recently approved catalog suggestions <ArrowIcon />
-                </Link>
+                <LeadAlbum album={leadAlbum} isLoading={isLoading} />
+                <PeopleToFollow />
             </div>
 
             <div className="home-feed">
@@ -136,26 +123,6 @@ export function Community() {
                         <DispatchList reviews={signals.reviews.slice(0, 3)} />
                     ) : (
                         <EmptySignal>{isLoading ? "Gathering review dispatches..." : "No popular reviews yet."}</EmptySignal>
-                    )}
-                </SignalPanel>
-
-                <SignalPanel
-                    id="community-catalog-title"
-                    title="Catalog index"
-                    action={<div className="signal-panel-search"><SearchBar placeholder="Search catalog" /></div>}
-                >
-                    {signals.catalog.length ? (
-                        <div className="signal-index-list">
-                            {signals.catalog.slice(0, 8).map((album) => (
-                                <Link to={`/album/${getAlbumId(album)}`} key={getAlbumId(album)}>
-                                    <span>{album.title || "Untitled album"}</span>
-                                    <small>{album.artistDisplayName || "Unknown artist"}</small>
-                                    <em>{album.releaseYear || "----"}</em>
-                                </Link>
-                            ))}
-                        </div>
-                    ) : (
-                        <EmptySignal>{isLoading ? "Reading the catalog..." : "No catalog albums yet."}</EmptySignal>
                     )}
                 </SignalPanel>
             </div>

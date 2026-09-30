@@ -230,31 +230,38 @@
   font-size: 1.04em;
 }
 
-/* Home: listening log and masthead on the left, circle feed on the right. */
+/*
+ * Open layout (home and Community): rail on the left, unboxed feed panels on
+ * the right against the page edge.
+ */
 
-.home-page-circle {
+.home-page-open {
   grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
 }
 
-.home-page-circle .home-feed {
+.home-page-open .home-feed {
   justify-self: end;
 }
 
 /* No panel boxes on the home feed: content sits flush on the page. */
-.home-page-circle .signal-panel {
+.home-page-open .signal-panel {
   padding: 0 0 20px;
   border-bottom: 0;
   background: transparent;
 }
 
 /* Left side: the log, reaching from the edge to about the middle. */
-.home-page-circle .home-rail {
+.home-page-open .home-rail {
   justify-self: stretch;
   padding-right: clamp(0px, 6vw, 120px);
 }
 
-.home-page-circle .listening-log {
+.home-page-open .listening-log {
   width: 100%;
+}
+
+.home-page-open .home-rail > .signal-panel {
+  width: min(100%, 520px);
 }
 
 /* Right feed */
@@ -315,10 +322,6 @@
 .home-community-link:hover,
 .home-community-link:focus-visible {
   color: var(--app-accent);
-}
-
-.signal-panel-search {
-  width: min(100%, 220px);
 }
 
 .signal-empty {
@@ -454,6 +457,58 @@
   color: var(--app-bg);
 }
 
+button.signal-queue-action {
+  background: transparent;
+  color: inherit;
+  font-family: var(--app-font);
+  line-height: inherit;
+}
+
+.signal-queue-action.is-active {
+  border-color: var(--app-text);
+  background: var(--app-text);
+  color: var(--app-bg);
+}
+
+.signal-queue-action:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+/* People to follow */
+
+.signal-people li {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--home-panel-line);
+}
+
+.signal-person {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.signal-person-avatar {
+  display: block;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--app-surface-strong);
+}
+
+.signal-person:hover strong,
+.signal-person:focus-visible strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 /* Review dispatches */
 
 .signal-dispatch-list {
@@ -550,40 +605,6 @@
   text-underline-offset: 3px;
 }
 
-/* Catalog index (Community) */
-
-.signal-index-list {
-  display: grid;
-}
-
-.signal-index-list a {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
-  gap: 1rem;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--home-panel-line);
-  font-size: 0.72rem;
-}
-
-.signal-index-list span,
-.signal-index-list small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.signal-index-list small,
-.signal-index-list em {
-  color: var(--app-muted);
-  font-size: 0.72rem;
-  font-style: normal;
-}
-
-.signal-index-list a:hover span {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
 /* Community lead album */
 
 .community-lead {
@@ -653,7 +674,7 @@ a.community-lead:hover strong {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .home-page-circle .home-rail {
+  .home-page-open .home-rail {
     grid-template-columns: minmax(0, 1fr);
     padding-right: 0;
   }
@@ -701,13 +722,5 @@ a.community-lead:hover strong {
 
   .signal-panel-header {
     flex-wrap: wrap;
-  }
-
-  .signal-index-list a {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .signal-index-list small {
-    display: none;
   }
 }

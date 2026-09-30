@@ -95,7 +95,10 @@ function Navbar()
                                     <SiteNavLink to="/boards" current={isCurrent("/boards")}>Boards</SiteNavLink>
                                 </li>
                                 <li>
-                                    <SiteNavLink to="/community" current={isCurrent("/community")}>Community</SiteNavLink>
+                                    <SiteNavLink to="/community" current={location.pathname === "/community"}>Community</SiteNavLink>
+                                </li>
+                                <li>
+                                    <SiteNavLink to="/community/approved" current={isCurrent("/community/approved")}>Approved</SiteNavLink>
                                 </li>
                                 <li>
                                     <SiteNavLink to="/patch-notes" current={isCurrent("/patch-notes")}>Patch notes</SiteNavLink>

@@ -81,7 +81,7 @@ export function FrontPage() {
     ]).length;
 
     return (
-        <div className="home-page home-page-circle">
+        <div className="home-page home-page-open">
             <div className="home-rail">
                 <Masthead edition="Circle Signals" reference={reference} />
                 <ListeningLog listens={signals.listens} isSignedIn={isSignedIn} isLoading={isLoading} />
