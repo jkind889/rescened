@@ -124,6 +124,8 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
   const targetKey = `${kind}:${id || ""}`;
   useEffect(() => {
     onBusyChange?.(candidateLoading || command.pending);
+    // An unmounted panel must not leave its parent blocked on a lookup it can no longer finish.
+    return () => onBusyChange?.(false);
   }, [candidateLoading, command.pending, onBusyChange]);
   const runRequest = useCallback(async (url, options, fallback) => {
     const token = await getToken();
@@ -160,12 +162,22 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
     setRecommendation(null);
     setCandidateError(null);
     setCandidateOffset("");
+    // Aborted provider requests skip their own loading reset, so clear it here.
+    setCandidateLoading(false);
+    setGroupLoading(false);
     loadDetail(controller.signal);
     return () => {
       controller.abort();
       providerController.current?.abort();
     };
   }, [loadDetail, targetKey]);
+
+  // Parents reuse one panel across targets; a reason written for one must not submit for another.
+  useEffect(() => {
+    setReason("");
+    setReleaseInput("");
+    setGroupResults([]);
+  }, [targetKey]);
 
   const flags = detail?.flags || {};
   const hasBaseline = Boolean(detail?.activeBaseline);

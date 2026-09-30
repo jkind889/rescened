@@ -81,6 +81,8 @@ const scrobbleSchema = new mongoose.Schema({
 }, { timestamps: true });
 scrobbleSchema.index({ connectionId: 1, identityKey: 1 }, { unique: true });
 scrobbleSchema.index({ artistKey: 1, albumKey: 1, resolution: 1 });
+// Owner event pages sort one connection's scrobbles newest first.
+scrobbleSchema.index({ connectionId: 1, playedAt: -1, _id: -1 });
 
 const mappingCaseSchema = new mongoose.Schema({
   caseId: uuid,
@@ -122,6 +124,8 @@ const albumMappingSchema = new mongoose.Schema({
   workerFence: { type: String, default: "", select: false },
 }, { timestamps: true });
 albumMappingSchema.index({ artistKey: 1, albumKey: 1, status: 1 });
+// The worker's stale-mapping pass scans active mappings.
+albumMappingSchema.index({ status: 1 });
 
 const mappingAuditSchema = new mongoose.Schema({
   auditId: uuid,
@@ -147,6 +151,8 @@ const jobSchema = new mongoose.Schema({
   error: { type: String, default: "" },
 }, { timestamps: true });
 jobSchema.index({ status: 1, runAt: 1, leaseUntil: 1 });
+// Connection cleanup retires that connection's other jobs.
+jobSchema.index({ "payload.connectionId": 1 }, { sparse: true });
 
 // Private detected sessions. Never serialized into public activity.
 const DETECTION_HOLDS = ["sync_incomplete", "stale_baseline", "stale_mapping", "stale_rule", "evidence_expired", "reconciliation_required"];
@@ -205,6 +211,10 @@ const detectionSchema = new mongoose.Schema({
 }, { timestamps: true });
 detectionSchema.index({ connectionId: 1, eventIds: 1 });
 detectionSchema.index({ userId: 1, startedAt: -1 });
+// Owner detection pages sort one connection's sessions newest first.
+detectionSchema.index({ connectionId: 1, startedAt: -1, _id: -1 });
+// The worker polls for plays whose credited evidence has expired.
+detectionSchema.index({ "plays.evidenceExpiresAt": 1 });
 
 const detectionEvidenceSchema = new mongoose.Schema({
   sessionId: { type: String, required: true, index: true },

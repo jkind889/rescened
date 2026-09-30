@@ -31,4 +31,7 @@ const userProfileSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// Board and account deletion unpin every profile that pinned a removed board.
+userProfileSchema.index({ pinnedBoardId: 1 });
+
 module.exports = mongoose.model("UserProfile", userProfileSchema);

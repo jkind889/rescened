@@ -45,6 +45,8 @@ reviewSchema.statics.isDeletedAuthor = function isDeletedAuthor(userId) { return
 reviewSchema.index({ albumCatalogId: 1, date: -1, _id: -1 });
 reviewSchema.index({ userId: 1, date: -1, _id: -1 });
 reviewSchema.index({ date: -1, _id: -1 });
+// "Has this user reviewed this album" lookups, e.g. the unreviewed-listens queue.
+reviewSchema.index({ userId: 1, albumCatalogId: 1 });
 reviewSchema.index(
   { userId: 1, creationKey: 1 },
   { unique: true, partialFilterExpression: { creationKey: { $type: "string" } } },

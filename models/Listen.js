@@ -17,5 +17,7 @@ const schema = new mongoose.Schema({
 
 schema.index({ userId: 1, listenedOn: -1, createdAt: -1, _id: -1 });
 schema.index({ userId: 1, albumCatalogId: 1, listenedOn: -1, createdAt: -1, _id: -1 });
+// Network and profile activity order listens by creation across many users.
+schema.index({ userId: 1, createdAt: -1, _id: -1 });
 
 module.exports = mongoose.model("Listen", schema);
