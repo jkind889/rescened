@@ -172,6 +172,20 @@ export default function AlbumMappings() {
     return () => controller.abort();
   }, [caseId, getToken, isLoaded, isSignedIn]);
 
+  // A baseline confirmation can fill empty tracks and advance the album's catalog
+  // revision. Carry that revision into the candidates so approval is checked
+  // against the revision the moderator is now looking at.
+  const handleBaselineStateChange = useCallback((baseline) => {
+    const albumId = baseline?.target?.kind === "albums" ? baseline.target.id : "";
+    const revision = Number(baseline?.target?.catalogRevision);
+    if (albumId && Number.isSafeInteger(revision) && revision > 0) {
+      const update = (candidate) => (candidate.albumId === albumId ? { ...candidate, catalogRevision: revision } : candidate);
+      setDetail((current) => (current?.case ? { ...current, case: { ...current.case, candidates: (current.case.candidates || []).map(update) } } : current));
+      setCatalogResults((current) => current.map(update));
+    }
+    loadQueue();
+  }, [loadQueue]);
+
   const selectedCase = detail?.case || null;
   const candidates = useMemo(() => Array.isArray(selectedCase?.candidates) ? selectedCase.candidates : [], [selectedCase]);
 
@@ -293,7 +307,7 @@ export default function AlbumMappings() {
               <section className="mapping-detail-section"><h3>Search existing catalog</h3><p className="mapping-muted">Search by the observed album title independently of its artist credit. This helps review aliases such as LOONA and 이달의 소녀.</p><form className="mapping-catalog-search" onSubmit={searchCatalog}><input aria-label="Search existing catalog" onChange={(event) => setCatalogQuery(event.target.value)} placeholder="Album or artist" value={catalogQuery} /><button className="community-secondary-button" disabled={catalogLoading} type="submit">{catalogLoading ? "Searching…" : "Search"}</button><button className="community-text-button" disabled={catalogLoading} onClick={(event) => searchCatalog(event, true)} type="button">Search observed title</button></form>{catalogResults.length > 0 ? <div className="mapping-candidate-list">{catalogResults.map((candidate) => <button className="mapping-catalog-result" key={candidate.albumId} onClick={() => setSelectedAlbumId(candidate.albumId)} type="button"><strong>{candidateLabel(candidate)}</strong><small>{candidate.albumId} · catalog rev. {candidate.catalogRevision || "?"}</small></button>)}</div> : null}</section>
               <section className="mapping-detail-section"><h3>Provider evidence</h3><Evidence evidence={selectedCase.evidence} /></section>
               {detail?.mapping ? <section className="mapping-detail-section"><h3>Current mapping</h3><p>{candidateLabel(detail.mapping)} · {formatMappingStatus(detail.mapping.status)}</p><p className="mapping-muted">Reviewed catalog revision {detail.mapping.catalogRevision || "unknown"}. Baseline tracklist availability is reviewed separately.</p></section> : null}
-              {selectedAlbumId ? <BaselineReviewPanel compact id={selectedAlbumId} kind="albums" onBusyChange={setBaselineBusy} onStateChange={() => loadQueue()} target={catalogResults.find((candidate) => candidate.albumId === selectedAlbumId) || candidates.find((candidate) => candidate.albumId === selectedAlbumId) || null} /> : null}
+              {selectedAlbumId ? <BaselineReviewPanel compact id={selectedAlbumId} kind="albums" onBusyChange={setBaselineBusy} onStateChange={handleBaselineStateChange} target={catalogResults.find((candidate) => candidate.albumId === selectedAlbumId) || candidates.find((candidate) => candidate.albumId === selectedAlbumId) || null} /> : null}
               <form className="mapping-decision-form" onSubmit={applyAction}><label>Decision<select value={action} onChange={(event) => setAction(event.target.value)}>{ACTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Decision reason<textarea maxLength={1000} onChange={(event) => setReason(event.target.value)} placeholder="Explain the evidence and decision." required rows="4" value={reason} /></label>{command.error ? <p className="community-message community-message-error" role="alert">{command.error.message}{command.error.code ? <code>{command.error.code}</code> : null}</p> : null}{command.success ? <p className="community-message community-message-success" role="status">{command.success}</p> : null}<button className="community-primary-button" disabled={command.pending} type="submit">{command.pending ? "Saving decision…" : "Save decision"}</button></form>
               {Array.isArray(detail?.history) && detail.history.length > 0 ? <section className="mapping-detail-section"><h3>Decision history</h3><div className="mapping-history">{detail.history.map((entry, index) => <article key={`${entry.revision || index}-${entry.action || "event"}`}><strong>{formatMappingStatus(entry.action)}</strong><span>{entry.reason || "No reason supplied"}</span><time>{formatLastfmDate(entry.createdAt || entry.at)}</time></article>)}</div></section> : null}
             </div>

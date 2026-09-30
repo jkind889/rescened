@@ -882,7 +882,7 @@ export function Account() {
           const actorName = actor.username || "rescened user";
           const actionLabelByType = {
             saved_album: "Saved",
-            listen: "Listened",
+            listen: activity.source === "automatic" ? "Listened · Automatic" : "Listened",
             review: "Reviewed",
             liked_album: "Liked",
             liked_review: "Liked",
@@ -1373,7 +1373,7 @@ export function Account() {
                         const targetUser = activity.targetUser || {};
                         const actionLabelByType = {
                           saved_album: "Saved",
-                          listen: "Listened",
+                          listen: activity.source === "automatic" ? "Listened · Automatic" : "Listened",
                           review: "Reviewed",
                           liked_album: "Liked",
                           liked_review: "Liked",
