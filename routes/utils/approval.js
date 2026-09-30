@@ -498,9 +498,16 @@ async function approveCatalogCorrection({ preliminary, submissionId, actorUserId
         catalogRevision: baselineRevision + 1,
       };
       validateCatalogDocument(candidate, { existingId: plain(target)._id });
+      // Albums written before revisions were tracked have no stored field and
+      // count as revision 1, so match that shape and set the next revision
+      // explicitly; $inc on a missing field would leave it at 1.
       const updatedAlbum = await AlbumCatalog.findOneAndUpdate(
-        { _id: plain(target)._id, albumId: plain(target).albumId, catalogRevision: baselineRevision },
-        { $set: patch, $inc: { catalogRevision: 1 } },
+        {
+          _id: plain(target)._id,
+          albumId: plain(target).albumId,
+          catalogRevision: baselineRevision === 1 ? { $in: [null, 1] } : baselineRevision,
+        },
+        { $set: { ...patch, catalogRevision: baselineRevision + 1 } },
         { returnDocument: "after", runValidators: true, session },
       );
       if (!updatedAlbum) throw new ModerationConflictError("Catalog album changed while the correction was being applied", "CATALOG_CHANGED");

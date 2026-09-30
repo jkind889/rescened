@@ -487,12 +487,16 @@ async function processAlbum(album, { options, dependencies, Model, resolver, con
 
   if (!options.apply || referenceConflict) return result;
 
+  // Albums written before revisions were tracked have no stored field and
+  // count as revision 1, so set the next revision explicitly; $inc on a
+  // missing field would leave it at 1 and the carry below would find nothing.
+  const fromRevision = catalogRevisionOf(plain(album));
   const update = {
     $set: {
       cover: resolution.cover,
       "fieldProvenance.cover": resolution.provenance,
+      catalogRevision: fromRevision + 1,
     },
-    $inc: { catalogRevision: 1 },
   };
   if (appendReference) update.$addToSet = { externalReferences: reference };
   let writeResult;
@@ -528,7 +532,6 @@ async function processAlbum(album, { options, dependencies, Model, resolver, con
   // both stay stale (fail closed) until they are re-reviewed.
   const carry = dependencies.carryCoverRevision || (Model === AlbumCatalog ? carryCoverRevision : null);
   if (carry && base.albumId) {
-    const fromRevision = catalogRevisionOf(plain(album));
     try {
       const carried = await carry({ albumId: base.albumId, fromRevision, toRevision: fromRevision + 1, now: context.now() });
       result.baselineCarried = Boolean(carried?.baselineCarried);

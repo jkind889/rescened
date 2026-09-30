@@ -257,7 +257,6 @@ test("correction approval patches selected fields once and records the applicati
   AlbumCatalog.find = () => chain([album]);
   AlbumCatalog.findOneAndUpdate = async (_query, update) => {
     Object.assign(album, update.$set);
-    album.catalogRevision += update.$inc.catalogRevision;
     return album;
   };
   mongoose.startSession = async () => ({

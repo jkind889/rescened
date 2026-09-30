@@ -60,6 +60,8 @@ async function mockedProviderBackfillTest() {
     externalReferences: [{ provider: "barcode", entityType: "release", externalId: BARCODE }],
     catalogSource: "import",
   });
+  // Most imported albums predate revision tracking and store no catalogRevision.
+  await AlbumCatalog.collection.updateOne({ _id: target._id }, { $unset: { catalogRevision: "" } });
   const manual = await AlbumCatalog.create({
     albumId: crypto.randomUUID(),
     title: "Manual Cover Album",
