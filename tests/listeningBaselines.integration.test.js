@@ -171,3 +171,67 @@ test('a baseline that fills empty tracks before mapping review does not block ap
     names.forEach((name, index) => { if (previous[index] === undefined) delete process.env[name]; else process.env[name] = previous[index]; });
   }
 });
+
+test('a mapping stranded by a catalog change is flagged, then reconfirmed at the current revision', { skip: !enabled }, async () => {
+  const repl = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
+  const names = ['COMMUNITY_MODERATION_ENABLED', 'MODERATOR_USER_IDS'];
+  const previous = names.map((name) => process.env[name]);
+  process.env.COMMUNITY_MODERATION_ENABLED = 'true'; process.env.MODERATOR_USER_IDS = 'moderator';
+  try {
+    await mongoose.connect(repl.getUri(), { dbName: 'listening_reconfirm_test' });
+    await Promise.all([AlbumCatalog, Listen, ...Object.values(Listening), ...Object.values(Baselines)].map((model) => model.init()));
+    const { detail, listCases, moderate } = require('../lib/listening/moderation');
+    const now = new Date();
+    const album = await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: 'Pilot', artistDisplayName: 'Artist', releaseType: 'album', catalogRevision: 1 });
+    const conn = await Listening.Connection.create({ userId: 'reconfirm-listener', username: 'fixture', usernameKey: 'fixture', state: 'active', revision: 1, connectedAt: now, windows: [{ start: now }] });
+    await Listening.Scrobble.create({ connectionId: conn._id, connectionRevision: 1, identityKey: 'fixture', artist: 'Artist', album: 'Pilot', track: 'One', artistKey: normalize('Artist'), albumKey: normalize('Pilot'), trackKey: normalize('One'), playedAt: now, expiresAt: new Date(now.getTime() + 86400000), resolution: 'unresolved', albumId: '', baselineAvailable: false });
+    const key = mappingKey('Artist', 'Pilot'); const caseId = crypto.randomUUID();
+    await Listening.MappingCase.create({ caseId, key, artist: 'Artist', album: 'Pilot', artistKey: normalize('Artist'), albumKey: normalize('Pilot'), status: 'pending', revision: 1, encounterCount: 1, candidates: [{ albumId: album.albumId, title: 'Pilot', artistDisplayName: 'Artist', catalogRevision: 1, evidence: [] }] });
+    await moderate(caseId, 'approve', { expectedRevision: 1, albumId: album.albumId, expectedCatalogRevision: 1, reason: 'Same album' }, 'moderator');
+    const worker = (offset) => runWorkerOnce({ types: ['reprocess'], ownerExists: async () => true, env: {}, clock: () => new Date(Date.now() + offset) });
+    await worker(1000);
+    assert.equal((await listEvents({ userId: conn.userId })).items[0].resolution, 'matched');
+    assert.equal((await listCases({ status: 'approved' })).items[0].mappingStale, false);
+    assert.equal((await listCases({ stale: true })).items.length, 0);
+    await assert.rejects(moderate(caseId, 'reconfirm', { expectedRevision: 2, expectedCatalogRevision: 1, reason: 'Nothing changed' }, 'moderator'), (error) => error.code === 'MAPPING_NOT_STALE');
+
+    // An identity-relevant correction (not a cover or tracklist fill) strands the mapping.
+    await AlbumCatalog.updateOne({ albumId: album.albumId }, { $set: { title: 'Pilot (Remastered)', catalogRevision: 2 } });
+    await scheduleStaleMappingJobs();
+    await worker(2000);
+    assert.equal((await listEvents({ userId: conn.userId })).items[0].resolution, 'unavailable');
+    const stale = await listCases({ stale: true });
+    assert.deepEqual(stale.items.map((item) => [item.caseId, item.mappingStale]), [[caseId, true]]);
+    const flagged = await detail(caseId);
+    assert.equal(flagged.mapping.stale, true);
+    assert.equal(flagged.mapping.catalogRevision, 1);
+    assert.equal(flagged.mapping.currentCatalogRevision, 2);
+
+    // Only a moderator re-review moves it forward, against the revision they saw.
+    await assert.rejects(moderate(caseId, 'reconfirm', { expectedRevision: 2, reason: 'Missing revision' }, 'moderator'), (error) => error.code === 'INVALID_REVISION');
+    await assert.rejects(moderate(caseId, 'reconfirm', { expectedRevision: 2, expectedCatalogRevision: 2, albumId: album.albumId, reason: 'Retarget' }, 'moderator'), (error) => error.code === 'INVALID_REQUEST');
+    await assert.rejects(moderate(caseId, 'reconfirm', { expectedRevision: 2, expectedCatalogRevision: 1, reason: 'Old view' }, 'moderator'), (error) => error.code === 'CATALOG_REVISION_CONFLICT');
+    await assert.rejects(moderate(caseId, 'approve', { expectedRevision: 2, albumId: album.albumId, expectedCatalogRevision: 2, reason: 'Approve again' }, 'moderator'), (error) => error.code === 'STATE_CONFLICT');
+    const reconfirmed = await moderate(caseId, 'reconfirm', { expectedRevision: 2, expectedCatalogRevision: 2, reason: 'Remaster label only; same release' }, 'moderator');
+    assert.equal(reconfirmed.case.status, 'approved');
+    assert.equal(reconfirmed.case.revision, 3);
+    assert.equal(reconfirmed.mapping.stale, false);
+    assert.equal(reconfirmed.mapping.catalogRevision, 2);
+    assert.equal(reconfirmed.mapping.revision, 2);
+    assert.equal(reconfirmed.mapping.albumId, album.albumId);
+    assert.deepEqual(reconfirmed.history.map((entry) => entry.action), ['approved', 'reconfirmed']);
+    const audit = await Listening.MappingAudit.findOne({ caseId, action: 'reconfirmed' }).lean();
+    assert.equal(audit.details.previous.catalogRevision, 1);
+    assert.equal(audit.details.selected.catalogRevision, 2);
+    assert.equal((await listCases({ stale: true })).items.length, 0);
+
+    await worker(3000);
+    assert.equal((await listEvents({ userId: conn.userId })).items[0].resolution, 'matched');
+    await assert.rejects(moderate(caseId, 'reconfirm', { expectedRevision: 2, expectedCatalogRevision: 2, reason: 'Replay' }, 'moderator'), (error) => error.code === 'REVISION_CONFLICT');
+    assert.equal(await Listen.countDocuments({}), 0);
+  } finally {
+    await mongoose.disconnect();
+    await repl.stop();
+    names.forEach((name, index) => { if (previous[index] === undefined) delete process.env[name]; else process.env[name] = previous[index]; });
+  }
+});

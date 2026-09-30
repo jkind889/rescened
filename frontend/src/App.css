@@ -9920,6 +9920,11 @@ label.moderation-candidate-choice {
   color: var(--app-soft);
 }
 
+.mapping-queue-topline .mapping-stale-badge {
+  border-color: #d7a85c;
+  color: #e6bd78;
+}
+
 .mapping-load-more {
   width: 100%;
 }

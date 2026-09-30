@@ -40,9 +40,9 @@ function errorResponse(res, error) {
   return res.status(status).json({ error: code, code });
 }
 function parseListQuery(req) {
-  const allowed = new Set(["status", "priority", "cursor", "limit"]);
+  const allowed = new Set(["status", "priority", "stale", "cursor", "limit"]);
   Object.keys(req.query || {}).forEach((key) => { if (!allowed.has(key)) { const error = new Error("INVALID_REQUEST"); error.code = "INVALID_REQUEST"; error.status = 400; throw error; } });
-  for (const key of ["status", "priority", "cursor", "limit"]) {
+  for (const key of ["status", "priority", "stale", "cursor", "limit"]) {
     if (req.query?.[key] !== undefined && typeof req.query[key] !== "string") {
       const error = new Error("INVALID_REQUEST"); error.code = "INVALID_REQUEST"; error.status = 400; throw error;
     }
@@ -53,8 +53,10 @@ function parseListQuery(req) {
   if (cursor && cursor.length > 512) { const error = new Error("INVALID_CURSOR"); error.code = "INVALID_CURSOR"; error.status = 400; throw error; }
   if (status && status.length > 32) { const error = new Error("INVALID_STATUS"); error.code = "INVALID_STATUS"; error.status = 400; throw error; }
   if (priority && priority.length > 16) { const error = new Error("INVALID_PRIORITY"); error.code = "INVALID_PRIORITY"; error.status = 400; throw error; }
+  if (req.query?.stale !== undefined && req.query.stale !== "true") { const error = new Error("INVALID_STALE"); error.code = "INVALID_STALE"; error.status = 400; throw error; }
+  const stale = req.query?.stale === "true";
   const limit = req.query?.limit === undefined ? undefined : Number(req.query.limit);
-  return { status, priority, cursor, limit };
+  return { status, priority, stale, cursor, limit };
 }
 
 router.get("/", authenticate, moderatorOnly, async (req, res) => {
@@ -87,6 +89,7 @@ router.post("/:caseId/approve", authenticate, moderatorOnly, moderationEnabled, 
 router.post("/:caseId/reject", authenticate, moderatorOnly, moderationEnabled, mutationRateLimit, (req, res) => command(req, res, "reject"));
 router.post("/:caseId/no-catalog-match", authenticate, moderatorOnly, moderationEnabled, mutationRateLimit, (req, res) => command(req, res, "no-catalog-match"));
 router.post("/:caseId/refresh", authenticate, moderatorOnly, moderationEnabled, mutationRateLimit, (req, res) => command(req, res, "refresh"));
+router.post("/:caseId/reconfirm", authenticate, moderatorOnly, moderationEnabled, mutationRateLimit, (req, res) => command(req, res, "reconfirm"));
 router.post("/:caseId/revoke", authenticate, moderatorOnly, moderationEnabled, mutationRateLimit, (req, res) => command(req, res, "revoke"));
 
 module.exports = router;

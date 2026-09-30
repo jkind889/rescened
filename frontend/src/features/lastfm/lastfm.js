@@ -37,6 +37,7 @@ export function formatMappingStatus(value) {
     no_catalog_match: "No catalog match",
     active: "Active",
     revoked: "Revoked",
+    reconfirmed: "Reconfirmed",
   };
   return labels[value] || String(value || "Unknown").replaceAll("_", " ");
 }

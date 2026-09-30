@@ -84,3 +84,7 @@ test("evidence links reject javascript and credential-bearing URLs", () => {
   assert.equal("sourceLink" in result.evidence[1], false);
   assert.equal(result.evidence[2].sourceLink, "https://musicbrainz.org/release-group/abc");
 });
+
+test("stale queue filtering accepts only a boolean", async () => {
+  await assert.rejects(moderation.listCases({ stale: "yes" }), (error) => error.code === "INVALID_STALE");
+});

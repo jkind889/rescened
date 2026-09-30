@@ -23,6 +23,7 @@ const ACTIONS = [
   { value: "reject", label: "Reject case" },
   { value: "no-catalog-match", label: "No catalog match" },
   { value: "refresh", label: "Request refreshed evidence" },
+  { value: "reconfirm", label: "Reconfirm at current catalog revision" },
   { value: "revoke", label: "Revoke mapping" },
 ];
 
@@ -91,6 +92,7 @@ export default function AlbumMappings() {
   const navigate = useNavigate();
   const [status, setStatus] = useState("pending");
   const [priorityOnly, setPriorityOnly] = useState(false);
+  const [staleOnly, setStaleOnly] = useState(false);
   const [items, setItems] = useState([]);
   const [nextCursor, setNextCursor] = useState("");
   const [queueLoading, setQueueLoading] = useState(true);
@@ -119,7 +121,7 @@ export default function AlbumMappings() {
     try {
       const token = await getToken();
       const data = await requestLastfmJson(
-        lastfmUrl(ALBUM_MAPPING_PATH, { status, cursor, priority: priorityOnly ? "high" : "" }),
+        lastfmUrl(ALBUM_MAPPING_PATH, { status, cursor, priority: priorityOnly ? "high" : "", stale: staleOnly ? "true" : "" }),
         { headers: { Authorization: `Bearer ${token}` } },
         "The album mapping queue could not be loaded.",
       );
@@ -134,7 +136,7 @@ export default function AlbumMappings() {
       setQueueLoading(false);
       setQueueLoadingMore(false);
     }
-  }, [getToken, isLoaded, isSignedIn, priorityOnly, status]);
+  }, [getToken, isLoaded, isSignedIn, priorityOnly, staleOnly, status]);
 
   useEffect(() => {
     loadQueue();
@@ -223,6 +225,10 @@ export default function AlbumMappings() {
       setCommand((current) => ({ ...current, error: { message: "A decision reason is required.", code: "REASON_REQUIRED" } }));
       return;
     }
+    if (action === "reconfirm" && !detail?.mapping?.stale) {
+      setCommand((current) => ({ ...current, error: { message: "Only a mapping whose album changed since review can be reconfirmed.", code: "MAPPING_NOT_STALE" } }));
+      return;
+    }
     if (action === "approve" && !selectedAlbumId) {
       setCommand((current) => ({ ...current, error: { message: "Select an existing catalog album before approving.", code: "ALBUM_REQUIRED" } }));
       return;
@@ -243,6 +249,7 @@ export default function AlbumMappings() {
             expectedRevision: selectedCase.revision,
             reason: reason.trim(),
             ...(action === "approve" ? { albumId: selectedAlbumId, ...(expectedCatalogRevision === undefined ? {} : { expectedCatalogRevision }) } : {}),
+            ...(action === "reconfirm" ? { expectedCatalogRevision: detail.mapping.currentCatalogRevision } : {}),
           }),
         },
         "The mapping decision could not be applied.",
@@ -286,11 +293,12 @@ export default function AlbumMappings() {
           <div className="mapping-filter-row">
             <label>Review status<select value={status} onChange={(event) => setStatus(event.target.value)}>{STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
             <label className="mapping-checkbox"><input checked={priorityOnly} onChange={(event) => setPriorityOnly(event.target.checked)} type="checkbox" /> High encounter priority</label>
+            <label className="mapping-checkbox"><input checked={staleOnly} onChange={(event) => setStaleOnly(event.target.checked)} type="checkbox" /> Album changed since review</label>
           </div>
           {queueError ? <div className="community-message community-message-error" role="alert"><strong>{queueError.message}</strong>{queueError.code ? <code>{queueError.code}</code> : null}</div> : null}
           {queueLoading && items.length === 0 ? <div className="community-loading" role="status">Loading mapping cases…</div> : null}
           {!queueLoading && !queueError && items.length === 0 ? <div className="community-empty-state"><h2>No cases in this view.</h2><p>Unknown names appear here after the supervised worker gathers provider evidence.</p></div> : null}
-          {items.length > 0 ? <ol className="mapping-queue-list">{items.map((item) => <li key={item.caseId}><button className={`mapping-queue-card${item.caseId === caseId ? " mapping-queue-card-selected" : ""}`} onClick={() => navigate(`${ALBUM_MAPPING_PATH}/${encodeURIComponent(item.caseId)}`)} type="button"><span className="mapping-queue-topline"><span className="community-status">{formatMappingStatus(item.status)}</span><span>{item.encounterCount || 0} encounters</span></span><strong>{item.album || "Unknown album"}</strong><span>{item.artist || "Unknown artist"}</span><small>Priority {item.priority ?? item.encounterCount ?? 0} · Rev. {item.revision || 1}</small></button></li>)}</ol> : null}
+          {items.length > 0 ? <ol className="mapping-queue-list">{items.map((item) => <li key={item.caseId}><button className={`mapping-queue-card${item.caseId === caseId ? " mapping-queue-card-selected" : ""}`} onClick={() => navigate(`${ALBUM_MAPPING_PATH}/${encodeURIComponent(item.caseId)}`)} type="button"><span className="mapping-queue-topline"><span className="community-status">{formatMappingStatus(item.status)}</span>{item.mappingStale ? <span className="community-status mapping-stale-badge">Album changed</span> : null}<span>{item.encounterCount || 0} encounters</span></span><strong>{item.album || "Unknown album"}</strong><span>{item.artist || "Unknown artist"}</span><small>Priority {item.priority ?? item.encounterCount ?? 0} · Rev. {item.revision || 1}</small></button></li>)}</ol> : null}
           {nextCursor ? <button className="community-secondary-button mapping-load-more" disabled={queueLoadingMore} onClick={() => loadQueue({ cursor: nextCursor, append: true })} type="button">{queueLoadingMore ? "Loading…" : "Load more"}</button> : null}
         </aside>
 
@@ -306,7 +314,7 @@ export default function AlbumMappings() {
               <section className="mapping-detail-section"><h3>Candidate albums</h3><p className="mapping-muted">Choose an existing public catalog album. Candidate overlap is evidence for review, never automatic approval.</p>{candidates.length === 0 ? <p className="mapping-muted">No local catalog candidates were found.</p> : <div className="mapping-candidate-list">{candidates.map((candidate) => <label className={`mapping-candidate${selectedAlbumId === candidate.albumId ? " mapping-candidate-selected" : ""}`} key={candidate.albumId}><input checked={selectedAlbumId === candidate.albumId} name="mapping-candidate" onChange={() => setSelectedAlbumId(candidate.albumId)} type="radio" /><span><strong>{candidateLabel(candidate)}</strong><small>{candidate.albumId} · catalog rev. {candidate.catalogRevision || "?"}</small>{candidateEvidenceSummary(candidate.evidence).map((summary, index) => <small key={`${candidate.albumId}-${summary}-${index}`}>{summary}</small>)}</span></label>)}</div>}</section>
               <section className="mapping-detail-section"><h3>Search existing catalog</h3><p className="mapping-muted">Search by the observed album title independently of its artist credit. This helps review aliases such as LOONA and 이달의 소녀.</p><form className="mapping-catalog-search" onSubmit={searchCatalog}><input aria-label="Search existing catalog" onChange={(event) => setCatalogQuery(event.target.value)} placeholder="Album or artist" value={catalogQuery} /><button className="community-secondary-button" disabled={catalogLoading} type="submit">{catalogLoading ? "Searching…" : "Search"}</button><button className="community-text-button" disabled={catalogLoading} onClick={(event) => searchCatalog(event, true)} type="button">Search observed title</button></form>{catalogResults.length > 0 ? <div className="mapping-candidate-list">{catalogResults.map((candidate) => <button className="mapping-catalog-result" key={candidate.albumId} onClick={() => setSelectedAlbumId(candidate.albumId)} type="button"><strong>{candidateLabel(candidate)}</strong><small>{candidate.albumId} · catalog rev. {candidate.catalogRevision || "?"}</small></button>)}</div> : null}</section>
               <section className="mapping-detail-section"><h3>Provider evidence</h3><Evidence evidence={selectedCase.evidence} /></section>
-              {detail?.mapping ? <section className="mapping-detail-section"><h3>Current mapping</h3><p>{candidateLabel(detail.mapping)} · {formatMappingStatus(detail.mapping.status)}</p><p className="mapping-muted">Reviewed catalog revision {detail.mapping.catalogRevision || "unknown"}. Baseline tracklist availability is reviewed separately.</p></section> : null}
+              {detail?.mapping ? <section className="mapping-detail-section"><h3>Current mapping</h3><p>{candidateLabel(detail.mapping)} · {formatMappingStatus(detail.mapping.status)}</p><p className="mapping-muted">Reviewed catalog revision {detail.mapping.catalogRevision || "unknown"}. Baseline tracklist availability is reviewed separately.</p>{detail.mapping.stale ? <p className="community-message community-message-error" role="status">{detail.mapping.currentCatalogRevision ? `The album changed since review (now catalog revision ${detail.mapping.currentCatalogRevision}), so this mapping resolves no listens. Review the album, then reconfirm it or revoke the mapping.` : "The mapped album is no longer in the catalog, so this mapping resolves no listens. Revoke the mapping."}</p> : null}</section> : null}
               {selectedAlbumId ? <BaselineReviewPanel compact id={selectedAlbumId} kind="albums" onBusyChange={setBaselineBusy} onStateChange={handleBaselineStateChange} target={catalogResults.find((candidate) => candidate.albumId === selectedAlbumId) || candidates.find((candidate) => candidate.albumId === selectedAlbumId) || null} /> : null}
               <form className="mapping-decision-form" onSubmit={applyAction}><label>Decision<select value={action} onChange={(event) => setAction(event.target.value)}>{ACTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Decision reason<textarea maxLength={1000} onChange={(event) => setReason(event.target.value)} placeholder="Explain the evidence and decision." required rows="4" value={reason} /></label>{command.error ? <p className="community-message community-message-error" role="alert">{command.error.message}{command.error.code ? <code>{command.error.code}</code> : null}</p> : null}{command.success ? <p className="community-message community-message-success" role="status">{command.success}</p> : null}<button className="community-primary-button" disabled={command.pending} type="submit">{command.pending ? "Saving decision…" : "Save decision"}</button></form>
               {Array.isArray(detail?.history) && detail.history.length > 0 ? <section className="mapping-detail-section"><h3>Decision history</h3><div className="mapping-history">{detail.history.map((entry, index) => <article key={`${entry.revision || index}-${entry.action || "event"}`}><strong>{formatMappingStatus(entry.action)}</strong><span>{entry.reason || "No reason supplied"}</span><time>{formatLastfmDate(entry.createdAt || entry.at)}</time></article>)}</div></section> : null}

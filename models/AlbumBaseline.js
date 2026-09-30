@@ -81,7 +81,7 @@ const auditSchema = new mongoose.Schema({
   targetKind: { type: String, required: true, enum: ["albums", "submissions"] },
   targetId: { type: String, required: true, lowercase: true },
   requestId: { type: String, required: true, lowercase: true },
-  action: { type: String, required: true, enum: ["confirm", "replace", "defer", "revoke", "publish", "invalidate", "queue"] },
+  action: { type: String, required: true, enum: ["confirm", "replace", "defer", "revoke", "publish", "invalidate", "queue", "carry_forward"] },
   revision: { type: Number, required: true, min: 1 },
   actorUserId: { type: String, required: true, maxlength: 128 },
   reason: { type: String, required: true, maxlength: 1000 },
