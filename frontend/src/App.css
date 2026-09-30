@@ -2221,27 +2221,34 @@ html:has(.search-results-page) .search-submit {
   text-decoration: none;
 }
 
+/*
+ * Board thumbnails are square and never crop a cover: one album fills the
+ * square, a pair sits side by side across the middle, four form a 2x2 grid.
+ */
 .board-preview-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
+  align-content: center;
   overflow: hidden;
-  aspect-ratio: 1.55 / 1;
+  aspect-ratio: 1 / 1;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
   background: #0f0f10;
 }
 
+.board-preview-grid[data-layout="pair"],
+.board-preview-grid[data-layout="quad"] {
+  grid-template-columns: 1fr 1fr;
+}
+
 .board-preview-grid img,
 .board-preview-grid span {
+  display: block;
   width: 100%;
-  height: 100%;
+  aspect-ratio: 1 / 1;
   min-height: 0;
   object-fit: cover;
   background: #18181b;
-}
-
-.board-preview-grid img:first-child {
-  grid-row: span 2;
 }
 
 .board-card h2,

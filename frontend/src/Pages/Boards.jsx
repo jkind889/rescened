@@ -3,24 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@clerk/react";
 import AsyncState from "../Components/Loading/AsyncState";
-
-function BoardPreview({ albums }) {
-  const previewAlbums = albums.slice(0, 4);
-
-  return (
-    <div className="board-preview-grid" aria-hidden="true">
-      {Array.from({ length: 4 }).map((_, index) => {
-        const album = previewAlbums[index];
-
-        return album?.cover ? (
-          <img key={album.albumId || index} src={album.cover} alt="" />
-        ) : (
-          <span key={index} />
-        );
-      })}
-    </div>
-  );
-}
+import BoardPreview from "../Components/BoardPreview";
 
 export function Boards() {
   const { getToken, isSignedIn } = useAuth();

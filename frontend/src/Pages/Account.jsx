@@ -11,6 +11,7 @@ import {
 import LikeButton from "../Components/LikeButton";
 import ProfileReviewCard from "../Components/ProfileReviewCard";
 import AsyncState from "../Components/Loading/AsyncState";
+import BoardPreview from "../Components/BoardPreview";
 import LastfmConnectionPanel from "../Components/LastfmConnectionPanel.jsx";
 import { getApiErrorMessage } from "../utils/apiErrors";
 
@@ -81,24 +82,6 @@ function AlbumCover({ src, title }) {
   }
 
   return <img className="profile-cover" src={src} alt={`${title} cover`} />;
-}
-
-function BoardPreview({ albums }) {
-  const previewAlbums = albums.slice(0, 4);
-
-  return (
-    <div className="board-preview-grid" aria-hidden="true">
-      {Array.from({ length: 4 }).map((_, index) => {
-        const album = previewAlbums[index];
-
-        return album?.cover ? (
-          <img key={album.albumId || index} src={album.cover} alt="" />
-        ) : (
-          <span key={index} />
-        );
-      })}
-    </div>
-  );
 }
 
 export function Account() {
