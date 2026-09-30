@@ -9,6 +9,7 @@ const Review = require("../models/Reviews");
 const Like = require("../models/Like");
 const Notification = require("../models/Notification");
 const UserProfile = require("../models/UserProfile");
+const Follow = require("../models/Follow");
 const { createCatalogAlbum } = require("../routes/utils/albumCatalog");
 const {
   rankedAlbums,
@@ -88,6 +89,7 @@ test.before(async () => {
     Like.syncIndexes(),
     Notification.syncIndexes(),
     UserProfile.syncIndexes(),
+    Follow.syncIndexes(),
   ]);
 });
 test.after(async () => {
@@ -143,6 +145,45 @@ test("review discovery aggregates use catalog order, windows, deduplication, and
   assert.equal(popularReviews.length, 6);
   assert.equal(popularReviews.some((row) => String(row.albumCatalogId) === String(missing._id)), false);
   assert.ok(popularReviews.some((row) => String(row._id) === String(secondReview._id)));
+});
+
+test("circle feeds only rank the viewer and accounts they follow", { skip: !enabled }, async (t) => {
+  const [shared, friendOnly, strangerOnly] = await Promise.all([
+    createAlbum("Circle Shared"),
+    createAlbum("Circle Friend"),
+    createAlbum("Circle Stranger"),
+  ]);
+  const now = new Date();
+  const [, , friendReview, strangerReview] = await Promise.all([
+    createReview(shared, "circle-viewer", 5, now),
+    createReview(shared, "circle-friend", 4, now),
+    createReview(friendOnly, "circle-friend", 3, now),
+    createReview(strangerOnly, "circle-stranger", 5, now),
+  ]);
+  await Follow.create([
+    { followerId: "circle-viewer", followingId: "circle-friend" },
+    { followerId: "circle-stranger", followingId: "circle-viewer" },
+  ]);
+  await Like.create([
+    { userId: "liker-circle", targetType: "review", reviewId: strangerReview._id },
+    { userId: "liker-circle", targetType: "review", reviewId: friendReview._id },
+  ]);
+  const request = reviewFeedClient(t, "circle-viewer");
+
+  const popular = await request("/circle/popular", {}, { limit: "10", window: "all" });
+  assert.equal(popular.status, 200);
+  const albums = Object.values(popular).filter((row) => row?.albumId);
+  assert.deepEqual(albums.map((album) => album.title).sort(), ["Circle Friend", "Circle Shared"]);
+  assert.equal(albums.find((album) => album.title === "Circle Shared").reviewCount, 2);
+
+  const reviews = await request("/circle/popular-reviews", {}, { limit: "12" });
+  const rows = Object.values(reviews).filter((row) => row?.reviewId);
+  assert.equal(rows.length, 3);
+  assert.equal(rows.some((row) => row.userId === "circle-stranger"), false);
+  assert.equal(rows[0].reviewId, friendReview.reviewId);
+
+  const lonely = await reviewFeedClient(t, "circle-nobody")("/circle/popular", {}, { window: "all" });
+  assert.equal(Object.values(lonely).filter((row) => row?.albumId).length, 0);
 });
 
 test("review deletion cascades likes, notifications, and every matching pin", { skip: !enabled }, async () => {

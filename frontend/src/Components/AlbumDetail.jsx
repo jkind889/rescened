@@ -90,7 +90,9 @@ export function AlbumDetail()
     const [listenCursor, setListenCursor] = useState(null);
     const [listenError, setListenError] = useState("");
     const [isLoadingListens, setIsLoadingListens] = useState(false);
-    const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+    const location = useLocation();
+    // Links such as the home page review queue can ask to open the review form.
+    const [isReviewModalOpen, setIsReviewModalOpen] = useState(() => Boolean(location.state?.openReview));
     const [isBoardModalOpen, setIsBoardModalOpen] = useState(false);
     const [newBoardTitle, setNewBoardTitle] = useState("");
     const [boardSaveMessage, setBoardSaveMessage] = useState("");
@@ -103,9 +105,16 @@ export function AlbumDetail()
     const [deletingReviewId, setDeletingReviewId] = useState("");
     const [deleteErrors, setDeleteErrors] = useState({});
     const { getToken, isSignedIn, userId } = useAuth();
-    const location = useLocation();
     const canUseAuthenticatedActions = Boolean(isSignedIn && userId);
     const activeAlbumIdRef = useRef(albumId);
+
+    // Consume the one-time open-review request so a refresh or back navigation
+    // does not reopen the form.
+    useEffect(() => {
+        if (location.state?.openReview) {
+            navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+        }
+    }, [location.pathname, location.search, location.state, navigate]);
 
     useEffect(() => {
         activeAlbumIdRef.current = albumId;

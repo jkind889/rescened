@@ -2,6 +2,7 @@ const crypto = require("node:crypto");
 const mongoose = require("mongoose");
 const AlbumCatalog = require("../../models/AlbumCatalog");
 const Listen = require("../../models/Listen");
+const Review = require("../../models/Reviews");
 const ListenCreation = require("../../models/ListenCreation");
 const BoardListen = require("../../models/BoardListen");
 const Board = require("../../models/Board");
@@ -192,4 +193,44 @@ async function listListens(userId, query = {}, fixed = {}) {
   };
 }
 
-module.exports = { createAutomaticListen, createListen, fenceAlbumDiary, updateListen, deleteListen, listListens, serializeListen };
+const UNREVIEWED_WINDOW_DAYS = 30;
+
+// Albums the user logged in the last 30 days but never reviewed, most recently
+// listened first. listenedOn is a calendar date, so compare it as one.
+async function listUnreviewedAlbums(userId, query = {}) {
+  fields(query, ["limit"]);
+  if (query.limit !== undefined && (typeof query.limit !== "string" || !/^[1-9]\d*$/.test(query.limit))) {
+    throw fail(400, "INVALID_DIARY_REQUEST", "limit must be a positive integer");
+  }
+  const limit = Math.min(Number(query.limit || 5), 12);
+  const since = new Date(Date.now() - UNREVIEWED_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const rows = await Listen.aggregate([
+    { $match: { userId, listenedOn: { $gte: since } } },
+    { $sort: { listenedOn: -1, createdAt: -1, _id: -1 } },
+    { $group: {
+      _id: "$albumCatalogId",
+      lastListenedOn: { $first: "$listenedOn" },
+      lastCreatedAt: { $first: "$createdAt" },
+      listenCount: { $sum: 1 },
+    } },
+    { $sort: { lastListenedOn: -1, lastCreatedAt: -1, _id: -1 } },
+    { $lookup: {
+      from: Review.collection.name, localField: "_id", foreignField: "albumCatalogId",
+      pipeline: [{ $match: { userId } }, { $limit: 1 }, { $project: { _id: 1 } }], as: "review",
+    } },
+    { $match: { "review.0": { $exists: false } } },
+    { $lookup: { from: AlbumCatalog.collection.name, localField: "_id", foreignField: "_id", as: "album" } },
+    { $unwind: "$album" },
+    { $limit: limit },
+  ]);
+  return {
+    albums: rows.map((row) => {
+      const album = normalizeCatalogAlbum(row.album);
+      return album?.albumId
+        ? { albumId: album.albumId, album, lastListenedOn: row.lastListenedOn, listenCount: row.listenCount }
+        : null;
+    }).filter(Boolean),
+  };
+}
+
+module.exports = { createAutomaticListen, listUnreviewedAlbums, createListen, fenceAlbumDiary, updateListen, deleteListen, listListens, serializeListen };

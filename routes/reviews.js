@@ -3,6 +3,7 @@ const { clerkClient, getAuth } = require("@clerk/express");
 const Review = require("../models/Reviews");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const Like = require("../models/Like");
+const Follow = require("../models/Follow");
 const { findAlbumByPublicId, normalizeCatalogAlbum } = require("./utils/albumCatalog");
 const {
   rankedAlbums,
@@ -215,6 +216,28 @@ router.get("/popular-reviews", async (req, res) => {
     const reviews = await Review.aggregate(buildPopularReviewsPipeline(limit));
     res.json(await serializeReviews(reviews, viewer(req)));
   } catch { res.status(500).json({ error: "Failed to fetch popular reviews" }); }
+});
+
+// A viewer's circle is themselves plus every account they follow.
+async function circleUserIds(userId) {
+  const following = await Follow.find({ followerId: userId }).select("followingId").lean();
+  return [...new Set([userId, ...following.map((row) => row.followingId).filter(Boolean)])];
+}
+
+router.get("/circle/popular", auth, async (req, res) => {
+  try {
+    const userIds = await circleUserIds(req.userId);
+    res.json(await rankedAlbums({ limit: req.query.limit, window: req.query.window, userIds }));
+  } catch { res.status(500).json({ error: "Failed to fetch circle albums" }); }
+});
+
+router.get("/circle/popular-reviews", auth, async (req, res) => {
+  try {
+    const limit = getListLimit(req.query.limit, 4);
+    const userIds = await circleUserIds(req.userId);
+    const reviews = await Review.aggregate(buildPopularReviewsPipeline(limit, { userIds }));
+    res.json(await serializeReviews(reviews, req.userId));
+  } catch { res.status(500).json({ error: "Failed to fetch circle reviews" }); }
 });
 
 router.get("/featured", async (req, res) => {

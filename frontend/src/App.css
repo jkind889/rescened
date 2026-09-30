@@ -14,7 +14,7 @@
   --app-accent: #a978cf;
   --app-danger: #f87171;
   --app-success: #86efac;
-  --app-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --app-font: "Fragment Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --app-display-font: "Avenir Next Condensed", "Helvetica Neue", Arial, sans-serif;
 }
 
@@ -71,6 +71,25 @@ body {
 .site-navbar {
   min-height: 54px;
   padding: 0 0.8rem;
+}
+
+.site-navbar {
+  display: flex;
+  align-items: center;
+}
+
+.site-nav-links {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site-navbar .navbar-brand,
+.site-navbar .nav-link {
+  display: inline-block;
+  text-decoration: none;
 }
 
 .site-navbar > .site-navbar-inner {
@@ -798,7 +817,7 @@ html:has(.front-page) .site-navbar .navbar-brand,
 html:has(.catalog-page) .site-navbar .navbar-brand,
 html:has(.search-results-page) .site-navbar .navbar-brand {
   color: #744e96;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--app-font);
   font-size: 1rem;
   font-weight: 500;
 }
@@ -809,7 +828,7 @@ html:has(.catalog-page) .site-navbar .nav-link,
 html:has(.catalog-page) .nav-auth-button,
 html:has(.search-results-page) .site-navbar .nav-link,
 html:has(.search-results-page) .nav-auth-button {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--app-font);
   font-size: 0.72rem;
   font-weight: 500;
 }
@@ -825,7 +844,7 @@ html:has(.search-results-page) .search-submit {
   border-color: #292929;
   border-radius: 0;
   background: #050505;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--app-font);
   font-size: 0.7rem;
   font-weight: 400;
 }
@@ -851,7 +870,7 @@ html:has(.search-results-page) .search-submit {
   overflow: hidden;
   background: #050505;
   color: #d7d7d7;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--app-font);
 }
 
 .front-ascii-clouds {
@@ -866,7 +885,7 @@ html:has(.search-results-page) .search-submit {
   position: absolute;
   margin: 0;
   color: var(--front-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--app-font);
   font-size: clamp(0.48rem, 0.62vw, 0.72rem);
   line-height: 1.05;
   letter-spacing: 0.05em;
@@ -1796,7 +1815,7 @@ html:has(.search-results-page) .search-submit {
   padding: 3rem clamp(18px, 4vw, 48px) 4rem;
   background: #050505;
   color: #d7d7d7;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--app-font);
 }
 
 .catalog-page {
@@ -1808,7 +1827,7 @@ html:has(.search-results-page) .search-submit {
   padding: 3rem clamp(18px, 4vw, 48px) 4rem;
   background: #050505;
   color: #d7d7d7;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--app-font);
 }
 
 .catalog-header {
@@ -2048,7 +2067,7 @@ html:has(.search-results-page) .search-submit {
   border-radius: 0;
   background: #101010;
   color: #d8d8d8;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--app-font);
 }
 
 .catalog-page .async-state-message h3 {
@@ -2554,7 +2573,7 @@ html:has(.search-results-page) .search-submit {
 .search-view-toggle.profile-view-toggle button {
   border-radius: 0;
   color: var(--search-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--app-font);
   font-size: 0.68rem;
   font-weight: 500;
   letter-spacing: 0.08em;
@@ -2699,7 +2718,7 @@ html:has(.search-results-page) .search-submit {
 
 .search-results-page .search-pagination {
   color: var(--search-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--app-font);
   font-size: 0.72rem;
 }
 
@@ -2728,7 +2747,7 @@ html:has(.search-results-page) .search-submit {
   border-radius: 0;
   background: #101010;
   color: #d8d8d8;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--app-font);
 }
 
 .search-results-page .async-state-message h3 {
@@ -2759,7 +2778,7 @@ html:has(.search-results-page) .search-submit {
 
 .search-pagination.catalog-pagination {
   color: var(--catalog-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--app-font);
   font-size: 0.72rem;
 }
 
@@ -8695,7 +8714,7 @@ html:has(.community-page) .site-header {
   padding: 0.55rem;
   background: var(--app-surface);
   color: var(--app-soft);
-  font: 0.58rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 0.58rem/1.45 var(--app-font);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

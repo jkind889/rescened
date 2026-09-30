@@ -10,11 +10,25 @@ import {
   useAuth,
 } from '@clerk/react'
 
+function SiteNavLink({ to, current, children })
+{
+    return (
+        <Link
+            to={to}
+            className={`nav-link${current ? " nav-link-current" : ""}`}
+            aria-current={current ? "page" : undefined}
+        >
+            {children}
+        </Link>
+    )
+}
+
 function Navbar()
 {
     const { getToken, isLoaded, isSignedIn } = useAuth()
     const location = useLocation()
     const [unreadCount, setUnreadCount] = useState(0)
+    const isCurrent = (path) => location.pathname === path || location.pathname.startsWith(`${path}/`)
     const [theme, setTheme] = useState(() => localStorage.getItem("rescened-theme") || "dark")
 
     useEffect(() => {
@@ -72,34 +86,28 @@ function Navbar()
     return (
         <>
             <header className="site-header">
-                <nav className="navbar navbar-expand site-navbar">
-                    <div className="container-fluid site-navbar-inner">
+                <nav className="site-navbar" aria-label="Main">
+                    <div className="site-navbar-inner">
                         <Link to="/" className="navbar-brand">rescened</Link>
                         <div className="site-navbar-center">
-                            <ul className="navbar nav site-nav-links">
-                                <li className="nav-item">
-                                    <Link to="/boards" className="nav-link active">Boards</Link>
+                            <ul className="site-nav-links">
+                                <li>
+                                    <SiteNavLink to="/boards" current={isCurrent("/boards")}>Boards</SiteNavLink>
                                 </li>
-                                <li className="nav-item">
-                                    <Link to="/community/approved" className={`nav-link${location.pathname === "/community/approved" ? " nav-link-current" : ""}`}>Community</Link>
+                                <li>
+                                    <SiteNavLink to="/community" current={isCurrent("/community")}>Community</SiteNavLink>
                                 </li>
-                                <li className="nav-item">
-                                    <Link
-                                        to="/patch-notes"
-                                        className={`nav-link${location.pathname === "/patch-notes" ? " nav-link-current" : ""}`}
-                                        aria-current={location.pathname === "/patch-notes" ? "page" : undefined}
-                                    >
-                                        Patch notes
-                                    </Link>
+                                <li>
+                                    <SiteNavLink to="/patch-notes" current={isCurrent("/patch-notes")}>Patch notes</SiteNavLink>
                                 </li>
                                 <Show when="signed-in">
-                                    <li className="nav-item">
-                                        <Link
+                                    <li>
+                                        <SiteNavLink
                                             to="/suggestions"
-                                            className={`nav-link${location.pathname.startsWith("/suggestions") || location.pathname.startsWith("/moderation/album-suggestions") || location.pathname.startsWith("/moderation/album-mappings") ? " nav-link-current" : ""}`}
+                                            current={isCurrent("/suggestions") || isCurrent("/moderation/album-suggestions") || isCurrent("/moderation/album-mappings")}
                                         >
                                             Suggestions
-                                        </Link>
+                                        </SiteNavLink>
                                     </li>
                                 </Show>
                             </ul>
@@ -107,7 +115,11 @@ function Navbar()
                                 <SearchBar />
                             </div>
                             <Show when="signed-in">
-                                <Link to="/notifications" className="nav-link nav-notification-link active" aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ""}`}>
+                                <Link
+                                    to="/notifications"
+                                    className={`nav-link nav-notification-link${isCurrent("/notifications") ? " nav-link-current" : ""}`}
+                                    aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ""}`}
+                                >
                                     Notifications
                                     {unreadCount > 0 && (
                                         <span className="nav-notification-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>
@@ -115,7 +127,7 @@ function Navbar()
                                 </Link>
                             </Show>
                         </div>
-                        <div className="nav navbar-right site-navbar-actions">
+                        <div className="site-navbar-actions">
                             <button
                                 type="button"
                                 className="theme-toggle"
@@ -138,9 +150,9 @@ function Navbar()
                             </Show>
 
                             <Show when="signed-in">
-                                <Link to="/account" className="nav-link active px-0">
+                                <SiteNavLink to="/account" current={isCurrent("/account")}>
                                     Account
-                                </Link>
+                                </SiteNavLink>
                                 <UserButton afterSignOutUrl="/" />
                             </Show>
                         </div>

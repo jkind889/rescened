@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Routes, Route } from "react-router-dom";
-import 'bootstrap/dist/css/bootstrap.min.css';
+import "./reset.css";
 import "./App.css";
 import SearchResults from "./Pages/SearchResults";
 import AlbumDetail from "./Components/AlbumDetail";
@@ -18,6 +18,7 @@ import Boards from "./Pages/Boards";
 import BoardDetail from "./Pages/BoardDetail";
 import Notifications from "./Pages/Notifications";
 import PatchNotes from "./Pages/PatchNotes";
+import Community from "./Pages/Community";
 import ProtectedRoute from "./Components/ProtectedRoute";
 
 const Suggestions = lazy(() => import("./Pages/Suggestions"));
@@ -49,6 +50,7 @@ export function App() {
             </ProtectedRoute>} />
             <Route path="/review-dispatches" element={<ReviewDispatches />} />
             <Route path="/popular-albums" element={<PopularAlbums />} />
+            <Route path="/community" element={<Community />} />
             <Route path="/community/approved" element={<ApprovedSuggestions />} />
             <Route path="/patch-notes" element={<PatchNotes />} />
             <Route path="/account" element={<Account />} />
