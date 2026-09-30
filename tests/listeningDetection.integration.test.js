@@ -172,9 +172,27 @@ test("listening detection MongoDB integration", { skip: !enabled }, async (t) =>
     await sync(conn, provider(base.map((item, index) => (index === 0 ? { ...item, trackMbid: crypto.randomUUID() } : item))), clock);
     assert.equal(await Scrobble.countDocuments(), 10);
     assert.equal(await Scrobble.countDocuments({ identityConflict: true }), 1);
+    assert.equal(await Scrobble.countDocuments({ identityConflictFields: ["trackMbid"] }), 1);
     await detect(conn, clock);
     const detection = await Detection.findOne().lean();
     assert.equal(detection.plays[0].distinct, 9);
+  });
+
+  await t.test("duplicate deliveries that disagree only on album or artist IDs are recorded but still counted", async () => {
+    const conn = await reset();
+    const clock = at(4 * HOUR);
+    const base = rows(range(1, 10), 10 * MINUTE);
+    const release = (albumMbid) => base.map((item, index) => (index < 4 ? { ...item, albumMbid, artistMbid: albumMbid } : item));
+    await sync(conn, provider(release(crypto.randomUUID())), clock);
+    await sync(conn, provider(release(crypto.randomUUID())), clock);
+    assert.equal(await Scrobble.countDocuments(), 10);
+    assert.equal(await Scrobble.countDocuments({ identityConflict: true }), 0);
+    const recorded = await Scrobble.find({ "identityConflictFields.0": { $exists: true } }).lean();
+    assert.equal(recorded.length, 4);
+    recorded.forEach((item) => assert.deepEqual([...item.identityConflictFields].sort(), ["albumMbid", "artistMbid"]));
+    await detect(conn, clock);
+    const detection = await Detection.findOne().lean();
+    assert.equal(detection.plays[0].distinct, 10);
   });
 
   await t.test("deep sweep fetches late back-dated scrobbles without moving the sync cursor", async () => {

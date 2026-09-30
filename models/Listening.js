@@ -72,8 +72,12 @@ const scrobbleSchema = new mongoose.Schema({
   mappingRevision: { type: Number, default: null },
   catalogRevision: { type: Number, default: null },
   baselineAvailable: { type: Boolean, default: false },
-  // Set when a repeated delivery disagrees on a populated identifier.
+  // Set when a repeated delivery disagrees on the populated track identifier,
+  // the only one detection relies on.
   identityConflict: { type: Boolean, default: false },
+  // Every populated identifier a repeated delivery disagreed on, including
+  // artist/album IDs that are recorded for diagnosis but do not block counting.
+  identityConflictFields: { type: [String], default: [] },
 }, { timestamps: true });
 scrobbleSchema.index({ connectionId: 1, identityKey: 1 }, { unique: true });
 scrobbleSchema.index({ artistKey: 1, albumKey: 1, resolution: 1 });

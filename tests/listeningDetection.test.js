@@ -305,6 +305,17 @@ test("unusable evidence is excluded and conflicting duplicate deliveries are hel
   assert.equal(result.sessions[0].evidence.length, 1);
 });
 
+test("duplicate deliveries that disagree only on album or artist IDs still count", () => {
+  const events = [
+    event("Track 3", 8, { identityKey: "same", albumMbid: "11111111-1111-4111-8111-111111111111", artistMbid: "33333333-3333-4333-8333-333333333333" }),
+    event("Track 3", 8, { identityKey: "same", albumMbid: "22222222-2222-4222-8222-222222222222", artistMbid: "44444444-4444-4444-8444-444444444444" }),
+  ];
+  const result = detect(events, { evaluatedAt: T0 + 2 * HOUR });
+  assert.equal(result.diagnostics.duplicate_delivery, 1);
+  assert.equal(result.diagnostics.identity_conflict, undefined);
+  assert.equal(result.diagnostics.matched, 1);
+});
+
 test("multi-disc positions stay distinct", () => {
   const album = baseline([...range(1, 5).map((n) => ({ title: `Disc One ${n}`, disc: 1, number: n })), ...range(1, 5).map((n) => ({ title: `Disc Two ${n}`, disc: 2, number: n }))]);
   const events = [...range(1, 4).map((n, index) => event(`Disc One ${n}`, index * 4)), ...range(1, 4).map((n, index) => event(`Disc Two ${n}`, 20 + index * 4))];
