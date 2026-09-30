@@ -160,9 +160,13 @@ function Navbar()
                                     )}
                                 </Link>
                                 {isModerator && (
-                                    <SiteNavLink to="/moderation/album-suggestions" current={isCurrent("/moderation")}>
+                                    <Link
+                                        to="/moderation/album-suggestions"
+                                        className={`nav-link nav-utility-link${isCurrent("/moderation") ? " nav-link-current" : ""}`}
+                                        aria-current={isCurrent("/moderation") ? "page" : undefined}
+                                    >
                                         Moderation
-                                    </SiteNavLink>
+                                    </Link>
                                 )}
                             </Show>
                         </div>

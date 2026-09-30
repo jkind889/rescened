@@ -88,8 +88,12 @@ body {
 
 .site-navbar .navbar-brand,
 .site-navbar .nav-link {
-  display: inline-block;
   text-decoration: none;
+}
+
+.site-navbar .navbar-brand,
+.site-nav-links .nav-link {
+  display: inline-block;
 }
 
 .site-navbar > .site-navbar-inner {
@@ -164,7 +168,8 @@ body {
   align-items: center;
 }
 
-.nav-notification-link {
+.nav-notification-link,
+.nav-utility-link {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -9214,8 +9219,15 @@ label.moderation-candidate-choice {
 @media (max-width: 640px) {
   .site-navbar-center {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) 42px;
+    grid-template-columns: auto minmax(0, 1fr) 42px auto;
     gap: 0.35rem;
+  }
+
+  /* Moderation sits after Alerts; the column collapses for non-moderators. */
+  .nav-utility-link {
+    grid-column: 4;
+    grid-row: 1;
+    justify-content: center;
   }
 
   .site-nav-links {
