@@ -76,7 +76,7 @@ export function ListeningLog({ listens, isSignedIn, isLoading }) {
             <p className="listening-log-note">
                 {isLoading
                     ? "Reading your diary..."
-                    : <>Nothing logged yet. <Link to="/account/edit">Connect Last.fm</Link> to log finished albums automatically.</>}
+                    : <>Nothing logged yet. <Link to="/account" state={{ activeTab: "lastfm" }}>Connect Last.fm</Link> to log finished albums automatically.</>}
             </p>
         );
     }

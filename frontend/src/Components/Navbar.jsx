@@ -28,6 +28,7 @@ function Navbar()
     const { getToken, isLoaded, isSignedIn } = useAuth()
     const location = useLocation()
     const [unreadCount, setUnreadCount] = useState(0)
+    const [isModerator, setIsModerator] = useState(false)
     const isCurrent = (path) => location.pathname === path || location.pathname.startsWith(`${path}/`)
     const [theme, setTheme] = useState(() => localStorage.getItem("rescened-theme") || "dark")
 
@@ -83,6 +84,36 @@ function Navbar()
         }
     }, [getToken, isLoaded, isSignedIn, location.pathname])
 
+    // Display hint only: the moderation API enforces moderator access itself.
+    useEffect(() => {
+        const controller = new AbortController()
+
+        async function fetchModeratorAccess() {
+            if (!isLoaded || !isSignedIn) {
+                setIsModerator(false)
+                return
+            }
+
+            try {
+                const token = await getToken()
+                const response = await fetch(`${API_BASE_URL}/moderation/album-suggestions/access`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                    signal: controller.signal,
+                })
+                const data = response.ok ? await response.json() : {}
+                setIsModerator(data.moderator === true)
+            } catch (error) {
+                if (error.name !== "AbortError") {
+                    setIsModerator(false)
+                }
+            }
+        }
+
+        fetchModeratorAccess()
+
+        return () => controller.abort()
+    }, [getToken, isLoaded, isSignedIn])
+
     return (
         <>
             <header className="site-header">
@@ -107,7 +138,7 @@ function Navbar()
                                     <li>
                                         <SiteNavLink
                                             to="/suggestions"
-                                            current={isCurrent("/suggestions") || isCurrent("/moderation/album-suggestions") || isCurrent("/moderation/album-mappings")}
+                                            current={isCurrent("/suggestions")}
                                         >
                                             Suggestions
                                         </SiteNavLink>
@@ -128,6 +159,11 @@ function Navbar()
                                         <span className="nav-notification-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>
                                     )}
                                 </Link>
+                                {isModerator && (
+                                    <SiteNavLink to="/moderation/album-suggestions" current={isCurrent("/moderation")}>
+                                        Moderation
+                                    </SiteNavLink>
+                                )}
                             </Show>
                         </div>
                         <div className="site-navbar-actions">

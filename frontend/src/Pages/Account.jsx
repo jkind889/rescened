@@ -11,6 +11,7 @@ import {
 import LikeButton from "../Components/LikeButton";
 import ProfileReviewCard from "../Components/ProfileReviewCard";
 import AsyncState from "../Components/Loading/AsyncState";
+import LastfmConnectionPanel from "../Components/LastfmConnectionPanel.jsx";
 import { getApiErrorMessage } from "../utils/apiErrors";
 
 const tabs = [
@@ -20,6 +21,7 @@ const tabs = [
   { id: "activity", label: "Activity" },
   { id: "boards", label: "Boards" },
   { id: "network", label: "Network" },
+  { id: "lastfm", label: "Last.fm" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -149,8 +151,10 @@ export function Account() {
   const canManageProfile = !isPublicProfile;
   const isPrivateProfile = isPublicProfile && profile.isPrivate && !profile.isCurrentUser;
   const availableTabs = useMemo(
-    () => tabs.filter((tab) => tab.id !== "settings" && (!isPrivateProfile || ["overview", "reviews"].includes(tab.id))),
-    [isPrivateProfile],
+    () => tabs.filter((tab) => tab.id !== "settings"
+      && (tab.id !== "lastfm" || canManageProfile)
+      && (!isPrivateProfile || ["overview", "reviews"].includes(tab.id))),
+    [canManageProfile, isPrivateProfile],
   );
 
   useEffect(() => {
@@ -1183,6 +1187,12 @@ export function Account() {
       return renderNetwork();
     }
 
+    // Last.fm connection and listen sessions are owner-only; the tab is not
+    // offered on public profiles.
+    if (activeTab === "lastfm" && canManageProfile) {
+      return <LastfmConnectionPanel />;
+    }
+
     return (
       <div className="profile-settings-panel">
         <UserProfile />
@@ -1301,7 +1311,6 @@ export function Account() {
               {canManageProfile && (
                 <div className="profile-hero-actions">
                   <Link className="profile-edit-link" to="/account/edit">Edit Profile</Link>
-                  <Link className="profile-edit-link" to="/moderation/album-suggestions">Moderation</Link>
                 </div>
               )}
             </header>

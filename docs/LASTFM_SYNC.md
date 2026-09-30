@@ -4,7 +4,7 @@ This is the persistent **sync-only pilot**, separate from the frozen [feasibilit
 
 ## Account and privacy contracts
 
-Account settings contain a Last.fm pilot section. Start authorization while signed into Rescened, authorize the application at Last.fm, and return to `/account/lastfm/callback`. The server binds an expiring, single-use attempt to the authenticated Clerk user, exchanges the token, and uses the provider-returned account name. The browser removes callback parameters from its URL; the server stores only a hash of the attempt state. Session keys and authorization tokens are not persisted.
+The Last.fm pilot section, including detected listen sessions, is the owner-only **Last.fm** tab on the signed-in user's profile (`/account`). Start authorization while signed into Rescened, authorize the application at Last.fm, and return to `/account/lastfm/callback`, which sends the browser back to that tab. The server binds an expiring, single-use attempt to the authenticated Clerk user, exchanges the token, and uses the provider-returned account name. The browser removes callback parameters from its URL; the server stores only a hash of the attempt state. Session keys and authorization tokens are not persisted.
 
 A Last.fm account can have only one active or paused connection, and a Rescened user can have only one connection. Another user cannot take over an existing connection. Pause closes the activation window; resume begins another. Reconnection starts from the new connection time. Paused-period listening and history before connection are excluded.
 

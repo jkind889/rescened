@@ -62,7 +62,7 @@ export default function LastfmCallback() {
     completionRef.current.then((lastfmMessage) => {
       if (navigatedRef.current || window.location.pathname !== "/account/lastfm/callback") return;
       navigatedRef.current = true;
-      navigate("/account/edit", { replace: true, state: { lastfmMessage } });
+      navigate("/account", { replace: true, state: { activeTab: "lastfm", lastfmMessage } });
     });
   }, [callbackValues, getToken, isLoaded, isSignedIn, navigate]);
 

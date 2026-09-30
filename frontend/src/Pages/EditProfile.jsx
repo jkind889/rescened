@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { RedirectToSignIn, Show, useAuth, useUser } from "@clerk/react";
 import { getApiErrorMessage } from "../utils/apiErrors";
-import LastfmConnectionPanel from "../Components/LastfmConnectionPanel.jsx";
 
 const MAX_BIO_LENGTH = 280;
 const MAX_FAVORITES = 5;
@@ -747,8 +746,6 @@ export function EditProfile() {
                 {emailStatus && <p className="edit-profile-status">{emailStatus}</p>}
                 {emailError && <p className="edit-profile-error">{emailError}</p>}
               </section>
-
-              <LastfmConnectionPanel />
 
               <form className="edit-profile-panel" onSubmit={handlePasswordSubmit}>
                 <div className="profile-section-header">

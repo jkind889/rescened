@@ -226,6 +226,25 @@ test("moderator queue enforces auth, filters, oldest-first order, and public ser
   assert.equal(nonModerator.body.code, "MODERATOR_REQUIRED");
 });
 
+test("moderator access reports only the caller's own status and requires sign-in", async () => {
+  const state = installMocks();
+  const moderator = await callRoute(state.router, "get", "/access", {});
+  assert.equal(moderator.status, 200);
+  assert.deepEqual(moderator.body, { moderator: true });
+
+  for (const [userId, expected] of [["user_other", { status: 200, body: { moderator: false } }], [null, { status: 401 }]]) {
+    delete require.cache[clerkPath];
+    require.cache[clerkPath] = { id: clerkPath, filename: clerkPath, loaded: true, exports: { getAuth: () => ({ userId }) } };
+    delete require.cache[moderationPath];
+    const result = await callRoute(require("../routes/moderation"), "get", "/access", {});
+    assert.equal(result.status, expected.status);
+    if (expected.body) assert.deepEqual(result.body, expected.body);
+  }
+
+  const paths = require("../routes/moderation").stack.map((layer) => layer.route?.path).filter(Boolean);
+  assert.ok(paths.indexOf("/access") < paths.indexOf("/:submissionId"), "/access must not be captured as a submission ID");
+});
+
 test("moderator reads remain available while command writes are disabled", async () => {
   const document = makeSubmission();
   const state = installMocks({ documents: [document] });
