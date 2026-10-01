@@ -72,7 +72,36 @@ test("listening worker MongoDB integration", { skip: !enabled }, async (t) => {
     await runWorkerOnce(workerOptions(provider));
     assert.equal(await Scrobble.countDocuments(), 3);
     assert.equal((await MappingCase.findOne({ key: mappingKey("Album Artist", "Edition Label") })).encounterCount, 2);
+    assert.equal((await MappingCase.findOne({ key: mappingKey("Album Artist", "Edition Label") })).listenerCount, 1);
     assert.equal(await Listen.countDocuments(), 0);
+  });
+
+  await t.test("ranks mapping cases by distinct listeners, not one listener's repeat plays", async () => {
+    await reset();
+    const start = new Date("2026-09-25T12:00:00Z");
+    const first = await connection();
+    const second = await Connection.create({ userId: "user-2", username: "second", usernameKey: "second", state: "active", revision: 1, connectedAt: start, windows: [{ start, end: null }], nextSyncAt: start });
+    const provider = { async recentTracks({ username }) {
+      if (username === "second") return { page: 1, totalPages: 1, tracks: [track("Shared", "2026-09-25T12:40:00Z", "Shared Album")] };
+      return { page: 1, totalPages: 1, tracks: [
+        track("One", "2026-09-25T12:10:00Z", "Solo Album"),
+        track("Two", "2026-09-25T12:20:00Z", "Solo Album"),
+        track("Three", "2026-09-25T12:30:00Z", "Solo Album"),
+        track("Shared", "2026-09-25T12:35:00Z", "Shared Album"),
+      ] };
+    } };
+    const options = { ...workerOptions(provider), env: { ...workerOptions(provider).env, LASTFM_PILOT_USER_IDS: "user-1,user-2" } };
+    await enqueueJob("sync", "sync:listeners-1", { connectionId: String(first._id), connectionRevision: 1 }, { runAt: DUE });
+    await enqueueJob("sync", "sync:listeners-2", { connectionId: String(second._id), connectionRevision: 1 }, { runAt: DUE });
+    assert.equal((await runWorkerOnce(options)).status, "done");
+    assert.equal((await runWorkerOnce(options)).status, "done");
+    const solo = await MappingCase.findOne({ key: mappingKey("Album Artist", "Solo Album") }).lean();
+    const shared = await MappingCase.findOne({ key: mappingKey("Album Artist", "Shared Album") }).lean();
+    assert.deepEqual([solo.listenerCount, solo.encounterCount], [1, 3]);
+    assert.deepEqual([shared.listenerCount, shared.encounterCount], [2, 2]);
+    const moderation = require("../lib/listening/moderation");
+    const queue = await moderation.listCases({ status: "pending" });
+    assert.deepEqual(queue.items.map((item) => item.album), ["Shared Album", "Solo Album"]);
   });
 
   await t.test("persists page checkpoints and never advances completed cursor past a failed page", async () => {

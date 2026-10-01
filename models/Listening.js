@@ -96,6 +96,8 @@ const mappingCaseSchema = new mongoose.Schema({
   status: { type: String, required: true, enum: ["pending", "approved", "rejected", "no_catalog_match"], default: "pending" },
   revision: { type: Number, required: true, min: 1, default: 1 },
   encounterCount: { type: Number, required: true, min: 0, default: 0 },
+  // Distinct connections with retained unresolved scrobbles, refreshed on each new one. Stores no user IDs.
+  listenerCount: { type: Number, required: true, min: 0, default: 0 },
   candidates: { type: [mongoose.Schema.Types.Mixed], default: [] },
   evidence: { type: [mongoose.Schema.Types.Mixed], default: [] },
   evidenceHash: { type: String, default: "" },
@@ -103,6 +105,8 @@ const mappingCaseSchema = new mongoose.Schema({
   refreshedAt: { type: Date, default: null },
 }, { timestamps: true });
 mappingCaseSchema.index({ status: 1, encounterCount: -1, updatedAt: 1 });
+// The moderator queue ranks albums heard by the most listeners first.
+mappingCaseSchema.index({ status: 1, listenerCount: -1, encounterCount: -1, updatedAt: 1 });
 
 const albumMappingSchema = new mongoose.Schema({
   mappingId: uuid,

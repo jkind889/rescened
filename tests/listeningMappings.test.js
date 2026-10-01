@@ -67,6 +67,35 @@ test("typed discovery evidence and priority filtering remain moderator-safe", as
   } finally { Listening.MappingCase.find = original; }
 });
 
+test("moderator queue ranks distinct listeners before encounters and pages stably", async () => {
+  const Listening = require("../models/Listening");
+  const original = Listening.MappingCase.find;
+  const originalMappings = Listening.AlbumMapping.find;
+  try {
+    Listening.AlbumMapping.find = () => ({ select() { return this; }, limit() { return this; }, lean: async () => [] });
+    const seen = [];
+    const row = { _id: "65f1a2b3c4d5e6f708192a3b", caseId: "8f64f9df-d4cf-4b55-91dc-d0af36bf95ce", artist: "Artist", album: "Album", status: "pending", revision: 1, listenerCount: 3, encounterCount: 4, updatedAt: new Date("2026-09-30T12:00:00Z") };
+    Listening.MappingCase.find = (query) => {
+      const entry = { query };
+      seen.push(entry);
+      return { sort(order) { entry.sort = order; return this; }, limit() { return this; }, exec: async () => [row, { ...row, _id: "65f1a2b3c4d5e6f708192a3c" }] };
+    };
+    const first = await moderation.listCases({ status: "pending", limit: 1 });
+    assert.deepEqual(seen[0].sort, { listenerCount: -1, encounterCount: -1, updatedAt: 1, _id: 1 });
+    assert.equal(first.items[0].listenerCount, 3);
+    assert.ok(first.nextCursor);
+    await moderation.listCases({ status: "pending", limit: 1, cursor: first.nextCursor });
+    const [after] = seen[1].query.$and;
+    assert.deepEqual(after.$or[0], { listenerCount: { $lt: 3 } });
+    assert.deepEqual(after.$or[1], { listenerCount: 3, encounterCount: { $lt: 4 } });
+    const legacy = Buffer.from(JSON.stringify({ encounterCount: 4, updatedAt: row.updatedAt.toISOString(), id: row._id })).toString("base64url");
+    await assert.rejects(moderation.listCases({ cursor: legacy }), (error) => error.code === "INVALID_CURSOR");
+  } finally {
+    Listening.MappingCase.find = original;
+    Listening.AlbumMapping.find = originalMappings;
+  }
+});
+
 test("evidence links reject javascript and credential-bearing URLs", () => {
   const result = moderation.serializeCase({
     caseId: "8f64f9df-d4cf-4b55-91dc-d0af36bf95ce",
