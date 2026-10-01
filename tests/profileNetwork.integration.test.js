@@ -253,4 +253,8 @@ test("people suggestions rank active public reviewers outside the viewer's circl
   const signedOut = await suggestPeople({ now, authors, limit: "10" });
   assert.deepEqual(signedOut.map((person) => person.userId).sort(), ["busy", "followed", "recent-one", "veteran", "viewer"]);
   assert.deepEqual((await suggestPeople({ viewerId: "viewer", now, authors, limit: "1" })).map((person) => person.userId), ["busy"]);
+  // Account deletion anonymizes all of the author's reviews. The cached
+  // ranking must stop exposing that identity before its five-minute TTL.
+  await Review.updateMany({ userId: "busy" }, { $set: { userId: Review.DELETED_AUTHOR_ID } });
+  assert.deepEqual((await suggestPeople({ viewerId: "viewer", now, authors })).map((person) => person.userId), ["recent-one", "veteran"]);
 });

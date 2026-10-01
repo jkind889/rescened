@@ -39,6 +39,7 @@ function stubModels(t, { ranked, follows = {}, privateIds = () => [] }) {
   t.mock.method(Follow, "find", ({ followerId }) => ({
     select: () => ({ lean: async () => (follows[followerId] || []).map((followingId) => ({ followingId })) }),
   }));
+  t.mock.method(Review, "distinct", async (field, query) => query.userId.$in);
   t.mock.method(UserProfile, "find", ({ userId }) => ({
     select: () => ({ lean: async () => userId.$in.filter((id) => currentPrivate().includes(id)).map((id) => ({ userId: id })) }),
   }));
@@ -77,7 +78,25 @@ test("the ranking is cached across viewers while follows and privacy are read pe
   assert.equal(calls.aggregate, 1);
   assert.deepEqual(calls.maxTimeMS, [RANKING_MAX_TIME_MS]);
   // Clerk's default page of 10 would drop names beyond the tenth candidate.
-  assert.deepEqual(calls.authorLimits, [4]);
+  assert.deepEqual(calls.authorLimits, [2, 3, 3, 2]);
+});
+
+test("cached rankings omit deleted reviewers and refresh author identity", async (t) => {
+  resetSuggestionCache();
+  const { calls } = stubModels(t, { ranked: rows("a", "b") });
+  let current = ["a", "b"];
+  let name = "old-name";
+  t.mock.method(Review, "distinct", async () => current);
+  const authors = async (ids) => new Map(ids.map((id) => [id, { username: name, imageUrl: `https://example.test/${name}.png` }]));
+  const options = { authors, clock: () => 0 };
+  assert.equal((await suggestPeople(options))[0].username, "old-name");
+  current = ["b"];
+  name = "new-name";
+  const afterDeletion = await suggestPeople(options);
+  assert.deepEqual(afterDeletion.map((row) => row.userId), ["b"]);
+  assert.equal(afterDeletion[0].username, "new-name");
+  assert.equal(afterDeletion[0].imageUrl, "https://example.test/new-name.png");
+  assert.equal(calls.aggregate, 1);
 });
 
 test("the ranking refreshes after the TTL", async (t) => {

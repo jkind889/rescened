@@ -38,17 +38,12 @@ function buildSuggestionPipeline({ limit = CANDIDATE_POOL_SIZE, now = new Date()
   ];
 }
 
-async function rankCandidates({ now, authors }) {
+async function rankCandidates({ now }) {
   const ranked = await Review.aggregate(buildSuggestionPipeline({ now })).option({ maxTimeMS: RANKING_MAX_TIME_MS });
   if (!ranked.length) return [];
-  // Clerk's user list returns 10 users unless a larger limit is requested.
-  const authorMap = await authors(ranked.map((row) => row._id), { limit: ranked.length });
   return ranked.map((row) => {
-    const author = authorMap.get(row._id) || {};
     return {
       userId: row._id,
-      username: author.username || "rescened user",
-      imageUrl: author.imageUrl || "",
       recentReviewCount: row.recentReviewCount,
       reviewCount: row.reviewCount,
     };
@@ -56,10 +51,10 @@ async function rankCandidates({ now, authors }) {
 }
 
 // Concurrent requests share one in-flight ranking; a failed ranking is not cached.
-function candidatePool({ now, authors, clock = Date.now }) {
+function candidatePool({ now, clock = Date.now }) {
   const current = clock();
   if (cachedPool && cachedPool.expiresAt > current) return cachedPool.promise;
-  const promise = rankCandidates({ now: now || new Date(current), authors });
+  const promise = rankCandidates({ now: now || new Date(current) });
   const entry = { expiresAt: current + CANDIDATE_POOL_TTL_MS, promise };
   cachedPool = entry;
   promise.catch(() => { if (cachedPool === entry) cachedPool = null; });
@@ -76,7 +71,7 @@ function resetSuggestionCache() {
 async function suggestPeople({ viewerId = "", limit, now, authors, clock }) {
   const size = getSuggestionLimit(limit);
   const [pool, following] = await Promise.all([
-    candidatePool({ now, authors, clock }),
+    candidatePool({ now, clock }),
     viewerId ? Follow.find({ followerId: viewerId }).select("followingId").lean() : [],
   ]);
   const excluded = new Set(viewerId ? [viewerId, ...following.map((row) => row.followingId)] : []);
@@ -87,10 +82,21 @@ async function suggestPeople({ viewerId = "", limit, now, authors, clock }) {
     userId: { $in: remaining.map((row) => row.userId) },
     isPrivate: true,
   }).select("userId").lean()).map((row) => row.userId));
-  return remaining
-    .filter((row) => !privateIds.has(row.userId))
-    .slice(0, size)
-    .map((row) => ({ ...row, isFollowing: false }));
+  // Account deletion anonymizes reviews and removes profiles. A missing profile
+  // alone cannot distinguish a deleted account from one never customized.
+  const currentReviewers = new Set(await Review.distinct("userId", {
+    userId: { $in: remaining.map((row) => row.userId) },
+  }));
+  const visible = remaining.filter((row) => currentReviewers.has(row.userId) && !privateIds.has(row.userId)).slice(0, size);
+  if (!visible.length) return [];
+  // Never retain names or avatars in the ranking cache.
+  const authorMap = await authors(visible.map((row) => row.userId), { limit: visible.length });
+  return visible.map((row) => ({
+    ...row,
+    username: authorMap.get(row.userId)?.username || "rescened user",
+    imageUrl: authorMap.get(row.userId)?.imageUrl || "",
+    isFollowing: false,
+  }));
 }
 
 module.exports = {

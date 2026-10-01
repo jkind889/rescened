@@ -104,6 +104,23 @@ test("listening worker MongoDB integration", { skip: !enabled }, async (t) => {
     assert.deepEqual(queue.items.map((item) => item.album), ["Shared Album", "Solo Album"]);
   });
 
+  await t.test("listener counts exclude expired evidence before TTL deletion", async () => {
+    await reset();
+    const conn = await connection();
+    // Future fixture dates keep MongoDB's wall-clock TTL monitor from deleting
+    // the row; expiry is evaluated against the injected worker clock.
+    await Scrobble.collection.insertOne({
+      eventId: crypto.randomUUID(), connectionId: new mongoose.Types.ObjectId(), identityKey: "expired-listener",
+      artistKey: normalize("Album Artist"), albumKey: normalize("Edition Label"),
+      resolution: "unresolved", expiresAt: new Date("2099-09-25T13:00:00Z"),
+    });
+    const provider = { async recentTracks() { return { page: 1, totalPages: 1, tracks: [track("Current", "2099-09-25T13:30:00Z")] }; } };
+    await enqueueJob("sync", "sync:expiry", { connectionId: String(conn._id), connectionRevision: 1 }, { runAt: DUE });
+    assert.equal((await runWorkerOnce(workerOptions(provider, () => new Date("2099-09-25T14:00:00Z")))).status, "done");
+    assert.equal(await Scrobble.countDocuments({ identityKey: "expired-listener" }), 1);
+    assert.equal((await MappingCase.findOne({ key: mappingKey("Album Artist", "Edition Label") })).listenerCount, 1);
+  });
+
   await t.test("persists page checkpoints and never advances completed cursor past a failed page", async () => {
     await reset();
     const conn = await connection();

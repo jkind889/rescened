@@ -53,11 +53,11 @@ Startup failures (no `MONGO_URI`, unreachable database) still exit with code 1, 
 
 `GET /profile/suggestions` used to run a `$group` over the whole `reviews` collection and a Clerk user lookup on every Community page view.
 
-- **Shared cache:** the site-wide ranking (the top 100 reviewers, with author details) is now computed once and cached in each process for 5 minutes.
+- **Shared cache:** the site-wide ranking (the top 100 reviewer IDs and counts) is now computed once and cached in each process for 5 minutes. Names and avatars are fetched fresh and are not cached.
 - **Failures:** the ranking has a 5-second `maxTimeMS`. Concurrent requests share one in-flight ranking, and a failed ranking is not cached.
-- **Fresh per-request checks:** each request still reads the viewer's follows and checks the remaining candidates for private profiles, so a new follow or a profile made private shows up immediately.
+- **Fresh per-request checks:** each request still reads the viewer's follows, checks the remaining candidates for private profiles, and verifies they still have authored reviews. Account deletion anonymizes those reviews, so deleted identities disappear without waiting for the ranking cache to expire.
 - **Rate limiting:** the endpoint stays behind the global per-IP API rate limit. With the scan cached, it does not need its own limiter.
-- **Clerk bug fixed:** Clerk's `getUserList` returns 10 users by default, so a request for more than 10 suggestions showed the extra names as "rescened user". The lookup now requests the full pool.
+- **Clerk bug fixed:** Clerk's `getUserList` returns 10 users by default, so a request for more than 10 suggestions showed the extra names as "rescened user". The lookup now requests the full selected page.
 
 Tests: `tests/peopleSuggestions.test.js` and `tests/profileNetwork.integration.test.js`.
 
