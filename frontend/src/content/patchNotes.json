@@ -1,5 +1,17 @@
 [
   {
+    "id": "lastfm-detection-listening-diary",
+    "date": "2026-09-30",
+    "title": "Last.fm listen detection and your listening diary",
+    "summary": "Connect Last.fm and Rescened can spot when you’ve listened to a full album, then help you keep a diary of what you’ve heard.",
+    "changes": [
+      "Connect Last.fm from the new tab on your profile. It’s rolling out to a small group first.",
+      "An album counts as listened once you play at least 80% of its standard tracks.",
+      "Log a detected listen to your diary or dismiss it, or turn on automatic logging.",
+      "Automatically logged entries are labeled, and you can change their date or delete them."
+    ]
+  },
+  {
     "id": "introducing-patch-notes",
     "date": "2026-09-28",
     "title": "A home for what’s new",
