@@ -10,7 +10,7 @@ const Review = require("../models/Reviews");
 const Like = require("../models/Like");
 const { createCatalogAlbum, UUID_V4 } = require("../routes/utils/albumCatalog");
 const { getNetworkActivity, NETWORK_ACTIVITY_LIMIT } = require("../routes/utils/networkActivity");
-const { suggestPeople } = require("../routes/utils/peopleSuggestions");
+const { resetSuggestionCache, suggestPeople } = require("../routes/utils/peopleSuggestions");
 
 const enabled = String(process.env.RUN_MONGO_INTEGRATION || "").toLowerCase() === "true";
 const collections = [AlbumCatalog, Follow, UserProfile, Review, Like];
@@ -217,6 +217,7 @@ test("network activities use current catalog metadata and review-specific viewer
 });
 
 test("people suggestions rank active public reviewers outside the viewer's circle", { skip: !enabled }, async () => {
+  resetSuggestionCache();
   const now = new Date("2026-09-30T12:00:00Z");
   const album = await createAlbum("Suggested");
   await Review.create([

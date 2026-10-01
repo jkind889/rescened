@@ -38,6 +38,42 @@ Collection names are Mongoose defaults. Confirm them with `db.getCollectionNames
 
 While it was busy, approvals and mapping decisions failed with `BASELINE_REVIEW_IN_PROGRESS` until the page was reloaded. The panel now clears its loading state when it aborts, and it tells the parent it is no longer busy when it unmounts. It also clears the reason and release fields when the target changes, so a reason written for one submission can no longer be submitted for another.
 
+### Listening worker exiting on a transient error
+
+`scripts/listeningWorker.js` now handles a failed pass instead of exiting:
+
+- **Retry with backoff:** it logs the error code, then retries from 5 seconds, doubling up to 5 minutes. The backoff resets after the next successful pass.
+- **Unfinished jobs:** they keep their lease and are retaken when it expires.
+- **Scheduling:** the due-sync, sweep, detection-expiry and stale-mapping scans run at most once a minute. They used to run on every loop, up to every 250 ms when busy.
+- **Shutdown:** stop signals interrupt a backoff sleep.
+
+Startup failures (no `MONGO_URI`, unreachable database) still exit with code 1, so the worker still needs a restarting supervisor. See [the Last.fm sync guide](LASTFM_SYNC.md#configuration-and-launch). Tests: `tests/listeningWorkerLoop.test.js`.
+
+### "People to follow" scanning every review
+
+`GET /profile/suggestions` used to run a `$group` over the whole `reviews` collection and a Clerk user lookup on every Community page view.
+
+- **Shared cache:** the site-wide ranking (the top 100 reviewers, with author details) is now computed once and cached in each process for 5 minutes.
+- **Failures:** the ranking has a 5-second `maxTimeMS`. Concurrent requests share one in-flight ranking, and a failed ranking is not cached.
+- **Fresh per-request checks:** each request still reads the viewer's follows and checks the remaining candidates for private profiles, so a new follow or a profile made private shows up immediately.
+- **Rate limiting:** the endpoint stays behind the global per-IP API rate limit. With the scan cached, it does not need its own limiter.
+- **Clerk bug fixed:** Clerk's `getUserList` returns 10 users by default, so a request for more than 10 suggestions showed the extra names as "rescened user". The lookup now requests the full pool.
+
+Tests: `tests/peopleSuggestions.test.js` and `tests/profileNetwork.integration.test.js`.
+
+### Account deletion waiting on the worker
+
+The Clerk `user.deleted` webhook used to leave the Last.fm connection, including the username, in place. It only marked the connection disconnected and queued a worker `cleanup` job. `cleanupUserData` (`lib/listening/connections.js`) now deletes the connection and its related data in the same transaction as the rest of the account removal:
+
+- **Deleted:** the connection itself, its scrobbles, detections, and detection evidence.
+- **Scrubbed:** connection references in queued jobs.
+
+The transaction commits or rolls back as a whole, and a retried webhook is a no-op.
+
+This is safe while the worker is running. Every worker job that writes Last.fm data also writes the connection document in the same transaction. A sync or detection running at that moment therefore either hits a write conflict and retries, or finds the connection gone and stops. Disconnect (as opposed to account deletion) still uses the worker's cleanup job.
+
+Tests: `tests/accountDeletion.integration.test.js`.
+
 ## Rolling out the indexes
 
 Mongoose builds the indexes automatically (the default `autoIndex`) when each model first connects.
@@ -62,20 +98,21 @@ If a build fails, Mongoose reports it as an `error` event on the model and does 
 
 ## Before the production push
 
-These findings are still open. Items 1 to 3 need a decision or an operator action before the push.
+These findings are still open. Items 1 and 2 need an operator action before the push. Three findings from the original list are now fixed (see above): the worker's error handling, account deletion waiting on the worker, and the "people to follow" scan.
 
-1. **Supervise the listening worker.** `scripts/listeningWorker.js` has no error handling around its loop. One transient MongoDB error (a failover or a network blip) makes it exit with code 1. Last.fm sync, detection, and the account-deletion evidence cleanup then stop with no alert. Before enabling any Last.fm flag, do one or both of these:
-   - Run the worker under a process manager that restarts it.
-   - Add a try/catch with backoff around each pass.
-2. **Account deletion depends on the worker.** The Clerk `user.deleted` webhook deletes the account's social data in one transaction. For Last.fm, it only marks connections disconnected and queues a `cleanup` job. The connection document, which holds the Last.fm username, stays until the worker processes that job. TTLs remove scrobbles after about 30 days and detections after about 60, but the connection document is never removed without the worker. Either the worker is a required part of the deploy, or the webhook must delete the connection rows itself.
-3. **Configure the webhook deliberately.** `/webhooks/clerk/listening` is mounted without a feature flag and performs full account deletion (see [the Last.fm sync guide](LASTFM_SYNC.md#account-and-privacy-contracts)). Set `CLERK_WEBHOOK_SIGNING_SECRET` and point the Clerk destination at this route, knowing it removes the whole account and not just Last.fm data. If the secret is not set, every delivery returns 400.
-4. **Production must be a replica set.** Several existing features now need transactions or snapshot reads, and fail with 503 on a standalone MongoDB:
+1. **Run the worker under a supervisor.** A failed pass no longer stops the worker, but startup failures still exit with code 1. Run `npm run listening:worker` under a process manager that restarts it, and alert on repeated `Listening worker pass failed` lines. On Railway, set it up as its own service:
+   - **Source:** the same repo, with start command `npm run listening:worker`.
+   - **Networking:** no public domain and no healthcheck path. It serves no HTTP.
+   - **Restart policy:** **Always**. With **On Failure**, Railway stops retrying after its retry cap.
+   - **Variables:** the same `MONGO_URI` and the listening and Last.fm variables as the API. Use reference variables so the two services stay in sync. The worker does not read `.env`.
+   - **Instances:** one replica. Job leases make extra workers safe, but they are not needed.
+2. **Configure the webhook deliberately.** `/webhooks/clerk/listening` is mounted without a feature flag and performs full account deletion (see [the Last.fm sync guide](LASTFM_SYNC.md#account-and-privacy-contracts)). Set `CLERK_WEBHOOK_SIGNING_SECRET` and point the Clerk destination at this route, knowing it removes the whole account and not just Last.fm data. If the secret is not set, every delivery returns 400.
+3. **Production must be a replica set. Confirmed 2026-09-30: production runs on MongoDB Atlas, and every Atlas cluster is a replica set.** For reference, these features need transactions or snapshot reads and would fail with 503 on a standalone MongoDB:
    - Saving to a board, removing from a board, deleting a board, and pinning a board on a profile (`BOARD_WRITE_UNAVAILABLE`).
    - Popular-sorted review pages (`POPULAR_REVIEWS_UNAVAILABLE`).
    - Account deletion (`CLEANUP_UNAVAILABLE`).
 
    A popular-review cursor expires after `minSnapshotHistoryWindowInSeconds` (300 s by default) and returns `400 INVALID_REVIEW_CURSOR`. The frontend has no special handling for this, so the user sees the server's reload message.
-5. **"People to follow" scans every review.** `GET /profile/suggestions` (`routes/utils/peopleSuggestions.js`) groups the entire `reviews` collection on every Community page view. The endpoint needs no login and has no rate limit, cache, or `maxTimeMS`. Recommended fix: only rank reviews newer than a cutoff date, cache the ranked list for a few minutes, and add `searchRateLimit`.
 
 ## Performance follow-ups
 
@@ -87,10 +124,10 @@ These can wait until after launch. The cost of each grows with data.
 | `/reviews/circle/popular-reviews` | No date window: every review by the circle gets catalog and likes `$lookup`s before the top 3 are picked | 30–90 day window; catalog `$lookup` after `$limit` |
 | Album detail saved count | A BoardListen aggregation with two `$lookup`s on every album view, where it used to be one `distinct` | Cache it or keep a counter |
 | Catalog search (`routes/utils/catalogSearch.js`) | Ranks every regex match; no `maxTimeMS`; no cap on the query length | `maxTimeMS`; cap `q` at about 200 characters |
-| Listening worker | Schedules scans every 5 s when idle; the stale-mapping pass runs even with every flag off | Slower timer for the schedule passes; gate on the flags |
+| Listening worker | The stale-mapping pass still runs with every flag off, now at most once a minute | Gate it on the listening flags |
 | Last.fm owner reads | Baseline lookups run one album at a time (up to 50 round trips) | Batch them or use `Promise.all` |
 | `listeningjobs` | Finished jobs are never removed | Decide on retention; jobs are keyed and reopened, so a TTL needs care |
-| Account deletion | One transaction; a very heavy account could reach the 60 s transaction limit even with the new indexes | Batch deletes of user-owned rows if this happens |
+| Account deletion | One transaction, now including up to 30 days of Last.fm scrobbles and evidence; a very heavy account could reach the 60 s transaction limit even with the new indexes | Batch deletes of user-owned rows if this happens |
 | Frontend bundle | Main chunk is 508.6 kB (137 kB gzip), over Vite's 500 kB warning. `AlbumMappings` (moderator-only) and `Community` load eagerly. | `lazy()` them like `AlbumBaselines` |
 | `LastfmConnectionPanel` | Re-fetches matches after every settings save because the effect depends on the `connection` object | Depend on `connection?.state` |
 
@@ -118,12 +155,12 @@ Smaller correctness items:
 
 ## Verification
 
-Run on 2026-09-30 after the fixes above:
+Run on 2026-09-30 after all the fixes above:
 
 | Check | Result |
 |---|---|
-| `npm test` | 424 passed, 80 skipped, 0 failed |
-| `npm run test:integration` | 128 passed, 0 failed (temporary replica sets) |
+| `npm test` | 434 passed, 81 skipped, 0 failed |
+| `npm run test:integration` | 129 passed, 0 failed (temporary replica sets) |
 | `npm --prefix frontend run lint` | Clean |
 | `npm --prefix frontend run build` | Succeeds, with the existing warning that a chunk is over 500 kB |
 

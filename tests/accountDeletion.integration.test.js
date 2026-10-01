@@ -183,6 +183,42 @@ integration("account deletion removes diary, boards, social data, and profile, a
   assert.deepEqual(await accountCounts(other), { ...otherBefore, follows: 0, notifications: 0 });
 });
 
+integration("account deletion removes the Last.fm connection and its private evidence without the worker", async () => {
+  // Raw inserts: deletion only filters on userId and connectionId.
+  const { Connection, Scrobble, Detection, DetectionEvidence, Job } = Listening;
+  async function lastfmAccount(userId, username) {
+    const { insertedId: connectionId } = await Connection.collection.insertOne({ userId, username, usernameKey: username, state: "active", revision: 1 });
+    await Scrobble.collection.insertOne({ eventId: crypto.randomUUID(), connectionId, identityKey: `${username}-event`, artist: "Artist", album: "Album", track: "Track" });
+    await Detection.collection.insertOne({ connectionId, userId, sessionId: crypto.randomUUID() });
+    await DetectionEvidence.collection.insertOne({ connectionId, sessionId: crypto.randomUUID(), eventId: crypto.randomUUID() });
+    await Job.collection.insertOne({ key: `sync:${connectionId}`, type: "sync", status: "pending", payload: { connectionId: String(connectionId), connectionRevision: 1 }, runAt: new Date() });
+    return connectionId;
+  }
+  const deletedConnection = await lastfmAccount(deleted, "deleted-listener");
+  const otherConnection = await lastfmAccount(other, "other-listener");
+  // Awaiting worker cleanup after a disconnect: still removed immediately.
+  await Connection.collection.updateOne({ _id: deletedConnection }, { $set: { state: "disconnected", revision: 2 } });
+
+  const result = await cleanupUserData(deleted);
+
+  assert.deepEqual(result, { removed: 1 });
+  assert.equal(await Connection.countDocuments({ userId: deleted }), 0);
+  assert.equal(await Connection.exists({ username: "deleted-listener" }), null);
+  for (const Model of [Scrobble, Detection, DetectionEvidence]) {
+    assert.equal(await Model.countDocuments({ connectionId: deletedConnection }), 0);
+    assert.equal(await Model.countDocuments({ connectionId: otherConnection }), 1);
+  }
+  // Jobs keep no reference to the removed connection, and no cleanup job is queued.
+  assert.deepEqual((await Job.findOne({ key: `sync:${deletedConnection}` }).lean()).payload, {});
+  assert.equal(await Job.countDocuments({ "payload.connectionId": String(deletedConnection) }), 0);
+  assert.equal(await Job.countDocuments({ type: "cleanup" }), 0);
+  assert.equal((await Job.findOne({ key: `sync:${otherConnection}` }).lean()).payload.connectionId, String(otherConnection));
+  assert.equal((await Connection.findById(otherConnection).lean()).username, "other-listener");
+
+  // A retried webhook finds nothing left to remove.
+  assert.deepEqual(await cleanupUserData(deleted), { removed: 0 });
+});
+
 integration("account deletion rolls back every removal when the cleanup transaction does not commit", async () => {
   await log(deleted, { boardIds: [board.boardId] });
   await saveAlbum(deleted, board.boardId, album._id);
@@ -190,6 +226,8 @@ integration("account deletion rolls back every removal when the cleanup transact
   await Like.create({ userId: deleted, targetType: "album", albumCatalogId: album._id });
   await Follow.create({ followerId: other, followingId: deleted });
   await Notification.create({ recipientUserId: deleted, actorUserId: other, type: "follow" });
+  const { insertedId: connectionId } = await Listening.Connection.collection.insertOne({ userId: deleted, username: "kept-listener", usernameKey: "kept-listener", state: "active", revision: 1 });
+  await Listening.Scrobble.collection.insertOne({ eventId: crypto.randomUUID(), connectionId, identityKey: "kept-event" });
   const before = await accountCounts(deleted);
   const sessionFactory = async () => {
     const session = await mongoose.startSession();
@@ -204,4 +242,6 @@ integration("account deletion rolls back every removal when the cleanup transact
     listens: 1, memberships: 1, receipts: 1, boards: 2, items: 1, likes: 1, follows: 1, notifications: 1, profiles: 1, reviews: 1,
   });
   assert.ok((await Review.findById(review._id).select("+creationKey").lean()).creationKey);
+  assert.equal((await Listening.Connection.findById(connectionId).lean()).state, "active");
+  assert.equal(await Listening.Scrobble.countDocuments({ connectionId }), 1);
 });
