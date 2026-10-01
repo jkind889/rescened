@@ -507,3 +507,25 @@ When introducing or changing a code:
 3. Add a focused test for the status, `code`, and any required metadata such as `details` or `Retry-After`.
 4. Preserve existing code/status pairs unless an API migration is explicitly planned.
 5. Keep provider-native and internal errors behind a small public API vocabulary.
+
+## Reviewed standard baselines
+
+The moderator-only `/moderation/album-baselines` API follows the existing `UNAUTHORIZED` (401), `MODERATOR_REQUIRED` (403), and rate-limit (429 with `Retry-After`) contracts.
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `INVALID_BASELINE_REQUEST` | 400 | Invalid command, identifier, revision, or unknown field. |
+| `TRACKLIST_ENRICHMENT_DISABLED` | 503 | New provider discovery is disabled. |
+| `TRACKLIST_BASELINE_MODERATION_DISABLED` | 503 | Baseline decisions are disabled. |
+| `BASELINE_UNAVAILABLE` | 503 | Transaction-capable database is unavailable. |
+| `BASELINE_REVISION_CONFLICT` | 409 | Another baseline decision changed the review. |
+| `TARGET_REVISION_CONFLICT` | 409 | Album or submission changed since preview. |
+| `RELEASE_GROUP_REQUIRED` | 409 | Select a MusicBrainz release group first. |
+| `RELEASE_GROUP_MISMATCH` | 409 | Release conflicts with the selected/catalog identity. |
+| `CANDIDATE_NOT_FOUND` | 409 | Preview is missing or expired for this revision. |
+| `INCOMPLETE_TRACKLIST` | 409 | A complete ordered baseline is required. |
+| `UNSUPPORTED_RELEASE_TYPE` | 409 | Only albums and EPs are eligible in this release. |
+| `INVALID_BASELINE_STATE` | 409 | Confirm or defer on a current reviewed baseline, or replace without one. |
+| `MUSICBRAINZ_RATE_LIMITED` | 503 | MusicBrainz asked the server to slow down; `Retry-After` carries its delay when supplied. |
+
+Provider errors retain bounded error codes without raw responses. Any provider error that carries an upstream delay sets `Retry-After` in seconds. Refresh stale review state before retrying; do not retry automatically from the UI. See [baseline workflow](TRACKLIST_BASELINES.md).

@@ -27,6 +27,8 @@ const notificationSchema = new mongoose.Schema(
 );
 
 notificationSchema.index({ recipientUserId: 1, readAt: 1, createdAt: -1 });
+// Account deletion removes notifications the user sent as well as received.
+notificationSchema.index({ actorUserId: 1 });
 notificationSchema.index(
   { recipientUserId: 1, actorUserId: 1, reviewId: 1, type: 1 },
   { unique: true, partialFilterExpression: { type: "review_like" } },

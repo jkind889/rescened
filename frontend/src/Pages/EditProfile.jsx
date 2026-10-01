@@ -68,6 +68,17 @@ function AlbumCover({ src, title }) {
   return <img className="edit-profile-cover" src={src} alt={`${title} cover`} />;
 }
 
+const PIN_SNIPPET_LENGTH = 30;
+
+// A short excerpt so reviews of similar albums are easy to tell apart in the
+// pinned-review picker.
+function reviewSnippet(text) {
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  const excerpt = clean.length > PIN_SNIPPET_LENGTH ? `${clean.slice(0, PIN_SNIPPET_LENGTH).trimEnd()}…` : clean;
+  return ` · “${excerpt}”`;
+}
+
 export function EditProfile() {
   const navigate = useNavigate();
   const { getToken, isSignedIn } = useAuth();
@@ -644,7 +655,7 @@ export function EditProfile() {
                       <option value="">No pinned review</option>
                       {reviews.map((review) => (
                         <option key={review.reviewId} value={review.reviewId}>
-                          {review.title || "Untitled album"} · {review.rating}/5
+                          {review.title || "Untitled album"} · {review.rating}/5{reviewSnippet(review.reviewText)}
                         </option>
                       ))}
                     </select>

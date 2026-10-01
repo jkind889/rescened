@@ -10,11 +10,26 @@ import {
   useAuth,
 } from '@clerk/react'
 
+function SiteNavLink({ to, current, children })
+{
+    return (
+        <Link
+            to={to}
+            className={`nav-link${current ? " nav-link-current" : ""}`}
+            aria-current={current ? "page" : undefined}
+        >
+            {children}
+        </Link>
+    )
+}
+
 function Navbar()
 {
     const { getToken, isLoaded, isSignedIn } = useAuth()
     const location = useLocation()
     const [unreadCount, setUnreadCount] = useState(0)
+    const [isModerator, setIsModerator] = useState(false)
+    const isCurrent = (path) => location.pathname === path || location.pathname.startsWith(`${path}/`)
     const [theme, setTheme] = useState(() => localStorage.getItem("rescened-theme") || "dark")
 
     useEffect(() => {
@@ -69,28 +84,64 @@ function Navbar()
         }
     }, [getToken, isLoaded, isSignedIn, location.pathname])
 
+    // Display hint only: the moderation API enforces moderator access itself.
+    useEffect(() => {
+        const controller = new AbortController()
+
+        async function fetchModeratorAccess() {
+            if (!isLoaded || !isSignedIn) {
+                setIsModerator(false)
+                return
+            }
+
+            try {
+                const token = await getToken()
+                const response = await fetch(`${API_BASE_URL}/moderation/album-suggestions/access`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                    signal: controller.signal,
+                })
+                const data = response.ok ? await response.json() : {}
+                setIsModerator(data.moderator === true)
+            } catch (error) {
+                if (error.name !== "AbortError") {
+                    setIsModerator(false)
+                }
+            }
+        }
+
+        fetchModeratorAccess()
+
+        return () => controller.abort()
+    }, [getToken, isLoaded, isSignedIn])
+
     return (
         <>
             <header className="site-header">
-                <nav className="navbar navbar-expand site-navbar">
-                    <div className="container-fluid site-navbar-inner">
+                <nav className="site-navbar" aria-label="Main">
+                    <div className="site-navbar-inner">
                         <Link to="/" className="navbar-brand">rescened</Link>
                         <div className="site-navbar-center">
-                            <ul className="navbar nav site-nav-links">
-                                <li className="nav-item">
-                                    <Link to="/boards" className="nav-link active">Boards</Link>
+                            <ul className="site-nav-links">
+                                <li>
+                                    <SiteNavLink to="/boards" current={isCurrent("/boards")}>Boards</SiteNavLink>
                                 </li>
-                                <li className="nav-item">
-                                    <Link to="/community/approved" className={`nav-link${location.pathname === "/community/approved" ? " nav-link-current" : ""}`}>Community</Link>
+                                <li>
+                                    <SiteNavLink to="/community" current={location.pathname === "/community"}>Community</SiteNavLink>
+                                </li>
+                                <li>
+                                    <SiteNavLink to="/community/approved" current={isCurrent("/community/approved")}>Approved</SiteNavLink>
+                                </li>
+                                <li>
+                                    <SiteNavLink to="/patch-notes" current={isCurrent("/patch-notes")}>Patch notes</SiteNavLink>
                                 </li>
                                 <Show when="signed-in">
-                                    <li className="nav-item">
-                                        <Link
+                                    <li>
+                                        <SiteNavLink
                                             to="/suggestions"
-                                            className={`nav-link${location.pathname.startsWith("/suggestions") || location.pathname.startsWith("/moderation/album-suggestions") ? " nav-link-current" : ""}`}
+                                            current={isCurrent("/suggestions")}
                                         >
                                             Suggestions
-                                        </Link>
+                                        </SiteNavLink>
                                     </li>
                                 </Show>
                             </ul>
@@ -98,15 +149,28 @@ function Navbar()
                                 <SearchBar />
                             </div>
                             <Show when="signed-in">
-                                <Link to="/notifications" className="nav-link nav-notification-link active" aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ""}`}>
+                                <Link
+                                    to="/notifications"
+                                    className={`nav-link nav-notification-link${isCurrent("/notifications") ? " nav-link-current" : ""}`}
+                                    aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ""}`}
+                                >
                                     Notifications
                                     {unreadCount > 0 && (
                                         <span className="nav-notification-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>
                                     )}
                                 </Link>
+                                {isModerator && (
+                                    <Link
+                                        to="/moderation/album-suggestions"
+                                        className={`nav-link nav-utility-link${isCurrent("/moderation") ? " nav-link-current" : ""}`}
+                                        aria-current={isCurrent("/moderation") ? "page" : undefined}
+                                    >
+                                        Moderation
+                                    </Link>
+                                )}
                             </Show>
                         </div>
-                        <div className="nav navbar-right site-navbar-actions">
+                        <div className="site-navbar-actions">
                             <button
                                 type="button"
                                 className="theme-toggle"
@@ -129,9 +193,9 @@ function Navbar()
                             </Show>
 
                             <Show when="signed-in">
-                                <Link to="/account" className="nav-link active px-0">
+                                <SiteNavLink to="/account" current={isCurrent("/account")}>
                                     Account
-                                </Link>
+                                </SiteNavLink>
                                 <UserButton afterSignOutUrl="/" />
                             </Show>
                         </div>

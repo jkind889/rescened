@@ -13,6 +13,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const mongoose = require("mongoose");
 const AlbumCatalog = require("../models/AlbumCatalog");
+const { catalogRevisionOf } = require("../lib/listening/common");
+const { carryCoverRevision } = require("../lib/listening/mappingRevisions");
 
 const DEFAULT_CONCURRENCY = 4;
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -339,6 +341,7 @@ function buildReport({ mode, generatedAt, entries, scanned }) {
     failures: entries.filter((entry) => entry.status === "failed").length,
     referenceConflicts: entries.filter((entry) => entry.reason === "reference_conflict").length,
     concurrentUpdates: entries.filter((entry) => entry.reason === "concurrent_update").length,
+    revisionCarryFailures: entries.filter((entry) => entry.revisionCarryFailed).length,
   };
   return {
     reportVersion: "1.0.0",
@@ -484,12 +487,16 @@ async function processAlbum(album, { options, dependencies, Model, resolver, con
 
   if (!options.apply || referenceConflict) return result;
 
+  // Albums written before revisions were tracked have no stored field and
+  // count as revision 1, so set the next revision explicitly; $inc on a
+  // missing field would leave it at 1 and the carry below would find nothing.
+  const fromRevision = catalogRevisionOf(plain(album));
   const update = {
     $set: {
       cover: resolution.cover,
       "fieldProvenance.cover": resolution.provenance,
+      catalogRevision: fromRevision + 1,
     },
-    $inc: { catalogRevision: 1 },
   };
   if (appendReference) update.$addToSet = { externalReferences: reference };
   let writeResult;
@@ -518,6 +525,20 @@ async function processAlbum(album, { options, dependencies, Model, resolver, con
       cover: undefined,
       provenance: undefined,
     };
+  }
+  // A cover cannot change album identity or the reviewed tracklist, so the
+  // reviewed baseline and active album mappings follow the album to its new
+  // revision in one transaction. If that fails, the cover stays committed and
+  // both stay stale (fail closed) until they are re-reviewed.
+  const carry = dependencies.carryCoverRevision || (Model === AlbumCatalog ? carryCoverRevision : null);
+  if (carry && base.albumId) {
+    try {
+      const carried = await carry({ albumId: base.albumId, fromRevision, toRevision: fromRevision + 1, now: context.now() });
+      result.baselineCarried = Boolean(carried?.baselineCarried);
+      result.mappingsCarried = Number(carried?.mappingsCarried || 0);
+    } catch {
+      result.revisionCarryFailed = true;
+    }
   }
   return result;
 }
@@ -637,7 +658,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     const report = await runBackfill(options, dependencies);
     const written = writeJsonAtomic(target, report);
     output.log(JSON.stringify({ mode: report.mode, counts: report.counts, report: written }, null, 2));
-    const hasIssues = report.counts.unresolved > 0 || report.counts.conflicts > 0 || report.counts.failures > 0;
+    const hasIssues = report.counts.unresolved > 0 || report.counts.conflicts > 0 || report.counts.failures > 0 || report.counts.revisionCarryFailures > 0;
     return hasIssues ? 2 : 0;
   } catch (error) {
     if (target) {

@@ -1,0 +1,12 @@
+[
+  {
+    "id": "introducing-patch-notes",
+    "date": "2026-09-28",
+    "title": "A home for what’s new",
+    "summary": "Follow along as Rescened grows. Patch notes bring new features, improvements, and fixes together in one place.",
+    "changes": [
+      "Open Patch notes from the navigation bar, whether you’re signed in or just browsing.",
+      "Read the latest updates first, with earlier releases kept here to explore."
+    ]
+  }
+]

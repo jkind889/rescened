@@ -5,6 +5,12 @@ const mongoose = require("mongoose");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
 
 const AlbumCatalog = require("../models/AlbumCatalog");
+const Listening = require("../models/Listening");
+const Baselines = require("../models/AlbumBaseline");
+const { baselineForAlbum } = require("../lib/baselines/service");
+const { hashCandidateTracklist } = require("../lib/baselines/musicBrainz");
+const { carryCoverRevision } = require("../lib/listening/mappingRevisions");
+const { mappingKey, normalize } = require("../lib/listening/common");
 const { runBackfill } = require("../scripts/backfillMissingAlbumCovers");
 
 const BARCODE = "012345678905";
@@ -27,6 +33,11 @@ async function setup() {
   replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(replSet.getUri(), { dbName: "rescened_cover_backfill" });
   await AlbumCatalog.syncIndexes();
+  await Promise.all([...Object.values(Listening), ...Object.values(Baselines)].map((model) => model.init()));
+}
+
+function mapping(album, artist, title, catalogRevision) {
+  return { mappingId: crypto.randomUUID(), key: mappingKey(artist, title), provider: "lastfm", artist, album: title, artistKey: normalize(artist), albumKey: normalize(title), albumId: album.albumId, catalogRevision, revision: 1, status: "active", reviewer: "moderator", reason: "fixture" };
 }
 
 async function teardown() {
@@ -49,6 +60,8 @@ async function mockedProviderBackfillTest() {
     externalReferences: [{ provider: "barcode", entityType: "release", externalId: BARCODE }],
     catalogSource: "import",
   });
+  // Most imported albums predate revision tracking and store no catalogRevision.
+  await AlbumCatalog.collection.updateOne({ _id: target._id }, { $unset: { catalogRevision: "" } });
   const manual = await AlbumCatalog.create({
     albumId: crypto.randomUUID(),
     title: "Manual Cover Album",
@@ -57,6 +70,18 @@ async function mockedProviderBackfillTest() {
     cover: "https://images.example.test/manual.jpg",
     catalogSource: "manual",
   });
+  // One mapping was reviewed at the album's current revision; the other was
+  // already stranded by an earlier change and must stay stale.
+  const [current, stranded] = await Listening.AlbumMapping.create([
+    mapping(target, "Exact Artist", "Exact Barcode Album", 1),
+    mapping(target, "Exact Artist", "Exact Barcode Album (Deluxe)", 3),
+  ]);
+  // A tracklist baseline reviewed at the same revision.
+  const candidate = { releaseMbid: RELEASE_MBID, releaseGroupMbid: GROUP_MBID, title: "Exact Barcode Album", artistDisplayName: "Exact Artist", date: "2026", country: "US", formats: ["CD"], disambiguation: "", status: "Official", tracks: [{ discNumber: 1, trackNumber: 1, title: "One", durationMs: 180000, artistDisplayName: "Exact Artist", releaseTrackMbid: crypto.randomUUID(), recordingMbid: crypto.randomUUID() }], retrievedAt: new Date("2026-08-01T00:00:00Z"), sourceUrl: `https://musicbrainz.org/release/${RELEASE_MBID}`, license: "CC0" };
+  candidate.tracklistHash = hashCandidateTracklist(candidate);
+  const [baseline] = await Baselines.Baseline.create([{ baselineId: crypto.randomUUID(), albumId: target.albumId, version: 1, catalogRevision: 1, candidate, reviewedByUserId: "moderator", reviewedAt: new Date(), reason: "Reviewed standard" }]);
+  const [head] = await Baselines.Head.create([{ targetKind: "albums", targetId: target.albumId, revision: 1, status: "reviewed", targetRevision: 1, activeBaselineId: baseline._id, reason: "Reviewed standard" }]);
+  assert.equal((await baselineForAlbum(target.toObject())).baselineId, baseline.baselineId);
   const calls = [];
   const dependencies = {
     AlbumCatalog,
@@ -105,6 +130,30 @@ async function mockedProviderBackfillTest() {
   assert.equal(persisted.fieldProvenance.cover.releaseMbid, RELEASE_MBID);
   assert.equal(persisted.externalReferences.some((reference) => reference.externalId === RELEASE_MBID), true);
   assert.equal((await AlbumCatalog.findById(manual._id).lean()).cover, "https://images.example.test/manual.jpg");
+  assert.equal(persisted.catalogRevision, 2);
+  assert.equal(first.entries[0].mappingsCarried, 1);
+  assert.equal(first.entries[0].baselineCarried, true);
+  assert.equal(first.counts.revisionCarryFailures, 0);
+  const carriedBaseline = await baselineForAlbum(persisted);
+  assert.equal(carriedBaseline.baselineId, baseline.baselineId, "the same reviewed baseline stays active");
+  assert.equal(carriedBaseline.version, 1);
+  assert.equal(carriedBaseline.catalogRevision, 2);
+  const carriedHead = await Baselines.Head.findById(head._id).lean();
+  assert.equal(carriedHead.status, "reviewed");
+  assert.equal(carriedHead.targetRevision, 2);
+  assert.equal(carriedHead.revision, 2);
+  const audit = await Baselines.Audit.findOne({ targetId: target.albumId, action: "carry_forward" }).lean();
+  assert.deepEqual(audit.details, { fromCatalogRevision: 1, toCatalogRevision: 2 });
+  assert.equal(audit.baselineId, baseline.baselineId);
+  // A carry toward a revision the album has already moved past changes nothing.
+  assert.deepEqual(await carryCoverRevision({ albumId: target.albumId, fromRevision: 2, toRevision: 3 }), { baselineCarried: false, mappingsCarried: 0 });
+  assert.equal((await Baselines.Head.findById(head._id).lean()).targetRevision, 2);
+  const carried = await Listening.AlbumMapping.findById(current._id).lean();
+  assert.equal(carried.catalogRevision, 2, "a cover fill does not strand a reviewed mapping");
+  assert.equal(carried.revision, 1, "carrying forward is not a new moderator decision");
+  assert.equal((await Listening.AlbumMapping.findById(stranded._id).lean()).catalogRevision, 3);
+  const jobs = await Listening.Job.find({ type: "reprocess" }).lean();
+  assert.deepEqual(jobs.map((job) => job.payload.mappingId), [current.mappingId]);
   assert.equal(calls.length, 3);
   assert.equal(calls[0].headers["User-Agent"], dependencies.userAgent);
 

@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Routes, Route } from "react-router-dom";
-import 'bootstrap/dist/css/bootstrap.min.css';
+import "./reset.css";
 import "./App.css";
 import SearchResults from "./Pages/SearchResults";
 import AlbumDetail from "./Components/AlbumDetail";
@@ -11,16 +11,21 @@ import FrontPage from "./Pages/FrontPage";
 import Layout from "./Layout";
 import Account from "./Pages/Account";
 import EditProfile from "./Pages/EditProfile";
+import LastfmCallback from "./Pages/LastfmCallback";
+import AlbumMappings from "./Pages/AlbumMappings";
 import ProfileNetwork from "./Pages/ProfileNetwork";
 import Boards from "./Pages/Boards";
 import BoardDetail from "./Pages/BoardDetail";
 import Notifications from "./Pages/Notifications";
+import PatchNotes from "./Pages/PatchNotes";
+import Community from "./Pages/Community";
 import ProtectedRoute from "./Components/ProtectedRoute";
 
 const Suggestions = lazy(() => import("./Pages/Suggestions"));
 const SuggestionEditor = lazy(() => import("./Pages/SuggestionEditor"));
 const ApprovedSuggestions = lazy(() => import("./Pages/ApprovedSuggestions"));
 const ModerationSuggestions = lazy(() => import("./Pages/ModerationSuggestions"));
+const AlbumBaselines = lazy(() => import("./Pages/AlbumBaselines"));
 
 export function App() {
    return (
@@ -45,7 +50,9 @@ export function App() {
             </ProtectedRoute>} />
             <Route path="/review-dispatches" element={<ReviewDispatches />} />
             <Route path="/popular-albums" element={<PopularAlbums />} />
+            <Route path="/community" element={<Community />} />
             <Route path="/community/approved" element={<ApprovedSuggestions />} />
+            <Route path="/patch-notes" element={<PatchNotes />} />
             <Route path="/account" element={<Account />} />
             <Route path="/account/network" element={<ProfileNetwork />} />
             <Route path="/notifications" element={
@@ -80,6 +87,22 @@ export function App() {
               <ProtectedRoute>
                 <ModerationSuggestions />
               </ProtectedRoute>} />
+            <Route path="/moderation/album-mappings" element={
+              <ProtectedRoute>
+                <AlbumMappings />
+              </ProtectedRoute>} />
+            <Route path="/moderation/album-mappings/:caseId" element={
+              <ProtectedRoute>
+                <AlbumMappings />
+              </ProtectedRoute>} />
+            <Route path="/moderation/album-baselines" element={
+              <ProtectedRoute>
+                <AlbumBaselines />
+              </ProtectedRoute>} />
+            <Route path="/moderation/album-baselines/:albumId" element={
+              <ProtectedRoute>
+                <AlbumBaselines />
+              </ProtectedRoute>} />
             <Route path="/profile/:userId/reviews" element={<ViewReviews />} />
             <Route path="/profile/:userId/network" element={<ProfileNetwork />} />
             <Route path="/profile/:userId/boards/:boardId" element={<BoardDetail />} />
@@ -88,6 +111,7 @@ export function App() {
               <ProtectedRoute>
                 <EditProfile />
               </ProtectedRoute>} />
+            <Route path="/account/lastfm/callback" element={<LastfmCallback />} />
           </Route>
         </Routes>
         </Suspense>

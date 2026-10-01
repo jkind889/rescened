@@ -15,6 +15,7 @@ const { formatBoard: libraryBoard, savedAlbums: getSavedAlbums } = require("./ut
 const { transaction, claimBoard } = require("./utils/boardMutations");
 const { listListens } = require("./utils/listeningDiary");
 const { getListenActivity } = require("./utils/listenActivity");
+const { suggestPeople } = require("./utils/peopleSuggestions");
 
 const router = express.Router();
 const MAX_FAVORITES = 5;
@@ -110,7 +111,7 @@ async function formatPrivateProfile(profile) {
     pinnedBoard: null,
   };
 }
-async function followable(userId) { return Boolean(await UserProfile.exists({ userId }) || await Review.exists({ userId })); }
+async function followable(userId) { if (Review.isDeletedAuthor(userId)) return false; return Boolean(await UserProfile.exists({ userId }) || await Review.exists({ userId })); }
 async function profileAccess(target, viewerId) { if (!(await followable(target))) return { status: 404, body: { error: "User not found" } }; const profile = await ensureProfile(target); if (profile.isPrivate && target !== viewerId) return { status: 403, body: PRIVATE_ERROR, profile }; return { status: 200, profile }; }
 async function activity(userId, includePrivate = false, viewerId = "") {
   const profileAuthors = await authors([userId]); const actor = profileAuthors.get(userId) || author(userId);
@@ -168,6 +169,12 @@ router.put("/me", auth, async (req, res) => {
   } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to update profile", ...(error.code ? { code: error.code } : {}) }); }
 });
 router.patch("/me", auth, async (req, res) => { try { if (typeof req.body.isPrivate !== "boolean") return res.status(400).json({ error: "isPrivate must be true or false" }); const profile = await UserProfile.findOneAndUpdate({ userId: req.userId }, { $set: { userId: req.userId, isPrivate: req.body.isPrivate } }, { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }).populate("favoriteAlbums.albumCatalogId").populate("listeningNextAlbum.albumCatalogId").populate({ path: "pinnedReviewId", populate: { path: "albumCatalogId" } }).populate("pinnedBoardId"); res.json({ ...(await formatProfile(profile)), ...(await socialStats(req.userId, req.userId)) }); } catch { res.status(500).json({ error: "Failed to update profile" }); } });
+
+// Registered before the /:userId routes so "suggestions" is not read as a user ID.
+router.get("/suggestions", async (req, res) => {
+  try { res.json({ people: await suggestPeople({ viewerId: viewer(req), limit: req.query.limit, authors }) }); }
+  catch { res.status(500).json({ error: "Failed to fetch suggestions" }); }
+});
 
 router.put("/:userId/follow", auth, async (req, res) => { try { const target = String(req.params.userId || "").trim(); if (target === req.userId) return res.status(400).json({ error: "You cannot follow yourself" }); if (typeof req.body.following !== "boolean") return res.status(400).json({ error: "following must be true or false" }); if (!(await followable(target))) return res.status(404).json({ error: "User not found" }); if (req.body.following) { await Follow.updateOne({ followerId: req.userId, followingId: target }, { $setOnInsert: { followerId: req.userId, followingId: target } }, { upsert: true }); await Notification.updateOne({ recipientUserId: target, actorUserId: req.userId, type: "follow" }, { $setOnInsert: { notificationId: crypto.randomUUID(), recipientUserId: target, actorUserId: req.userId, type: "follow" } }, { upsert: true }); } else await Follow.deleteOne({ followerId: req.userId, followingId: target }); res.json({ targetUserId: target, ...(await socialStats(target, req.userId)) }); } catch { res.status(500).json({ error: "Failed to update follow status" }); } });
 

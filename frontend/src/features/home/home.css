@@ -1,0 +1,726 @@
+/*
+ * Home (circle) and Community pages.
+ * Light panels, monospace type, letter-spaced section titles, hairline rules.
+ */
+
+.home-page {
+  --home-panel: #0f0f0f;
+  --home-panel-line: #262626;
+  --home-hover: rgba(255, 255, 255, 0.04);
+
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(0, 1.35fr);
+  gap: clamp(28px, 5vw, 96px);
+  width: 100%;
+  margin: 0;
+  padding: clamp(28px, 4vw, 56px) 0 72px;
+  color: var(--app-text);
+  font-family: var(--app-font);
+}
+
+:root[data-theme="light"] .home-page {
+  --home-panel: #f4f4f2;
+  --home-panel-line: #d9d9d4;
+  --home-hover: rgba(17, 19, 21, 0.035);
+}
+
+.home-page p,
+.home-page h2,
+.home-page h3,
+.home-page blockquote,
+.home-page ol {
+  margin: 0;
+}
+
+.home-page ol {
+  padding: 0;
+  list-style: none;
+}
+
+.home-page a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Left rail */
+
+.home-rail {
+  position: sticky;
+  top: calc(54px + 28px);
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: clamp(36px, 6vh, 64px);
+  min-width: 0;
+}
+
+/*
+ * Listening log: a compact, uppercase index. Rows sit dimmed until hovered;
+ * the open row inverts into a highlight and reveals its tracklist.
+ */
+
+.listening-log {
+  display: grid;
+  justify-items: start;
+  gap: 14px;
+  width: min(100%, 520px);
+  font-family: var(--app-font);
+  font-size: 0.7rem;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+
+.listening-log-label {
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: var(--app-text);
+  color: var(--app-bg);
+  font: inherit;
+  line-height: 1.2;
+}
+
+.listening-log-list {
+  display: grid;
+  width: 100%;
+}
+
+.listening-log-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) 4ch 6ch;
+  gap: 1.25rem;
+  align-items: baseline;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--app-text);
+  font: inherit;
+  letter-spacing: inherit;
+  line-height: 1.35;
+  text-align: left;
+  text-transform: inherit;
+  opacity: 0.7;
+  transition: background-color 0.5s, color 0.5s, padding 0.5s, border-radius 0.5s, opacity 0.2s;
+}
+
+.listening-log-row:hover,
+.listening-log-row:focus-visible {
+  opacity: 1;
+}
+
+.listening-log-item.is-open .listening-log-row {
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: var(--app-text);
+  color: var(--app-bg);
+  opacity: 1;
+}
+
+.listening-log-title,
+.listening-log-artist {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listening-log-source {
+  color: inherit;
+  opacity: 0.6;
+}
+
+.listening-log-row time {
+  text-align: right;
+}
+
+.listening-log-tracks {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 8px 8px 14px;
+  text-transform: none;
+}
+
+.listening-log-tracks ul {
+  margin: 0;
+  padding-left: 1.2em;
+  color: var(--app-muted);
+  line-height: 1.6;
+  list-style: disc;
+}
+
+.listening-log-tracks p {
+  color: var(--app-muted);
+}
+
+.listening-log-album-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-transform: uppercase;
+}
+
+.listening-log-album-link svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.listening-log-album-link:hover,
+.listening-log-album-link:focus-visible {
+  color: var(--app-accent);
+}
+
+.listening-log-note {
+  color: var(--app-muted);
+  line-height: 1.6;
+  text-transform: none;
+}
+
+.listening-log-note a {
+  color: var(--app-text);
+  text-decoration: underline !important;
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 640px) {
+  .listening-log-row {
+    grid-template-columns: minmax(0, 1fr) 6ch;
+    gap: 0.75rem;
+  }
+
+  .listening-log-artist,
+  .listening-log-source {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .listening-log-row {
+    transition: none;
+  }
+}
+
+/* Masthead */
+
+.masthead-card {
+  display: grid;
+  gap: 1.4rem;
+  width: min(100%, 420px);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.masthead-name {
+  font-size: 1.02em;
+}
+
+.masthead-rule {
+  display: block;
+  width: 42px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+.masthead-edition {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 1.04em;
+}
+
+/*
+ * Open layout (home and Community): rail on the left, unboxed feed panels on
+ * the right against the page edge.
+ */
+
+.home-page-open {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
+}
+
+.home-page-open .home-feed {
+  justify-self: end;
+}
+
+/* No panel boxes on the home feed: content sits flush on the page. */
+.home-page-open .signal-panel {
+  padding: 0 0 20px;
+  border-bottom: 0;
+  background: transparent;
+}
+
+/* Left side: the log, reaching from the edge to about the middle. */
+.home-page-open .home-rail {
+  justify-self: stretch;
+  padding-right: clamp(0px, 6vw, 120px);
+}
+
+.home-page-open .listening-log {
+  width: 100%;
+}
+
+.home-page-open .home-rail > .signal-panel {
+  width: min(100%, 520px);
+}
+
+/* Right feed */
+
+.home-feed {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  justify-self: end;
+  width: 100%;
+  max-width: 560px;
+  min-width: 0;
+}
+
+.signal-panel {
+  display: grid;
+  gap: 12px;
+  padding: 20px clamp(16px, 2vw, 28px) 24px;
+  background: var(--home-panel);
+  border-bottom: 1px solid var(--home-panel-line);
+}
+
+.signal-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--home-panel-line);
+}
+
+.signal-panel-header h2 {
+  font-family: var(--app-font);
+  font-size: 0.76rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.signal-more {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+}
+
+.signal-more svg,
+.home-community-link svg {
+  width: 13px;
+  height: 13px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.signal-more:hover,
+.signal-more:focus-visible,
+.home-community-link:hover,
+.home-community-link:focus-visible {
+  color: var(--app-accent);
+}
+
+.signal-empty {
+  color: var(--app-muted);
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+
+.signal-cover {
+  display: block;
+  object-fit: cover;
+  background: var(--app-surface-strong);
+}
+
+.signal-cover-empty {
+  display: grid;
+  place-items: center;
+  color: var(--app-muted);
+  font-size: 0.5rem;
+  text-align: center;
+}
+
+/* Ranked album rows */
+
+.signal-rank-list li {
+  border-bottom: 1px solid var(--home-panel-line);
+}
+
+.signal-rank-row {
+  display: grid;
+  grid-template-columns: 28px 48px minmax(0, 1fr) auto;
+  gap: 0.9rem;
+  align-items: center;
+  padding: 10px 0;
+}
+
+.signal-rank-row:hover,
+.signal-rank-row:focus-visible {
+  background: var(--home-hover);
+}
+
+.signal-rank,
+.signal-rank-context {
+  font-size: 0.72rem;
+}
+
+.signal-rank-cover {
+  width: 48px;
+  height: 48px;
+}
+
+.signal-rank-copy {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.signal-rank-copy strong,
+.signal-rank-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.signal-rank-copy strong {
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.signal-rank-copy small {
+  color: var(--app-muted);
+  font-size: 0.72rem;
+}
+
+.signal-rank-context {
+  white-space: nowrap;
+}
+
+/* Review queue: logged albums without the viewer's review */
+
+.signal-queue li {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--home-panel-line);
+}
+
+.signal-queue-album {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.signal-queue-cover {
+  width: 40px;
+  height: 40px;
+}
+
+.signal-queue-album:hover strong,
+.signal-queue-album:focus-visible strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.signal-queue-action {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 3px 8px;
+  border: 1px solid var(--home-panel-line);
+  border-radius: 3px;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+}
+
+.signal-queue-action svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.signal-queue-action:hover,
+.signal-queue-action:focus-visible {
+  border-color: var(--app-text);
+  background: var(--app-text);
+  color: var(--app-bg);
+}
+
+button.signal-queue-action {
+  background: transparent;
+  color: inherit;
+  font-family: var(--app-font);
+  line-height: inherit;
+}
+
+.signal-queue-action.is-active {
+  border-color: var(--app-text);
+  background: var(--app-text);
+  color: var(--app-bg);
+}
+
+.signal-queue-action:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+/* People to follow */
+
+.signal-people li {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--home-panel-line);
+}
+
+.signal-person {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.signal-person-avatar {
+  display: block;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--app-surface-strong);
+}
+
+.signal-person:hover strong,
+.signal-person:focus-visible strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Review dispatches */
+
+.signal-dispatch-list {
+  display: grid;
+}
+
+.signal-dispatch {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr);
+  gap: 0.9rem;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--home-panel-line);
+}
+
+.signal-dispatch:first-child {
+  padding-top: 4px;
+}
+
+.signal-dispatch-cover .signal-cover {
+  width: 60px;
+  height: 60px;
+}
+
+.signal-dispatch-copy {
+  display: grid;
+  align-content: start;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.signal-dispatch-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  font-size: 0.68rem;
+}
+
+.signal-dispatch-meta a:hover,
+.signal-dispatch-copy h3 a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.signal-dispatch-copy h3 {
+  font-family: var(--app-font);
+  font-size: 0.82rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.signal-dispatch-copy blockquote {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--app-muted);
+  font-size: 0.72rem;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+/* Newly reviewed tape (Community) */
+
+.signal-tape {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 10px;
+}
+
+.signal-tape-album {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.signal-tape-album .signal-cover {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+}
+
+.signal-tape-album span {
+  overflow: hidden;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.signal-tape-album small {
+  color: var(--app-muted);
+  font-size: 0.66rem;
+}
+
+.signal-tape-album:hover span {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Community lead album */
+
+.community-lead {
+  display: grid;
+  gap: 0.9rem;
+  width: min(100%, 360px);
+}
+
+.community-lead-label {
+  color: var(--app-accent);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.community-lead-cover {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border: 1px solid var(--home-panel-line);
+}
+
+.community-lead-copy {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.community-lead-copy strong {
+  font-size: clamp(1.3rem, 2vw, 1.9rem);
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.community-lead-copy small {
+  color: var(--app-muted);
+  font-size: 0.8rem;
+}
+
+a.community-lead:hover strong {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.community-lead-empty {
+  min-height: 240px;
+  place-content: center;
+  padding: 1rem;
+  border: 1px solid var(--home-panel-line);
+  color: var(--app-muted);
+  font-size: 0.8rem;
+}
+
+.home-community-link {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 0.5rem;
+  color: var(--app-muted) !important;
+  font-size: 0.72rem;
+}
+
+/* Responsive */
+
+@media (max-width: 980px) {
+  .home-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-page-open .home-rail {
+    grid-template-columns: minmax(0, 1fr);
+    padding-right: 0;
+  }
+
+  .home-rail {
+    position: static;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    padding-left: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .home-page {
+    gap: 32px;
+    padding-top: 20px;
+  }
+
+  .home-rail {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+    order: 1;
+  }
+
+  .listening-log,
+  .masthead-card,
+  .community-lead {
+    width: 100%;
+  }
+
+  .signal-rank-row {
+    grid-template-columns: 24px 44px minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+
+  .signal-rank-cover {
+    width: 44px;
+    height: 44px;
+  }
+
+  .signal-rank-context {
+    grid-column: 3;
+    color: var(--app-muted);
+  }
+
+  .signal-panel-header {
+    flex-wrap: wrap;
+  }
+}

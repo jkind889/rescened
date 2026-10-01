@@ -126,6 +126,7 @@ export default function BoardListens({ album, boardId, userId, onClose, onChange
               {listens.map((listen) => (
                 <li key={listen.listenId}>
                   <time dateTime={listen.listenedOn}>{listen.listenedOn}</time>
+                  {listen.source === "automatic" && <span className="listen-source-label">Automatically logged</span>}
                   {!readOnly && <button type="button" disabled={busy || loading} onClick={() => membership(listen.listenId)}>{mode === "diary" ? "Add to board" : "Remove from board"}</button>}
                 </li>
               ))}

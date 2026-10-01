@@ -10,6 +10,7 @@ const Review = require("../models/Reviews");
 const Like = require("../models/Like");
 const { createCatalogAlbum, UUID_V4 } = require("../routes/utils/albumCatalog");
 const { getNetworkActivity, NETWORK_ACTIVITY_LIMIT } = require("../routes/utils/networkActivity");
+const { resetSuggestionCache, suggestPeople } = require("../routes/utils/peopleSuggestions");
 
 const enabled = String(process.env.RUN_MONGO_INTEGRATION || "").toLowerCase() === "true";
 const collections = [AlbumCatalog, Follow, UserProfile, Review, Like];
@@ -213,4 +214,47 @@ test("network activities use current catalog metadata and review-specific viewer
     assert.equal(Object.hasOwn(item, "_id"), false);
     assert.equal(JSON.stringify(item).includes(String(album._id)), false);
   }
+});
+
+test("people suggestions rank active public reviewers outside the viewer's circle", { skip: !enabled }, async () => {
+  resetSuggestionCache();
+  const now = new Date("2026-09-30T12:00:00Z");
+  const album = await createAlbum("Suggested");
+  await Review.create([
+    reviewRow(1, album, "busy", "2026-09-20T12:00:00Z"),
+    reviewRow(2, album, "busy", "2026-09-21T12:00:00Z"),
+    reviewRow(3, album, "veteran", "2026-01-01T12:00:00Z"),
+    reviewRow(4, album, "veteran", "2026-01-02T12:00:00Z"),
+    reviewRow(5, album, "veteran", "2026-01-03T12:00:00Z"),
+    reviewRow(6, album, "recent-one", "2026-09-25T12:00:00Z"),
+    reviewRow(7, album, "viewer", "2026-09-26T12:00:00Z"),
+    reviewRow(8, album, "followed", "2026-09-27T12:00:00Z"),
+    reviewRow(9, album, "hidden", "2026-09-28T12:00:00Z"),
+    reviewRow(10, album, Review.DELETED_AUTHOR_ID, "2026-09-29T12:00:00Z"),
+  ]);
+  await Follow.create({ followerId: "viewer", followingId: "followed" });
+  await UserProfile.create({ userId: "hidden", isPrivate: true });
+
+  const people = await suggestPeople({ viewerId: "viewer", now, authors });
+  // Recent activity outranks all-time totals; the viewer, people they follow,
+  // private profiles, and deleted authors are never suggested.
+  assert.deepEqual(people.map((person) => person.userId), ["busy", "recent-one", "veteran"]);
+  assert.deepEqual(people[0], {
+    userId: "busy",
+    username: "busy-name",
+    imageUrl: "https://example.test/busy.png",
+    recentReviewCount: 2,
+    reviewCount: 2,
+    isFollowing: false,
+  });
+  assert.equal(people[2].recentReviewCount, 0);
+  assert.equal(people[2].reviewCount, 3);
+
+  const signedOut = await suggestPeople({ now, authors, limit: "10" });
+  assert.deepEqual(signedOut.map((person) => person.userId).sort(), ["busy", "followed", "recent-one", "veteran", "viewer"]);
+  assert.deepEqual((await suggestPeople({ viewerId: "viewer", now, authors, limit: "1" })).map((person) => person.userId), ["busy"]);
+  // Account deletion anonymizes all of the author's reviews. The cached
+  // ranking must stop exposing that identity before its five-minute TTL.
+  await Review.updateMany({ userId: "busy" }, { $set: { userId: Review.DELETED_AUTHOR_ID } });
+  assert.deepEqual((await suggestPeople({ viewerId: "viewer", now, authors })).map((person) => person.userId), ["recent-one", "veteran"]);
 });

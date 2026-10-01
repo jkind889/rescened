@@ -57,6 +57,15 @@ The [benchmark guide](../benchmarks/README.md#initial-baseline-and-adding-cases)
 
 **Open decisions:** Feedback status names and revision/withdrawal behavior, retention of submitted result context, duplicate grouping, and who owns promotion of accepted examples into a released dataset version.
 
+## Automatic album listens
+
+**Direction:** Optional automatic diary logging after a session covers 80% of one reviewed standard tracklist per album, with undo/delete and independent manual entries. Edition-specific detection is deferred.
+
+Persistent Last.fm sync and reviewed album-name mappings establish listening evidence and canonical album identity. MusicBrainz standard-baseline review adds moderator-confirmed release selection, alternatives, and tracklist enrichment. These foundations do not count sessions or write diary entries. See [automatic listens](AUTOMATIC_ALBUM_LISTENS.md), [sync operations](LASTFM_SYNC.md), and [baseline enrichment](TRACKLIST_BASELINES.md).
+
+The historical [feasibility study](LASTFM_LISTENING_STUDY.md) retains its frozen evidence and separately reviewed playback experiments. Study IDs/references are never automatically promoted into production. Private shadow counting and measured pilot validation come before diary publication.
+
+
 ## Other feature ideas
 
 Add future ideas here with the user problem, proposed behavior, and any open questions.

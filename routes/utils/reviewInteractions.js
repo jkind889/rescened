@@ -123,7 +123,7 @@ async function mutateReviewLike(reviewId, userId, liked) {
         { $setOnInsert: { userId, targetType: "review", reviewId: review._id } },
         { upsert: true, session },
       );
-      if (review.userId && review.userId !== userId) {
+      if (review.userId && review.userId !== userId && !Review.isDeletedAuthor(review.userId)) {
         await Notification.updateOne(
           { recipientUserId: review.userId, actorUserId: userId, type: "review_like", reviewId: review._id },
           { $setOnInsert: { notificationId: crypto.randomUUID(), recipientUserId: review.userId, actorUserId: userId, type: "review_like", reviewId: review._id } },

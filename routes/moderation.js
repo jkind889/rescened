@@ -228,6 +228,14 @@ async function transition(req, res, action) {
   }
 }
 
+// Tells the signed-in viewer whether they are a moderator, so the UI can hide
+// moderation links. It reveals only the caller's own status, never the
+// moderator list, and is not an authorization check: every moderation route
+// still enforces moderatorOnly itself. Registered before /:submissionId.
+router.get("/access", authenticate, (req, res) => {
+  res.json({ moderator: isModerator(req.userId) });
+});
+
 router.get("/", authenticate, moderatorOnly, async (req, res) => {
   try {
     const statuses = parseStatusFilter(req.query?.status);

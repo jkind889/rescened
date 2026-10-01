@@ -90,7 +90,9 @@ export function AlbumDetail()
     const [listenCursor, setListenCursor] = useState(null);
     const [listenError, setListenError] = useState("");
     const [isLoadingListens, setIsLoadingListens] = useState(false);
-    const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+    const location = useLocation();
+    // Links such as the home page review queue can ask to open the review form.
+    const [isReviewModalOpen, setIsReviewModalOpen] = useState(() => Boolean(location.state?.openReview));
     const [isBoardModalOpen, setIsBoardModalOpen] = useState(false);
     const [newBoardTitle, setNewBoardTitle] = useState("");
     const [boardSaveMessage, setBoardSaveMessage] = useState("");
@@ -103,9 +105,16 @@ export function AlbumDetail()
     const [deletingReviewId, setDeletingReviewId] = useState("");
     const [deleteErrors, setDeleteErrors] = useState({});
     const { getToken, isSignedIn, userId } = useAuth();
-    const location = useLocation();
     const canUseAuthenticatedActions = Boolean(isSignedIn && userId);
     const activeAlbumIdRef = useRef(albumId);
+
+    // Consume the one-time open-review request so a refresh or back navigation
+    // does not reopen the form.
+    useEffect(() => {
+        if (location.state?.openReview) {
+            navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+        }
+    }, [location.pathname, location.search, location.state, navigate]);
 
     useEffect(() => {
         activeAlbumIdRef.current = albumId;
@@ -528,7 +537,7 @@ export function AlbumDetail()
      }
 
     const artistNames = album.artistCredits?.length ? album.artistCredits.map((credit) => credit.name) : [album.artistDisplayName];
-    const userReviews = reviews.filter((review) => review.userId);
+    const userReviews = reviews.filter((review) => review.reviewId);
     const socialReviewCount = Number(albumSocial.reviewCount) || userReviews.length;
     const socialSavedCount = Number(albumSocial.savedCount) || 0;
     const localAverageRating = userReviews.length
@@ -1087,7 +1096,7 @@ export function AlbumDetail()
                             <span>What to add</span>
                             <select value={boardListenId} onChange={(event) => { setBoardListenId(event.target.value); setBoardSaveMessage(""); }} disabled={isSavingBoard}>
                                 <option value="">Save album</option>
-                                {listens.map((listen) => <option key={listen.listenId} value={listen.listenId}>Listen · {listen.listenedOn} · {new Date(listen.createdAt).toLocaleTimeString()}</option>)}
+                                {listens.map((listen) => <option key={listen.listenId} value={listen.listenId}>Listen · {listen.listenedOn} · {listen.source === "automatic" ? "automatically logged" : new Date(listen.createdAt).toLocaleTimeString()}</option>)}
                             </select>
                         </label>
                         {isLoadingListens && <p role="status">Loading listens…</p>}

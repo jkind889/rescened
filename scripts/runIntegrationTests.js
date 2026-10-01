@@ -3,7 +3,15 @@
 const { spawnSync } = require("node:child_process");
 
 const files = [
+  "tests/albumBaselines.integration.test.js",
+  "tests/listeningBaselines.integration.test.js",
+  "tests/listeningWorker.integration.test.js",
+  "tests/listeningDetection.integration.test.js",
+  "tests/listeningPublication.integration.test.js",
+  "tests/listeningApi.integration.test.js",
+  "tests/listeningSeeds.integration.test.js",
   "tests/listeningDiary.integration.test.js",
+  "tests/accountDeletion.integration.test.js",
   "tests/searchQuality.integration.test.js",
   "tests/benchmarks.integration.test.js",
   "tests/moderation.integration.test.js",

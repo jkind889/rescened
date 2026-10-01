@@ -2,10 +2,12 @@ const crypto = require("node:crypto");
 const mongoose = require("mongoose");
 const AlbumCatalog = require("../../models/AlbumCatalog");
 const Listen = require("../../models/Listen");
+const Review = require("../../models/Reviews");
 const ListenCreation = require("../../models/ListenCreation");
 const BoardListen = require("../../models/BoardListen");
 const Board = require("../../models/Board");
 const UserProfile = require("../../models/UserProfile");
+const { DiaryAlbumFence } = require("../../models/AutomaticListen");
 const { normalizeCatalogAlbum } = require("./albumCatalog");
 const { fail, uuid, fields, calendarDate, listeningDate, creationInput, isCalendarDate } = require("./diaryValidation");
 const { transaction, claimBoard, touchBoard, claimListen } = require("./boardMutations");
@@ -48,7 +50,7 @@ function serializeListen(listen, album) {
   if (!normalized?.albumId) return null;
   return {
     listenId: listen.listenId, userId: listen.userId, albumId: normalized.albumId, album: normalized,
-    listenedOn: listen.listenedOn, createdAt: listen.createdAt, updatedAt: listen.updatedAt,
+    listenedOn: listen.listenedOn, source: listen.source || "manual", createdAt: listen.createdAt, updatedAt: listen.updatedAt,
   };
 }
 
@@ -57,6 +59,23 @@ async function serializedListen(listen, session) {
   const result = serializeListen(listen, album);
   if (!result) throw fail(404, "ALBUM_NOT_FOUND", "Catalog album not found");
   return result;
+}
+
+// Manual and automatic creation for one user's album both write this fence, so
+// a duplicate check and an insert in concurrent transactions conflict and retry
+// instead of both succeeding unseen.
+async function fenceAlbumDiary(userId, albumCatalogId, session) {
+  await DiaryAlbumFence.updateOne({ userId, albumCatalogId }, { $inc: { revision: 1 } }, { upsert: true, session });
+}
+
+// Internal entry point for automatic publication. The caller owns the
+// transaction, receipt, and eligibility checks; source is never client input.
+async function createAutomaticListen({ userId, album, listenedOn, session }) {
+  if (!session) throw new Error("Automatic listens require a transaction session");
+  if (!isCalendarDate(listenedOn)) throw fail(400, "INVALID_LISTEN_DATE", "listenedOn must be a calendar date");
+  const [listen] = await Listen.create([{ userId, albumCatalogId: album._id, listenedOn, source: "automatic" }], { session });
+  await UserProfile.updateOne({ userId }, { $setOnInsert: { userId } }, { upsert: true, session });
+  return listen;
 }
 
 async function createListen(userId, body, key) {
@@ -71,6 +90,7 @@ async function createListen(userId, body, key) {
     }
     const album = await AlbumCatalog.findOne({ albumId: input.albumId }).session(session);
     if (!album) throw fail(404, "ALBUM_NOT_FOUND", "Catalog album not found");
+    await fenceAlbumDiary(userId, album._id, session);
     const boards = [];
     for (const id of input.boardIds) boards.push(await claimBoard(userId, id, session));
     const [listen] = await Listen.create([{ userId, albumCatalogId: album._id, listenedOn: input.listenedOn }], { session });
@@ -173,4 +193,44 @@ async function listListens(userId, query = {}, fixed = {}) {
   };
 }
 
-module.exports = { createListen, updateListen, deleteListen, listListens, serializeListen };
+const UNREVIEWED_WINDOW_DAYS = 30;
+
+// Albums the user logged in the last 30 days but never reviewed, most recently
+// listened first. listenedOn is a calendar date, so compare it as one.
+async function listUnreviewedAlbums(userId, query = {}) {
+  fields(query, ["limit"]);
+  if (query.limit !== undefined && (typeof query.limit !== "string" || !/^[1-9]\d*$/.test(query.limit))) {
+    throw fail(400, "INVALID_DIARY_REQUEST", "limit must be a positive integer");
+  }
+  const limit = Math.min(Number(query.limit || 5), 12);
+  const since = new Date(Date.now() - UNREVIEWED_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const rows = await Listen.aggregate([
+    { $match: { userId, listenedOn: { $gte: since } } },
+    { $sort: { listenedOn: -1, createdAt: -1, _id: -1 } },
+    { $group: {
+      _id: "$albumCatalogId",
+      lastListenedOn: { $first: "$listenedOn" },
+      lastCreatedAt: { $first: "$createdAt" },
+      listenCount: { $sum: 1 },
+    } },
+    { $sort: { lastListenedOn: -1, lastCreatedAt: -1, _id: -1 } },
+    { $lookup: {
+      from: Review.collection.name, localField: "_id", foreignField: "albumCatalogId",
+      pipeline: [{ $match: { userId } }, { $limit: 1 }, { $project: { _id: 1 } }], as: "review",
+    } },
+    { $match: { "review.0": { $exists: false } } },
+    { $lookup: { from: AlbumCatalog.collection.name, localField: "_id", foreignField: "_id", as: "album" } },
+    { $unwind: "$album" },
+    { $limit: limit },
+  ]);
+  return {
+    albums: rows.map((row) => {
+      const album = normalizeCatalogAlbum(row.album);
+      return album?.albumId
+        ? { albumId: album.albumId, album, lastListenedOn: row.lastListenedOn, listenCount: row.listenCount }
+        : null;
+    }).filter(Boolean),
+  };
+}
+
+module.exports = { createAutomaticListen, listUnreviewedAlbums, createListen, fenceAlbumDiary, updateListen, deleteListen, listListens, serializeListen };

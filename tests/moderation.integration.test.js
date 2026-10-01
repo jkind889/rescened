@@ -305,6 +305,38 @@ async function staleCorrectionTest() {
   assert.equal(await AlbumCatalog.countDocuments({ title: "Stale proposal" }), 0);
 }
 
+async function legacyRevisionCorrectionTest() {
+  // Most imported albums predate revision tracking and store no catalogRevision.
+  const target = await AlbumCatalog.create({
+    albumId: crypto.randomUUID(),
+    title: "Legacy Target",
+    artistDisplayName: "Legacy Artist",
+    artistCredits: [{ name: "Legacy Artist", role: "main" }],
+    releaseType: "single",
+    releaseDate: "2018",
+    releaseDatePrecision: "year",
+    releaseYear: 2018,
+    tracks: [],
+    label: "Label",
+    cover: "",
+    externalReferences: [],
+    fieldProvenance: {},
+    catalogSource: "import",
+  });
+  await AlbumCatalog.collection.updateOne({ _id: target._id }, { $unset: { catalogRevision: "" } });
+  const submission = await createCorrection(await AlbumCatalog.findById(target._id), { releaseType: "ep" });
+  assert.equal(submission.baseCatalogRevision, 1);
+  await approveAlbumSubmission({
+    submissionId: submission.submissionId,
+    actorUserId: "integration-moderator",
+    applyFields: ["releaseType"],
+    reason: "Verified the release type",
+  });
+  const updatedTarget = await AlbumCatalog.findById(target._id).lean();
+  assert.equal(updatedTarget.releaseType, "ep");
+  assert.equal(updatedTarget.catalogRevision, 2);
+}
+
 if (integrationEnabled) {
   test.before(setup);
   test.after(teardown);
@@ -315,6 +347,7 @@ if (integrationEnabled) {
   test("submission query updates preserve status and append-only invariants", modelInvariantTest);
   test("catalog corrections apply selected fields and record the result revision", correctionApprovalTest);
   test("stale catalog corrections are rejected without changing the submission", staleCorrectionTest);
+  test("corrections apply to legacy albums without a stored catalog revision", legacyRevisionCorrectionTest);
 } else {
   test("transactional approval publishes a usable catalog album and keeps pending data private", { skip: "Set RUN_MONGO_INTEGRATION=true in an environment that permits local Mongo processes" }, () => {});
   test("concurrent approval retries are idempotent and create one album", { skip: "Set RUN_MONGO_INTEGRATION=true in an environment that permits local Mongo processes" }, () => {});

@@ -18,6 +18,9 @@ likeSchema.index(
   { userId: 1, targetType: 1, reviewId: 1 },
   { unique: true, partialFilterExpression: { targetType: "review", reviewId: { $exists: true } } },
 );
+// The unique indexes above are partial, so a plain userId query (account
+// deletion) cannot use them.
+likeSchema.index({ userId: 1 });
 likeSchema.index({ targetType: 1, albumCatalogId: 1 });
 likeSchema.index({ targetType: 1, reviewId: 1 });
 likeSchema.index({ targetType: 1, reviewId: 1, createdAt: 1 });

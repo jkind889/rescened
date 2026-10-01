@@ -8,6 +8,7 @@ const rateLimitPath = require.resolve("../routes/utils/rateLimit");
 const moderationPath = require.resolve("../routes/moderation");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
+const BaselineService = require("../lib/baselines/service");
 
 const ORIGINALS = {
   startSession: mongoose.startSession,
@@ -17,6 +18,8 @@ const ORIGINALS = {
   submissionFind: AlbumSubmission.find,
   submissionFindOne: AlbumSubmission.findOne,
   submissionFindOneAndUpdate: AlbumSubmission.findOneAndUpdate,
+  publishSubmissionBaseline: BaselineService.publishSubmissionBaseline,
+  invalidateAlbumBaseline: BaselineService.invalidateAlbumBaseline,
 };
 
 function validMetadata(title = "Kind of Blue") {
@@ -107,6 +110,8 @@ function installMocks({ userId = "user_mod", documents = [], catalogs = [] } = {
   let currentDocuments = documents;
   let currentCatalogs = catalogs;
   const pass = (req, res, next) => next();
+  BaselineService.publishSubmissionBaseline = async () => null;
+  BaselineService.invalidateAlbumBaseline = async () => false;
   require.cache[clerkPath] = {
     id: clerkPath,
     filename: clerkPath,
@@ -189,6 +194,8 @@ test.afterEach(() => {
   AlbumSubmission.find = ORIGINALS.submissionFind;
   AlbumSubmission.findOne = ORIGINALS.submissionFindOne;
   AlbumSubmission.findOneAndUpdate = ORIGINALS.submissionFindOneAndUpdate;
+  BaselineService.publishSubmissionBaseline = ORIGINALS.publishSubmissionBaseline;
+  BaselineService.invalidateAlbumBaseline = ORIGINALS.invalidateAlbumBaseline;
   delete require.cache[moderationPath];
   delete require.cache[clerkPath];
   delete require.cache[rateLimitPath];
@@ -217,6 +224,25 @@ test("moderator queue enforces auth, filters, oldest-first order, and public ser
   const nonModerator = await callRoute(require("../routes/moderation"), "get", "/", { query: {} });
   assert.equal(nonModerator.status, 403);
   assert.equal(nonModerator.body.code, "MODERATOR_REQUIRED");
+});
+
+test("moderator access reports only the caller's own status and requires sign-in", async () => {
+  const state = installMocks();
+  const moderator = await callRoute(state.router, "get", "/access", {});
+  assert.equal(moderator.status, 200);
+  assert.deepEqual(moderator.body, { moderator: true });
+
+  for (const [userId, expected] of [["user_other", { status: 200, body: { moderator: false } }], [null, { status: 401 }]]) {
+    delete require.cache[clerkPath];
+    require.cache[clerkPath] = { id: clerkPath, filename: clerkPath, loaded: true, exports: { getAuth: () => ({ userId }) } };
+    delete require.cache[moderationPath];
+    const result = await callRoute(require("../routes/moderation"), "get", "/access", {});
+    assert.equal(result.status, expected.status);
+    if (expected.body) assert.deepEqual(result.body, expected.body);
+  }
+
+  const paths = require("../routes/moderation").stack.map((layer) => layer.route?.path).filter(Boolean);
+  assert.ok(paths.indexOf("/access") < paths.indexOf("/:submissionId"), "/access must not be captured as a submission ID");
 });
 
 test("moderator reads remain available while command writes are disabled", async () => {

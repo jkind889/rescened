@@ -10,7 +10,7 @@ async function getListenActivity(userIds, limit) {
     // Deleted catalog albums must neither produce broken links nor consume slots.
     { $unwind: "$catalogAlbum" },
     { $limit: limit },
-    { $project: { _id: 0, listenId: 1, userId: 1, createdAt: 1, listenedOn: 1, catalogAlbum: 1 } },
+    { $project: { _id: 0, listenId: 1, userId: 1, createdAt: 1, listenedOn: 1, source: 1, catalogAlbum: 1 } },
   ]);
   return listens.map((listen) => ({
     id: listen.listenId,
@@ -19,6 +19,7 @@ async function getListenActivity(userIds, limit) {
     userId: listen.userId,
     createdAt: listen.createdAt,
     listenedOn: listen.listenedOn,
+    source: listen.source === "automatic" ? "automatic" : "manual",
     album: normalizeCatalogAlbum(listen.catalogAlbum),
   }));
 }

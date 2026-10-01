@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "frozenOn": "2026-09-24",
+  "description": "Preselected study queries, not verified ground truth. Never replace failed cases after querying Last.fm.",
+  "pairs": [
+    {"id":"born-to-die","artist":"Lana Del Rey","standard":"Born to Die","deluxe":"Born to Die (Deluxe Version)","tags":["bonus-tracks"],"controlled":true},
+    {"id":"ultraviolence","artist":"Lana Del Rey","standard":"Ultraviolence","deluxe":"Ultraviolence (Deluxe)","tags":["regional-bonus"],"controlled":false},
+    {"id":"random-access-memories","artist":"Daft Punk","standard":"Random Access Memories","deluxe":"Random Access Memories (10th Anniversary Edition)","tags":["anniversary","multi-disc"],"controlled":true},
+    {"id":"nevermind","artist":"Nirvana","standard":"Nevermind","deluxe":"Nevermind (Deluxe Edition)","tags":["remaster","multi-disc"],"controlled":true},
+    {"id":"in-utero","artist":"Nirvana","standard":"In Utero","deluxe":"In Utero (20th Anniversary Deluxe Edition)","tags":["remaster","multi-disc"],"controlled":false},
+    {"id":"rumours","artist":"Fleetwood Mac","standard":"Rumours","deluxe":"Rumours (Deluxe Edition)","tags":["remaster","multi-disc"],"controlled":true},
+    {"id":"1989","artist":"Taylor Swift","standard":"1989","deluxe":"1989 (Deluxe)","tags":["similar-title","regional-bonus"],"controlled":true},
+    {"id":"red","artist":"Taylor Swift","standard":"Red","deluxe":"Red (Deluxe Edition)","tags":["similar-title","multi-disc"],"controlled":false},
+    {"id":"good-kid-maad-city","artist":"Kendrick Lamar","standard":"good kid, m.A.A.d city","deluxe":"good kid, m.A.A.d city (Deluxe)","tags":["regional-bonus"],"controlled":true},
+    {"id":"after-hours","artist":"The Weeknd","standard":"After Hours","deluxe":"After Hours (Deluxe)","tags":["bonus-tracks"],"controlled":true},
+    {"id":"future-nostalgia","artist":"Dua Lipa","standard":"Future Nostalgia","deluxe":"Future Nostalgia (The Moonlight Edition)","tags":["renamed-edition"],"controlled":true},
+    {"id":"parklife","artist":"Blur","standard":"Parklife","deluxe":"Parklife (Special Edition)","tags":["multi-disc","remaster"],"controlled":false},
+    {"id":"definitely-maybe","artist":"Oasis","standard":"Definitely Maybe","deluxe":"Definitely Maybe (Deluxe Edition Remastered)","tags":["remaster","multi-disc"],"controlled":false},
+    {"id":"morning-glory","artist":"Oasis","standard":"(What's the Story) Morning Glory?","deluxe":"(What's the Story) Morning Glory? (Deluxe Edition Remastered)","tags":["remaster","similar-title"],"controlled":false},
+    {"id":"ok-computer","artist":"Radiohead","standard":"OK Computer","deluxe":"OK Computer OKNOTOK 1997 2017","tags":["renamed-edition","multi-disc"],"controlled":true},
+    {"id":"origin-of-symmetry","artist":"Muse","standard":"Origin of Symmetry","deluxe":"Origin of Symmetry (XX Anniversary RemiXX)","tags":["anniversary","alternate-mix"],"controlled":false},
+    {"id":"lungs","artist":"Florence + the Machine","standard":"Lungs","deluxe":"Lungs (Deluxe Edition)","tags":["bonus-tracks"],"controlled":true},
+    {"id":"hozier","artist":"Hozier","standard":"Hozier","deluxe":"Hozier (Special Edition)","tags":["bonus-tracks"],"controlled":false},
+    {"id":"back-to-black","artist":"Amy Winehouse","standard":"Back to Black","deluxe":"Back to Black (Deluxe Edition)","tags":["multi-disc","regional-bonus"],"controlled":false},
+    {"id":"bad","artist":"Michael Jackson","standard":"Bad","deluxe":"Bad 25th Anniversary","tags":["anniversary","multi-disc"],"controlled":false}
+  ]
+}

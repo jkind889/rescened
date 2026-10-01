@@ -31,6 +31,14 @@ function getPopularDateFilter(windowValue, now = new Date()) {
   return new Date(current.getTime() - days * 24 * 60 * 60 * 1000);
 }
 
+// Circle feeds restrict discovery to an explicit author set (the viewer plus
+// the accounts they follow). An empty set matches nothing rather than
+// silently widening to the site-wide feed.
+function authorMatch(userIds) {
+  if (userIds === undefined) return null;
+  return { userId: { $in: Array.isArray(userIds) ? userIds : [] } };
+}
+
 // Discovery feeds must only rank public, current catalog records. Doing this
 // inside the aggregation prevents deleted catalog rows from leaking into a
 // response or consuming a result slot before the feed limit is applied.
@@ -48,10 +56,11 @@ function currentCatalogStages(localField) {
   ];
 }
 
-function buildPopularAlbumsPipeline({ limit = DEFAULT_POPULAR_LIMIT, window = "30d", now = new Date() } = {}) {
+function buildPopularAlbumsPipeline({ limit = DEFAULT_POPULAR_LIMIT, window = "30d", now = new Date(), userIds } = {}) {
   const pipeline = [];
   const since = getPopularDateFilter(window, now);
-  if (since) pipeline.push({ $match: { date: { $gte: since } } });
+  const match = { ...authorMatch(userIds), ...(since ? { date: { $gte: since } } : {}) };
+  if (Object.keys(match).length) pipeline.push({ $match: match });
   pipeline.push(
     {
       $group: {
@@ -110,8 +119,10 @@ function buildRecentlyReviewedAlbumsPipeline(limit = DEFAULT_RECENT_LIMIT) {
   ];
 }
 
-function buildPopularReviewsPipeline(limit = DEFAULT_POPULAR_REVIEWS_LIMIT) {
+function buildPopularReviewsPipeline(limit = DEFAULT_POPULAR_REVIEWS_LIMIT, { userIds } = {}) {
+  const match = authorMatch(userIds);
   return [
+    ...(match ? [{ $match: match }] : []),
     ...currentCatalogStages("albumCatalogId"),
     {
       $lookup: {
@@ -142,8 +153,8 @@ async function resolveCatalogAlbums(rows, decorate = () => ({})) {
   }).filter(Boolean);
 }
 
-async function rankedAlbums({ limit, window, now } = {}) {
-  const rows = await Review.aggregate(buildPopularAlbumsPipeline({ limit, window, now }));
+async function rankedAlbums({ limit, window, now, userIds } = {}) {
+  const rows = await Review.aggregate(buildPopularAlbumsPipeline({ limit, window, now, userIds }));
   return resolveCatalogAlbums(rows, (row) => ({
     reviewCount: row.reviewCount || 0,
     averageRating: Number(Number(row.averageRating || 0).toFixed(2)),

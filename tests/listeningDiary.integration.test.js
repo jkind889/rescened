@@ -489,3 +489,40 @@ integration("activity caps mixed events globally and excludes missing catalog li
     assert.ok(response.body.every((item) => item.album.albumId === album.albumId));
   }
 });
+
+integration("unreviewed albums list recent logged albums without the owner's review, newest listen first", async () => {
+  const [reviewed, older, removed, stale] = await Promise.all([
+    AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Reviewed", artistDisplayName: "An artist", catalogSource: "manual" }),
+    AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Older", artistDisplayName: "An artist", catalogSource: "manual" }),
+    AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Removed", artistDisplayName: "An artist", catalogSource: "manual" }),
+    AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Stale", artistDisplayName: "An artist", catalogSource: "manual" }),
+  ]);
+  const daysAgo = (days) => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  await log({ listenedOn: daysAgo(2) });
+  await log({ listenedOn: daysAgo(6) });
+  await log({ listenedOn: daysAgo(45) });
+  await log({ albumId: reviewed.albumId, listenedOn: daysAgo(1) });
+  await log({ albumId: older.albumId, listenedOn: daysAgo(4) });
+  await log({ albumId: removed.albumId, listenedOn: daysAgo(0) });
+  // Only listened outside the 30-day window, so it no longer waits for a review.
+  await log({ albumId: stale.albumId, listenedOn: daysAgo(31) });
+  await Review.create({ userId: owner, albumCatalogId: reviewed._id, rating: 4, reviewText: "Already reviewed" });
+  // Another user's review must not hide the album from the owner.
+  await Review.create({ userId: "someone-else", albumCatalogId: older._id, rating: 3, reviewText: "Not the owner" });
+  await AlbumCatalog.deleteOne({ _id: removed._id });
+
+  const response = await request("GET", "/diary/unreviewed");
+  assert.equal(response.status, 200, JSON.stringify(response.body));
+  assert.deepEqual(response.body.albums.map((row) => row.album.title), ["Diary album", "Older"]);
+  assert.equal(response.body.albums[0].albumId, album.albumId);
+  assert.equal(response.body.albums[0].lastListenedOn, daysAgo(2));
+  // Only listens inside the window are counted.
+  assert.equal(response.body.albums[0].listenCount, 2);
+  noInternalIds(response.body, [album._id, older._id]);
+
+  const limited = await request("GET", "/diary/unreviewed?limit=1");
+  assert.deepEqual(limited.body.albums.map((row) => row.album.title), ["Diary album"]);
+  assert.equal((await request("GET", "/diary/unreviewed?limit=0")).status, 400);
+  assert.equal((await request("GET", "/diary/unreviewed?cursor=x")).status, 400);
+  assert.equal((await request("GET", "/diary/unreviewed", { userId: "" })).status, 401);
+});

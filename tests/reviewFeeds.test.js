@@ -60,3 +60,22 @@ test("recent and popular-review pipelines are bounded and deterministic", () => 
   assert.deepEqual(popularReviews.find((stage) => stage.$sort).$sort, { likeCount: -1, date: -1, _id: -1 });
   assertCatalogFilterBeforeLimit(popularReviews);
 });
+
+test("circle feeds restrict authors before grouping and never widen an empty circle", () => {
+  const now = new Date("2026-09-03T12:00:00.000Z");
+  const popular = buildPopularAlbumsPipeline({ window: "30d", now, userIds: ["viewer", "friend"] });
+  assert.deepEqual(popular[0], {
+    $match: { userId: { $in: ["viewer", "friend"] }, date: { $gte: new Date("2026-08-04T12:00:00.000Z") } },
+  });
+  assert.ok(popular.findIndex((stage) => stage.$match) < popular.findIndex((stage) => stage.$group));
+  assertCatalogFilterBeforeLimit(popular);
+
+  const allTime = buildPopularAlbumsPipeline({ window: "all", userIds: [] });
+  assert.deepEqual(allTime[0], { $match: { userId: { $in: [] } } });
+
+  const reviews = buildPopularReviewsPipeline(4, { userIds: ["viewer"] });
+  assert.deepEqual(reviews[0], { $match: { userId: { $in: ["viewer"] } } });
+  assert.deepEqual(reviews.at(-2), { $limit: 4 });
+  assertCatalogFilterBeforeLimit(reviews);
+  assert.equal(buildPopularReviewsPipeline(4).some((stage) => stage.$match), false);
+});
