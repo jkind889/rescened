@@ -7,6 +7,7 @@ const Board = require("../models/Board");
 const BoardItem = require("../models/BoardItem");
 const BoardListen = require("../models/BoardListen");
 const Follow = require("../models/Follow");
+const Review = require("../models/Reviews");
 const UserProfile = require("../models/UserProfile");
 
 const clerkPath = require.resolve("@clerk/express");
@@ -291,6 +292,7 @@ test("profile pins resolve a board UUID to the internal relation and serialize a
   t.mock.method(UserProfile, "findOne", () => populatedQuery(profile));
   t.mock.method(BoardItem, "find", () => chainQuery([]));
   t.mock.method(Follow, "countDocuments", async () => 0);
+  t.mock.method(Review, "aggregate", async () => []);
   const router = loadRoute(t, profileRoutePath);
 
   const response = await invokeLastHandler(router, "/me", "put", {

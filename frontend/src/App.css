@@ -10101,3 +10101,9 @@ label.moderation-candidate-choice {
     flex-direction: column;
   }
 }
+
+.lastfm-detection-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

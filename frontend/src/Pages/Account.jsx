@@ -136,6 +136,8 @@ export function Account() {
     pinnedBoard: null,
     followerCount: 0,
     followingCount: 0,
+    reviewCount: 0,
+    averageRating: null,
     isFollowing: false,
     isCurrentUser: false,
   });
@@ -177,6 +179,8 @@ export function Account() {
           pinnedBoard: null,
           followerCount: 0,
           followingCount: 0,
+          reviewCount: 0,
+          averageRating: null,
           isFollowing: false,
           isCurrentUser: false,
         });
@@ -314,6 +318,8 @@ export function Account() {
           pinnedBoard: profileData.pinnedBoard || null,
           followerCount: Number(profileData.followerCount) || 0,
           followingCount: Number(profileData.followingCount) || 0,
+          reviewCount: Number(profileData.reviewCount) || 0,
+          averageRating: Number.isFinite(profileData.averageRating) ? profileData.averageRating : null,
           isFollowing: Boolean(profileData.isFollowing),
           isCurrentUser: Boolean(profileData.isCurrentUser),
         });
@@ -339,6 +345,8 @@ export function Account() {
             pinnedBoard: null,
             followerCount: 0,
             followingCount: 0,
+            reviewCount: 0,
+            averageRating: null,
             isFollowing: false,
             isCurrentUser: false,
           });
@@ -373,14 +381,9 @@ export function Account() {
     }
   }, [availableTabs, requestedTab]);
 
-  const averageRating = useMemo(() => {
-    if (reviews.length === 0) {
-      return "--";
-    }
-
-    const total = reviews.reduce((sum, review) => sum + (Number(review.rating) || 0), 0);
-    return (total / reviews.length).toFixed(1);
-  }, [reviews]);
+  const averageRating = profile.reviewCount > 0 && profile.averageRating !== null
+    ? profile.averageRating.toFixed(1)
+    : "--";
 
   const sortedSavedAlbums = useMemo(() => (
     [...savedAlbums].sort((first, second) => new Date(second.savedAt) - new Date(first.savedAt))
@@ -454,6 +457,19 @@ export function Account() {
       const response = await fetch(`${API_BASE_URL}/reviews/review/user/${reviewId}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
       if (!response.ok) throw new Error(await getApiErrorMessage(response, "Failed to delete review"));
       const withoutReview = (currentReviews) => currentReviews.filter((review) => review.reviewId !== reviewId);
+      const deletedRating = Number([...reviews, ...recentReviewPreviews, ...popularReviewPreviews]
+        .find((review) => review.reviewId === reviewId)?.rating);
+      setProfile((currentProfile) => {
+        const reviewCount = Math.max(0, currentProfile.reviewCount - 1);
+        const canAdjustAverage = reviewCount > 0 && currentProfile.averageRating !== null && Number.isFinite(deletedRating);
+        return {
+          ...currentProfile,
+          reviewCount,
+          averageRating: canAdjustAverage
+            ? (currentProfile.averageRating * currentProfile.reviewCount - deletedRating) / reviewCount
+            : reviewCount > 0 ? currentProfile.averageRating : null,
+        };
+      });
       setReviews(withoutReview);
       setRecentReviewPreviews(withoutReview);
       setPopularReviewPreviews(withoutReview);
@@ -625,7 +641,7 @@ export function Account() {
   const hasSpotifyProfile = Boolean(profile.spotifyProfileUrl);
   const sidebarFacts = [
     { label: "Albums", value: savedAlbums.length },
-    { label: "Reviews", value: reviews.length },
+    { label: "Reviews", value: profile.reviewCount },
     { label: "Avg. Rating", value: averageRating },
     { label: "Followers", value: profile.followerCount },
     { label: "Following", value: profile.followingCount },
@@ -1260,7 +1276,7 @@ export function Account() {
                   <>
                     <button type="button" onClick={() => setActiveTab("reviews")}>
                       <span>Reviews</span>
-                      <strong>{reviews.length}</strong>
+                      <strong>{profile.reviewCount}</strong>
                     </button>
                     <div className="profile-hero-stat">
                       <span>Followers</span>
@@ -1279,7 +1295,7 @@ export function Account() {
                     </button>
                     <button type="button" onClick={() => setActiveTab("reviews")}>
                       <span>Reviews</span>
-                      <strong>{reviews.length}</strong>
+                      <strong>{profile.reviewCount}</strong>
                     </button>
                     <Link
                       to={`${socialPath}?tab=followers`}

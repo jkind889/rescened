@@ -260,6 +260,7 @@ test("profile pins resolve public review IDs before storing the internal relatio
   });
   t.mock.method(UserProfile, "findOne", () => populatedQuery(profile));
   t.mock.method(Follow, "countDocuments", async () => 0);
+  t.mock.method(Review, "aggregate", async () => []);
   const router = loadRoute(t, profileRoutePath);
 
   const response = await invokeLastHandler(router, "/me", "put", {

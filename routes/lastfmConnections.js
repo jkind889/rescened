@@ -135,11 +135,13 @@ router.post("/detections/:sessionId/plays/:playId/:action", authenticate, connec
 
 router.get("/detections", authenticate, async (req, res) => {
   try {
-    const allowed = new Set(["cursor", "coverage", "limit"]);
+    const allowed = new Set(["cursor", "coverage", "limit", "includeExpired"]);
     for (const key of Object.keys(req.query || {})) if (!allowed.has(key)) throw safeError("INVALID_REQUEST", 400);
     for (const key of allowed) if (req.query?.[key] !== undefined && (typeof req.query[key] !== "string" || req.query[key].length > 512)) throw safeError("INVALID_REQUEST", 400);
+    if (req.query?.includeExpired !== undefined && !["true", "false"].includes(req.query.includeExpired)) throw safeError("INVALID_REQUEST", 400);
     const limit = req.query?.limit === undefined ? 20 : Number(req.query.limit);
-    return res.json(await listDetections({ userId: req.userId, cursor: req.query?.cursor, coverage: req.query?.coverage, limit }));
+    const includeExpired = req.query?.includeExpired === "true";
+    return res.json(await listDetections({ userId: req.userId, cursor: req.query?.cursor, coverage: req.query?.coverage, includeExpired, limit }));
   } catch (error) { return errorResponse(res, error); }
 });
 

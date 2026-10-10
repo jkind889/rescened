@@ -58,13 +58,23 @@ async function updateProfile(userId, update, session) {
     { upsert: true, returnDocument: "after", setDefaultsOnInsert: true, ...(session ? { session } : {}) },
   );
 }
+// Totals cover every review, not just the page a profile has loaded.
+async function reviewStats(userId) {
+  const [row] = await Review.aggregate([
+    { $match: { userId } },
+    { $group: { _id: null, reviewCount: { $sum: 1 }, averageRating: { $avg: "$rating" } } },
+  ]);
+  const reviewCount = Number(row?.reviewCount) || 0;
+  return { reviewCount, averageRating: reviewCount ? Number(row.averageRating) : null };
+}
 async function socialStats(userId, viewerId) {
-  const [followerCount, followingCount, isFollowing] = await Promise.all([
+  const [followerCount, followingCount, isFollowing, reviews] = await Promise.all([
     Follow.countDocuments({ followingId: userId }),
     Follow.countDocuments({ followerId: userId }),
     viewerId && viewerId !== userId ? Follow.exists({ followerId: viewerId, followingId: userId }) : false,
+    reviewStats(userId),
   ]);
-  return { followerCount, followingCount, isFollowing: Boolean(isFollowing), isCurrentUser: viewerId === userId };
+  return { followerCount, followingCount, ...reviews, isFollowing: Boolean(isFollowing), isCurrentUser: viewerId === userId };
 }
 async function formatBoard(board) {
   return libraryBoard(board, true);

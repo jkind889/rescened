@@ -295,8 +295,12 @@ test("listening detection MongoDB integration", { skip: !enabled }, async (t) =>
     const revoked = await listDetections({ userId: "user-1", coverage: "qualified", env: ENV, clock: () => at(8 * HOUR) });
     assert.deepEqual(revoked.items[0].holds, ["stale_mapping"]);
     await AlbumMapping.updateOne({}, { $set: { status: "active" } });
-    const lapsed = await listDetections({ userId: "user-1", coverage: "qualified", env: ENV, clock: () => at(31 * DAY) });
+    const lapsed = await listDetections({ userId: "user-1", coverage: "qualified", includeExpired: true, env: ENV, clock: () => at(31 * DAY) });
     assert.deepEqual(lapsed.items[0].holds, ["evidence_expired"]);
+    // Expired sessions, including below-threshold ones whose evidence is gone, are hidden unless requested.
+    assert.deepEqual(await listDetections({ userId: "user-1", env: ENV, clock: () => at(31 * DAY) }), { items: [], nextCursor: null });
+    assert.equal((await listDetections({ userId: "user-1", includeExpired: true, env: ENV, clock: () => at(31 * DAY) })).items.length, 2);
+    assert.equal((await listDetections({ userId: "user-1", env: ENV, clock: () => at(8 * HOUR) })).items.length, 2, "live sessions stay visible by default");
     assert.ok((await Detection.find().lean()).every((item) => item.holds.length === 0), "reads never persist holds");
 
     await assert.rejects(listDetections({ userId: "user-1", env: { ...ENV, LISTENING_DETECTION_ENABLED: "false" } }), { code: "LISTENING_DETECTION_DISABLED" });
