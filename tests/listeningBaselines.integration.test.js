@@ -44,7 +44,9 @@ test('reviewed baseline availability follows confirmation, revocation, and catal
     assert.equal(metrics.baselineUnavailableNames, 0);
     assert.equal(metrics.baselineReviews.albums.reviewed, 1);
     const current = await service.detail('albums', album.albumId);
-    await service.performCommand({ kind: 'albums', id: album.albumId, action: 'revoke', actorUserId: 'moderator', body: { expectedRevision: current.revision, expectedTargetRevision: current.target.catalogRevision, reason: 'Wrong standard release', requestId: crypto.randomUUID() } });
+    // A blank reason records the action's standard note.
+    await service.performCommand({ kind: 'albums', id: album.albumId, action: 'revoke', actorUserId: 'moderator', body: { expectedRevision: current.revision, expectedTargetRevision: current.target.catalogRevision, reason: '  ', requestId: crypto.randomUUID() } });
+    assert.equal((await Baselines.Audit.findOne({ targetId: album.albumId, action: 'revoke' })).reason, 'Tracklist revoked by a moderator.');
     rows = await listEvents({ userId: conn.userId });
     assert.equal(rows.items[0].resolution, 'matched');
     assert.equal(rows.items[0].baselineAvailable, false, 'owner reads must not trust stored true during worker lag');
@@ -157,8 +159,10 @@ test('a baseline that fills empty tracks before mapping review does not block ap
 
     // A reviewer who saw the old revision still gets a conflict; the refreshed view approves.
     await assert.rejects(moderate(caseId, 'approve', { expectedRevision: 1, albumId: album.albumId, expectedCatalogRevision: 1, reason: 'Stale view' }, 'moderator'), (error) => error.code === 'CATALOG_REVISION_CONFLICT');
-    await moderate(caseId, 'approve', { expectedRevision: 1, albumId: album.albumId, expectedCatalogRevision: reviewed.case.candidates[0].catalogRevision, reason: 'Same album' }, 'moderator');
+    // The reason is optional; the mapping then records the action's standard note.
+    await moderate(caseId, 'approve', { expectedRevision: 1, albumId: album.albumId, expectedCatalogRevision: reviewed.case.candidates[0].catalogRevision }, 'moderator');
     assert.equal((await Listening.AlbumMapping.findOne({ key })).catalogRevision, 2);
+    assert.equal((await Listening.AlbumMapping.findOne({ key })).reason, 'Approved by a moderator.');
 
     await runWorkerOnce({ types: ['reprocess'], ownerExists: async () => true, env: {}, clock: () => new Date(Date.now() + 1000) });
     const rows = await listEvents({ userId: conn.userId });

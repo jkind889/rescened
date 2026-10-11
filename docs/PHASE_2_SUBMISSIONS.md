@@ -418,7 +418,7 @@ All command bodies are strict and reject unknown fields, client-supplied reviewe
 | `POST /:submissionId/approve` for `new_album` | `{ albumId?, confirmPossibleDuplicate?, reason? }` | `pending → approved`, creating or linking |
 | `POST /:submissionId/approve` for `catalog_correction` | `{ applyFields, reason? }` | `pending → approved`, patching the fixed target |
 
-Reasons are required, trimmed, and limited to 1,000 characters for change requests, rejections, and duplicate decisions. Approval reason is optional with the same limit. Duplicate targets must be another approved submission with a usable catalog album. Existing catalog matches are handled by explicit `albumId` selection rather than `mark-duplicate`. Correction approval requires a non-empty subset of proposed field groups and rejects album selection or any supplied duplicate confirmation.
+Reasons are required, trimmed, and limited to 1,000 characters for change requests and rejections. Approval and duplicate reasons are optional with the same limit; a blank duplicate reason is stored as "Duplicate of an approved suggestion." Duplicate targets must be another approved submission with a usable catalog album. Existing catalog matches are handled by explicit `albumId` selection rather than `mark-duplicate`. Correction approval requires a non-empty subset of proposed field groups and rejects album selection or any supplied duplicate confirmation.
 
 A first successful state-changing command appends one moderation-history event. Request-changes, reject, and mark-duplicate reload moderator detail and return `{ suggestion, duplicateCandidates }`. Approval returns `{ suggestion, album, albumUrl, idempotent }`; an already-approved idempotent retry returns the existing result without appending another event. Concurrent or stale commands return `409 STATE_CONFLICT`.
 
@@ -573,8 +573,10 @@ The feed makes successful community moderation visible without making workflow r
 The backend route is:
 
 ```http
-GET /suggestions/approved?limit={limit}&cursor={cursor}
+GET /suggestions/approved?limit={limit}&cursor={cursor}&q={search}
 ```
+
+The optional `q` (at most 100 characters; longer or non-string values return `400 INVALID_SUBMISSION`) matches album title, display artist, or credited artist case-insensitively. It searches the current `AlbumCatalog` records of approved albums only and keeps the same newest-first order and cursor paging; a search with no matches returns an empty page. The cursor belongs to the search it came from, so clients restart paging when `q` changes.
 
 The route is anonymous and read-only. It is registered before `GET /suggestions/:submissionId`, remains available when contributor or moderation mutations are disabled, and makes no provider calls or database writes.
 

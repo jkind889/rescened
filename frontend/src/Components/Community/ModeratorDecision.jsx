@@ -141,7 +141,7 @@ export function ModeratorDecision({
   const canModerate = submission?.status === "pending";
   const selectedAction = ACTIONS.find((option) => option.id === action) || ACTIONS[0];
   const reason = reasons[action];
-  const requiresReason = action !== "approve";
+  const requiresReason = !["approve", "mark_duplicate"].includes(action);
   const isExactMatchError = error?.code === "EXACT_CATALOG_MATCH";
   const needsDuplicateConfirmation = error?.code === "POSSIBLE_DUPLICATE_CONFIRMATION_REQUIRED";
   const isCorrection = submission?.submissionType === "catalog_correction";
@@ -221,7 +221,7 @@ export function ModeratorDecision({
     if (action === "mark_duplicate") {
       onCommand("mark_duplicate", {
         duplicateOfSubmissionId: duplicateOfSubmissionId.trim(),
-        reason: trimmedReason,
+        ...(trimmedReason ? { reason: trimmedReason } : {}),
       });
       return;
     }

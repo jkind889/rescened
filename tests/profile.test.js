@@ -328,3 +328,71 @@ for (const failureKey of ["followError", "profileError", "reviewError", "listenE
     assert.deepEqual(route.calls.authors, []);
   });
 }
+
+function installProfileRoute(t, { reviewRows = [], profile = { userId: "user_alex", isPrivate: true } } = {}) {
+  const calls = { aggregates: [] };
+  t.mock.method(UserProfile, "exists", async () => ({ _id: new mongoose.Types.ObjectId() }));
+  t.mock.method(UserProfile, "findOne", () => {
+    const query = { populate() { return query; }, then(resolve, reject) { return Promise.resolve(profile).then(resolve, reject); } };
+    return query;
+  });
+  t.mock.method(Follow, "countDocuments", async () => 0);
+  t.mock.method(Follow, "exists", async () => null);
+  t.mock.method(Review, "aggregate", async (pipeline) => {
+    calls.aggregates.push(pipeline);
+    return reviewRows;
+  });
+
+  const previousClerk = require.cache[clerkPath];
+  const previousProfile = require.cache[profilePath];
+  require.cache[clerkPath] = {
+    id: clerkPath,
+    filename: clerkPath,
+    loaded: true,
+    exports: {
+      getAuth: () => ({ userId: VIEWER }),
+      clerkClient: { users: { async getUserList() { return { data: [] }; } } },
+    },
+  };
+  delete require.cache[profilePath];
+  const router = require("../routes/profile");
+  t.after(() => {
+    if (previousClerk) require.cache[clerkPath] = previousClerk;
+    else delete require.cache[clerkPath];
+    if (previousProfile) require.cache[profilePath] = previousProfile;
+    else delete require.cache[profilePath];
+  });
+
+  return {
+    calls,
+    async request(userId) {
+      const layer = router.stack.find((item) => item.route?.path === "/:userId" && item.route.methods.get);
+      assert.ok(layer, "GET /:userId must remain registered");
+      const req = { headers: {}, params: { userId } };
+      const res = {
+        statusCode: 200,
+        body: null,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; },
+      };
+      await layer.route.stack.at(-1).handle(req, res, () => {});
+      return { status: res.statusCode, body: res.body };
+    },
+  };
+}
+
+test("profile stats report the author's full review total and average, not one page", async (t) => {
+  const route = installProfileRoute(t, { reviewRows: [{ _id: null, reviewCount: 37, averageRating: 3.75 }] });
+  const { status, body } = await route.request("user_alex");
+  assert.equal(status, 200);
+  assert.equal(body.reviewCount, 37);
+  assert.equal(body.averageRating, 3.75);
+  assert.deepEqual(route.calls.aggregates[0][0], { $match: { userId: "user_alex" } });
+});
+
+test("profile stats report no average when the author has no reviews", async (t) => {
+  const route = installProfileRoute(t, { reviewRows: [] });
+  const { body } = await route.request("user_alex");
+  assert.equal(body.reviewCount, 0);
+  assert.equal(body.averageRating, null);
+});

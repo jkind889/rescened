@@ -233,6 +233,7 @@ export default function LastfmDetections({ savedTimeZone, onTimeZoneSaved, autoD
   const [notice, setNotice] = useState("");
   const [cursor, setCursor] = useState("");
   const [coverage, setCoverage] = useState("");
+  const [showExpired, setShowExpired] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -242,7 +243,7 @@ export default function LastfmDetections({ savedTimeZone, onTimeZoneSaved, autoD
     try {
       const token = await getToken();
       const data = await requestLastfmJson(
-        lastfmUrl(`${LASTFM_CONNECTION_PATH}/detections`, { coverage, cursor: next }),
+        lastfmUrl(`${LASTFM_CONNECTION_PATH}/detections`, { coverage, includeExpired: showExpired ? "true" : "", cursor: next }),
         apiOptions(token),
         "Could not load detected listens.",
       );
@@ -254,7 +255,7 @@ export default function LastfmDetections({ savedTimeZone, onTimeZoneSaved, autoD
     } finally {
       setLoading(false);
     }
-  }, [coverage, getToken]);
+  }, [coverage, getToken, showExpired]);
 
   useEffect(() => { load(); }, [load, savedTimeZone]);
 
@@ -282,9 +283,15 @@ export default function LastfmDetections({ savedTimeZone, onTimeZoneSaved, autoD
     <div className="lastfm-events lastfm-detections">
       <div className="profile-section-header">
         <h3>Detected album listens</h3>
-        <select aria-label="Filter detected listens" value={coverage} onChange={(event) => setCoverage(event.target.value)}>
-          {COVERAGE_FILTERS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
+        <div className="lastfm-detection-filters">
+          <select aria-label="Filter detected listens" value={coverage} onChange={(event) => setCoverage(event.target.value)}>
+            {COVERAGE_FILTERS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+          <select aria-label="Show expired sessions" value={showExpired ? "show" : "hide"} onChange={(event) => setShowExpired(event.target.value === "show")}>
+            <option value="hide">Hide expired</option>
+            <option value="show">Show expired</option>
+          </select>
+        </div>
       </div>
       <p className="edit-profile-current-value">
         A listen counts once you play at least 80% of an album's standard tracks.
@@ -295,7 +302,7 @@ export default function LastfmDetections({ savedTimeZone, onTimeZoneSaved, autoD
       {notice ? <p className="edit-profile-status" role="status">{notice}</p> : null}
       {error ? <p className="edit-profile-error" role="alert">{error}</p> : null}
       {loading && items.length === 0 ? <p className="edit-profile-current-value">Loading detected listens…</p> : null}
-      {!loading && !error && items.length === 0 ? <p className="edit-profile-current-value">No album sessions detected yet.</p> : null}
+      {!loading && !error && items.length === 0 ? <p className="edit-profile-current-value">{showExpired ? "No album sessions detected yet." : "No current album sessions. Expired sessions are hidden."}</p> : null}
       {items.length > 0 ? <div className="lastfm-event-list">{items.map((item) => <DetectionCard detection={item} key={item.sessionId} onResolve={resolve} resolving={resolving} />)}</div> : null}
       {cursor ? (
         <button className="profile-secondary-button" disabled={loading} onClick={() => load({ next: cursor, append: true })} type="button">

@@ -73,6 +73,9 @@ function optionalReason(value) {
   return reason;
 }
 
+// The duplicate target already explains the decision, so the note is optional.
+const DEFAULT_DUPLICATE_REASON = "Duplicate of an approved suggestion.";
+
 function publicUuid(value, path) {
   if (typeof value !== "string" || !PUBLIC_UUID_V4.test(value.trim())) {
     fail(`${path} must be a UUID v4`);
@@ -90,7 +93,7 @@ function normalizeCommandBody(body, action) {
     assertKeys(body, new Set(["duplicateOfSubmissionId", "reason"]));
     return {
       duplicateOfSubmissionId: publicUuid(body.duplicateOfSubmissionId, "duplicateOfSubmissionId"),
-      reason: requiredReason(body.reason),
+      reason: optionalReason(body.reason) || DEFAULT_DUPLICATE_REASON,
     };
   }
   if (action === "approve") {
