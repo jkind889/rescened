@@ -1,8 +1,10 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   RELEASE_TYPE_OPTIONS,
   SOURCE_TYPE_OPTIONS,
 } from "../../features/community/community";
+import { clearDraft, readDraft, useDraftAutosave } from "../../features/community/drafts.js";
+import DraftNotice from "./DraftNotice";
 
 const MAX_ARTISTS = 20;
 const MAX_SOURCES = 10;
@@ -98,6 +100,11 @@ function createDraft(initialValue) {
     supportingSources: sources,
     externalReferences: references,
   };
+}
+
+// Row keys are regenerated on every load, so they never count as edits.
+function draftFingerprint(draft) {
+  return JSON.stringify(draft, (field, value) => (field === "key" ? undefined : value));
 }
 
 function isHttpsUrl(value) {
@@ -315,9 +322,15 @@ export function SuggestionForm({
   error = null,
   disabled = false,
   formId = "community-suggestion-form",
+  draftKey = "",
 }) {
   const generatedId = useId();
-  const [draft, setDraft] = useState(() => createDraft(initialValue));
+  const [storedDraft] = useState(() => readDraft(draftKey));
+  const [restoredAt, setRestoredAt] = useState(storedDraft?.savedAt || null);
+  // Stored drafts are normalized through the same path as server records.
+  const [draft, setDraft] = useState(() => createDraft(storedDraft?.value || initialValue));
+  const initialFingerprint = useMemo(() => draftFingerprint(createDraft(initialValue)), [initialValue]);
+  useDraftAutosave(draftKey, draft, draftFingerprint(draft) === initialFingerprint);
   const [validationErrors, setValidationErrors] = useState([]);
   const validationSummaryRef = useRef(null);
   const serverErrorRef = useRef(null);
@@ -430,6 +443,13 @@ export function SuggestionForm({
     }));
   }
 
+  function discardDraft() {
+    clearDraft(draftKey);
+    setDraft(createDraft(initialValue));
+    setValidationErrors([]);
+    setRestoredAt(null);
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
     const errors = validateDraft(draft);
@@ -452,6 +472,7 @@ export function SuggestionForm({
 
   return (
     <form className="suggestion-form" id={formId} onSubmit={handleSubmit} noValidate>
+      <DraftNotice savedAt={restoredAt} onDiscard={discardDraft} disabled={controlsDisabled} />
       {validationErrors.length ? (
         <div className="suggestion-form-validation" ref={validationSummaryRef} role="alert" tabIndex={-1}>
           <p className="suggestion-form-validation-title">Check these fields before continuing:</p>

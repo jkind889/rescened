@@ -9,6 +9,7 @@ import {
   formatCommunityDate,
   requestCommunityJson,
 } from "../features/community/community";
+import { clearDraft, suggestionDraftKey } from "../features/community/drafts.js";
 
 function EditorError({ error, onRetry = null }) {
   if (!error) {
@@ -38,7 +39,7 @@ export function SuggestionEditor({ mode = "create" }) {
   const { albumId, submissionId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { getToken } = useAuth();
+  const { getToken, userId } = useAuth();
   const isRevision = mode === "revise";
   const isCorrection = mode === "correction";
   const externalMbid = isRevision ? "" : (searchParams.get("mbid") || "").trim();
@@ -138,6 +139,14 @@ export function SuggestionEditor({ mode = "create" }) {
     return () => controller.abort();
   }, [albumId, externalMbid, getToken, isCorrection, isRevision, refreshIndex, submissionId]);
 
+  // Drafts are per signed-in user and per thing being edited; a revision draft
+  // never carries over to a later revision.
+  const draftContext = isRevision
+    ? submission?.submissionId && submission?.currentRevision ? `revise:${submission.submissionId}:${submission.currentRevision}` : ""
+    : isCorrection ? `correction:${albumId}`
+    : externalMbid ? `create:mbid:${externalMbid}` : "create";
+  const draftKey = suggestionDraftKey(userId, draftContext);
+
   async function submitSuggestion(payload) {
     setMutationStatus("loading");
     setMutationError(null);
@@ -159,6 +168,7 @@ export function SuggestionEditor({ mode = "create" }) {
         isCorrection ? "Could not submit this correction." : isRevision ? "Could not submit this revision." : "Could not create this suggestion.",
       );
 
+      clearDraft(draftKey);
       setMutationStatus("success");
       navigate(`/suggestions/${data.submissionId}`, {
         replace: isRevision,
@@ -254,8 +264,9 @@ export function SuggestionEditor({ mode = "create" }) {
 
         {loadStatus === "ready" && !revisionBlocked ? (correctionFlow ? (
           <CorrectionForm
-            key={`${submission?.submissionId || albumId || "correction"}-${submission?.currentRevision || 1}`}
+            key={`${submission?.submissionId || albumId || "correction"}-${submission?.currentRevision || 1}-${draftKey}`}
             initialValue={submission}
+            draftKey={draftKey}
             onSubmit={submitSuggestion}
             submitLabel={isRevision ? "Submit corrected patch" : "Send correction for review"}
             submittingLabel={isRevision ? "Submitting correction…" : "Sending correction…"}
@@ -265,8 +276,9 @@ export function SuggestionEditor({ mode = "create" }) {
           />
         ) : (
           <SuggestionForm
-            key={isRevision ? `${submission?.submissionId}-${submission?.currentRevision}` : "create"}
+            key={`${isRevision ? `${submission?.submissionId}-${submission?.currentRevision}` : externalMbid || "create"}-${draftKey}`}
             initialValue={submission}
+            draftKey={draftKey}
             onSubmit={submitSuggestion}
             submitLabel={isRevision ? "Submit revised record" : "Send for review"}
             submittingLabel={isRevision ? "Submitting revision…" : "Sending suggestion…"}

@@ -1,11 +1,24 @@
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import {
   RELEASE_TYPE_OPTIONS,
   SOURCE_TYPE_OPTIONS,
   formatCommunityValue,
 } from "../../features/community/community.js";
+import { clearDraft, readDraft, useDraftAutosave } from "../../features/community/drafts.js";
+import DraftNotice from "./DraftNotice";
 
 const FIELD_ORDER = ["title", "artists", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"];
+const FIELD_VALUE_KEYS = {
+  title: ["title"],
+  artists: ["artistDisplayName", "artistCredits"],
+  releaseType: ["releaseType"],
+  releaseDate: ["releaseDate", "releaseYear"],
+  label: ["label"],
+  cover: ["cover"],
+  tracks: ["tracks"],
+  externalReferences: ["referenceProvider", "referenceEntityType", "referenceExternalId", "referenceUrl"],
+};
+const DEFAULT_SOURCE = { type: "musicbrainz", url: "", description: "" };
 
 function targetAlbumFrom(initialValue) {
   return initialValue?.targetAlbum || {};
@@ -38,6 +51,41 @@ function initialFields(initialValue) {
   return new Set(existing ? Object.keys(existing) : []);
 }
 
+function initialSource(initialValue) {
+  return initialValue?.supportingSources?.[0] || DEFAULT_SOURCE;
+}
+
+// A stored draft restores only the field groups it selected; everything else
+// comes from the album as it is now.
+function restoredState(initialValue, stored) {
+  const values = currentValues(initialValue);
+  if (!stored || typeof stored !== "object") {
+    return { enabledFields: initialFields(initialValue), values, source: initialSource(initialValue) };
+  }
+  const fields = (Array.isArray(stored.enabledFields) ? stored.enabledFields : []).filter((field) => FIELD_ORDER.includes(field));
+  for (const field of fields) {
+    for (const key of FIELD_VALUE_KEYS[field]) {
+      if (typeof stored.values?.[key] === "string") values[key] = stored.values[key];
+    }
+  }
+  const source = stored.source && typeof stored.source === "object" ? stored.source : {};
+  return {
+    enabledFields: new Set(fields),
+    values,
+    source: {
+      type: typeof source.type === "string" && source.type ? source.type : DEFAULT_SOURCE.type,
+      url: typeof source.url === "string" ? source.url : "",
+      description: typeof source.description === "string" ? source.description : "",
+    },
+  };
+}
+
+function draftSnapshot(enabledFields, values, source) {
+  const fields = FIELD_ORDER.filter((field) => enabledFields.has(field));
+  const selectedValues = Object.fromEntries(fields.flatMap((field) => FIELD_VALUE_KEYS[field].map((key) => [key, values[key]])));
+  return { enabledFields: fields, values: selectedValues, source };
+}
+
 function precisionForDate(date) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return "day";
   if (/^\d{4}-\d{2}$/.test(date)) return "month";
@@ -52,14 +100,20 @@ export function CorrectionForm({
   isSubmitting = false,
   error = null,
   formId = "community-correction-form",
+  draftKey = "",
 }) {
-  const [enabledFields, setEnabledFields] = useState(initialFields(initialValue));
-  const [values, setValues] = useState(() => currentValues(initialValue));
-  const [source, setSource] = useState(() => initialValue?.supportingSources?.[0] || {
-    type: "musicbrainz",
-    url: "",
-    description: "",
-  });
+  const [storedDraft] = useState(() => readDraft(draftKey));
+  const [initialState] = useState(() => restoredState(initialValue, storedDraft?.value));
+  const [restoredAt, setRestoredAt] = useState(storedDraft?.savedAt || null);
+  const [enabledFields, setEnabledFields] = useState(initialState.enabledFields);
+  const [values, setValues] = useState(initialState.values);
+  const [source, setSource] = useState(initialState.source);
+  const snapshot = useMemo(() => draftSnapshot(enabledFields, values, source), [enabledFields, values, source]);
+  const initialFingerprint = useMemo(() => {
+    const start = restoredState(initialValue, null);
+    return JSON.stringify(draftSnapshot(start.enabledFields, start.values, start.source));
+  }, [initialValue]);
+  useDraftAutosave(draftKey, snapshot, JSON.stringify(snapshot) === initialFingerprint);
   const [clientError, setClientError] = useState("");
   const fieldPrefix = useId();
   const album = targetAlbumFrom(initialValue);
@@ -78,6 +132,16 @@ export function CorrectionForm({
       return next;
     });
     setClientError("");
+  }
+
+  function discardDraft() {
+    const start = restoredState(initialValue, null);
+    clearDraft(draftKey);
+    setEnabledFields(start.enabledFields);
+    setValues(start.values);
+    setSource(start.source);
+    setClientError("");
+    setRestoredAt(null);
   }
 
   function submit(event) {
@@ -139,6 +203,7 @@ export function CorrectionForm({
 
   return (
     <form className="community-form correction-form" id={formId} onSubmit={submit} noValidate>
+      <DraftNotice savedAt={restoredAt} onDiscard={discardDraft} disabled={isSubmitting} />
       <fieldset className="correction-fieldset">
         <legend>Choose the catalog fields to correct</legend>
         <p className="correction-help">Each selected group is reviewed independently. Unselected fields remain exactly as they are.</p>

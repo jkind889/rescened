@@ -9708,6 +9708,10 @@ label.moderation-candidate-choice {
   background: rgba(0, 0, 0, 0.4);
 }
 
+:root[data-theme="light"] .lastfm-detection {
+  background: #ffffff;
+}
+
 .lastfm-detection-heading,
 .lastfm-play-list li {
   display: flex;
@@ -10106,4 +10110,29 @@ label.moderation-candidate-choice {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.suggestion-draft-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--app-line);
+  background: var(--app-surface);
+  color: var(--app-text);
+}
+
+.suggestion-draft-notice p {
+  margin: 0;
+}
+
+.suggestion-draft-notice button {
+  border: 1px solid var(--app-line-strong);
+  background: transparent;
+  color: inherit;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
 }

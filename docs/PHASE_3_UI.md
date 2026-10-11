@@ -26,6 +26,8 @@ Withdrawal is an action on the list/detail UI, not a separate frontend route. Th
 
 The contributor list is a private workflow view. It is not a public catalog or approved-submission feed, and creating or revising a proposal does not publish an album.
 
+Unsent editor input is autosaved to browser `localStorage` (`frontend/src/features/community/drafts.js`), keyed by the signed-in Clerk user and by context: a new suggestion, a MusicBrainz prefill (`mbid`), a correction to one `albumId`, or one submission revision. A revision draft never carries over to a later revision. Drafts expire after 30 days, are removed once the form returns to its starting values or the submission succeeds, and the form offers "Discard draft" when it restores one. A restored correction draft keeps only its selected field groups and source; unselected fields reload from the album as it is now. Drafts never reach the server and are only a convenience.
+
 The editor computes `correctionFlow` only after declaring the `submission` state variable, so both new-album and correction revision routes can load their type-specific form. Lint/build cover the bundle; a signed-in smoke pass still belongs in deployment verification.
 
 ## Public approved feed
