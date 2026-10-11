@@ -520,3 +520,15 @@ test("moderator mutation rate limiting happens before persistence", async () => 
   assert.equal(result.status, 429);
   assert.equal(document.status, "pending");
 });
+
+test("mark-duplicate notes are optional and default to a standard note", () => {
+  const { normalizeCommandBody } = require("../routes/utils/moderation");
+  const target = crypto.randomUUID();
+  assert.deepEqual(normalizeCommandBody({ duplicateOfSubmissionId: target }, "mark_duplicate"), {
+    duplicateOfSubmissionId: target,
+    reason: "Duplicate of an approved suggestion.",
+  });
+  assert.equal(normalizeCommandBody({ duplicateOfSubmissionId: target, reason: "  Same release  " }, "mark_duplicate").reason, "Same release");
+  assert.throws(() => normalizeCommandBody({ reason: "" }, "reject"), /reason is required/);
+  assert.throws(() => normalizeCommandBody({ reason: "" }, "request_changes"), /reason is required/);
+});

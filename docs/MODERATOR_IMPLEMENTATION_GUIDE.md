@@ -175,7 +175,7 @@ One current route-level quirk is `normalizeCommandBody(req.body || {}, action)`:
 | `POST /:submissionId/approve` for `new_album` | `{ albumId?, confirmPossibleDuplicate?, reason? }` | `pending → approved` plus catalog create/link |
 | `POST /:submissionId/approve` for `catalog_correction` | `{ applyFields, reason? }` | `pending → approved` plus guarded field patch |
 
-Reasons are trimmed and capped at 1,000 characters. They are required for request changes, reject, and mark duplicate; approval reason is optional. Public IDs must be UUID v4 values. Correction `applyFields` must be a non-empty, duplicate-free subset of the correction's proposed field groups. A correction approval rejects `albumId` and any supplied duplicate-confirmation option. The approval service rejects `applyFields` on a new-album request, so the two approval contracts cannot be mixed.
+Reasons are trimmed and capped at 1,000 characters. They are required for request changes and reject. Approval and mark-duplicate reasons are optional; a blank duplicate reason is stored as "Duplicate of an approved suggestion." Public IDs must be UUID v4 values. Correction `applyFields` must be a non-empty, duplicate-free subset of the correction's proposed field groups. A correction approval rejects `albumId` and any supplied duplicate-confirmation option. The approval service rejects `applyFields` on a new-album request, so the two approval contracts cannot be mixed.
 
 These are `POST` commands because the client is asking the server to perform a workflow transition and append server-authored audit data. The request is not a complete replacement representation for either the submission or album. Approval is nevertheless application-level idempotent, as described below.
 

@@ -10136,3 +10136,8 @@ label.moderation-candidate-choice {
   padding: 0.35rem 0.7rem;
   cursor: pointer;
 }
+
+.approved-feed-search {
+  max-width: 28rem;
+  margin-bottom: 1rem;
+}

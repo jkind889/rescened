@@ -32,7 +32,7 @@ The editor computes `correctionFlow` only after declaring the `submission` state
 
 ## Public approved feed
 
-`/community/approved` is anonymous and calls `GET /suggestions/approved` without a Clerk token. It renders one chronological card per approval event using the album's current normalized catalog metadata, supports opaque-cursor “load more,” deduplicates appended events by `submissionId`, and includes loading, empty, retry, and end states. The Navbar exposes it as Community.
+`/community/approved` is anonymous and calls `GET /suggestions/approved` without a Clerk token. It renders one chronological card per approval event using the album's current normalized catalog metadata, supports opaque-cursor “load more,” deduplicates appended events by `submissionId`, and includes loading, empty, retry, and end states. A search box filters by album title or artist through the server's `q` parameter, so it covers the whole history and not just the loaded pages; it restarts paging when the search changes and drops a load-more page from an earlier search. The Navbar exposes it as Community.
 
 ## Moderator routes and workflows
 
@@ -49,7 +49,7 @@ The decision panel presents the server-supported actions for a pending submissio
 
 - Request changes with a required reason: `POST /moderation/album-suggestions/:submissionId/request-changes`.
 - Reject with a required reason: `POST /moderation/album-suggestions/:submissionId/reject`.
-- Mark duplicate by selecting or entering another approved `submissionId`, with a required reason: `POST /moderation/album-suggestions/:submissionId/mark-duplicate`.
+- Mark duplicate by selecting or entering another approved `submissionId`, with an optional reason (blank records a standard note): `POST /moderation/album-suggestions/:submissionId/mark-duplicate`.
 - Approve a new album with an optional existing `albumId`, possible-duplicate confirmation when required, and optional reason: `POST /moderation/album-suggestions/:submissionId/approve`.
 - Approve a correction by selecting at least one proposed field group and sending `applyFields` plus an optional reason to the same endpoint.
 

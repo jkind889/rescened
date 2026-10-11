@@ -26,6 +26,7 @@ const {
   submissionCreateRateLimit,
   submissionMutationRateLimit,
 } = require("./utils/rateLimit");
+const { buildSearchPattern } = require("./utils/catalogSearch");
 
 const router = express.Router();
 
@@ -154,17 +155,42 @@ router.post("/corrections", auth, submissionsEnabled, submissionCreateRateLimit,
   }
 });
 
+const MAX_APPROVED_SEARCH_LENGTH = 100;
+
+function approvedSearchText(value) {
+  if (value === undefined) return "";
+  if (typeof value !== "string") throw new SubmissionValidationError("q must be a string");
+  const text = value.normalize("NFC").replace(/\s+/gu, " ").trim();
+  if (text.length > MAX_APPROVED_SEARCH_LENGTH) throw new SubmissionValidationError(`q must be ${MAX_APPROVED_SEARCH_LENGTH} characters or fewer`);
+  return text;
+}
+
 router.get("/approved", async (req, res) => {
   try {
     const cursor = decodeApprovedCursor(req.query?.cursor);
     const limit = getPageLimit(req.query?.limit);
-    const query = {
+    const searchText = approvedSearchText(req.query?.q);
+    const approvedFilter = {
       status: "approved",
       approvedAlbumCatalogId: { $ne: null },
       approvedAt: { $ne: null },
       approvalPublicationType: { $in: ["catalog_created", "catalog_linked", "catalog_corrected"] },
-      ...approvedCursorFilter(cursor),
     };
+    const query = { ...approvedFilter, ...approvedCursorFilter(cursor) };
+    if (searchText) {
+      // Search only albums reached through approvals, by their current catalog
+      // title and artists, so paging stays on the approval timeline.
+      const approvedAlbumIds = await AlbumSubmission.distinct("approvedAlbumCatalogId", approvedFilter);
+      const pattern = new RegExp(buildSearchPattern(searchText), "iu");
+      const matches = approvedAlbumIds.length
+        ? await AlbumCatalog.find({
+          _id: { $in: approvedAlbumIds },
+          $or: [{ title: pattern }, { artistDisplayName: pattern }, { "artistCredits.name": pattern }],
+        }).select("_id").lean()
+        : [];
+      if (!matches.length) return res.json({ suggestions: [], nextCursor: null });
+      query.approvedAlbumCatalogId = { $in: matches.map((album) => album._id) };
+    }
     let result = AlbumSubmission.find(query);
     if (result && typeof result.populate === "function") result = result.populate("approvedAlbumCatalogId");
     if (result && typeof result.sort === "function") result = result.sort({ approvedAt: -1, _id: -1 });

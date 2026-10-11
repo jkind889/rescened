@@ -280,3 +280,41 @@ test("correction approval patches selected fields once and records the applicati
   assert.equal(album.catalogRevision, 4);
   assert.equal(result.suggestion.baseProvenance.title.source, "import");
 });
+
+test("approved feed search matches current catalog title or artist among approved albums only", async (t) => {
+  const matching = targetAlbum({ title: "Kid A", artistDisplayName: "Radiohead" });
+  const other = targetAlbum({ title: "Blue Train", artistDisplayName: "John Coltrane" });
+  const rows = [matching, other].map((album, index) => ({
+    _id: new mongoose.Types.ObjectId(),
+    submissionId: crypto.randomUUID(),
+    status: "approved",
+    approvedAt: new Date(Date.UTC(2026, 8, 2, 12 - index)),
+    approvalPublicationType: "catalog_created",
+    approvedAlbumCatalogId: album,
+  }));
+  const catalogQueries = [];
+  t.mock.method(AlbumSubmission, "distinct", async () => [matching._id, other._id]);
+  AlbumCatalog.find = (query) => {
+    catalogQueries.push(query);
+    const pattern = query.$or[0].title;
+    const found = [matching, other].filter((album) => query._id.$in.includes(album._id)
+      && (pattern.test(album.title) || pattern.test(album.artistDisplayName)));
+    return { select() { return this; }, lean: async () => found.map(({ _id }) => ({ _id })) };
+  };
+  AlbumSubmission.find = (query = {}) => chain(rows.filter((row) => !query.approvedAlbumCatalogId?.$in
+    || query.approvedAlbumCatalogId.$in.includes(row.approvedAlbumCatalogId._id)));
+  delete require.cache[suggestionsPath];
+  const router = require("../routes/suggestions");
+
+  const byArtist = await callRoute(router, "get", "/approved", { query: { q: "  radio  " } });
+  assert.equal(byArtist.status, 200);
+  assert.deepEqual(byArtist.body.suggestions.map((item) => item.album.title), ["Kid A"]);
+  assert.deepEqual(catalogQueries[0]._id.$in, [matching._id, other._id], "search is limited to approved albums");
+
+  const regexSafe = await callRoute(router, "get", "/approved", { query: { q: "(.*)" } });
+  assert.deepEqual(regexSafe.body, { suggestions: [], nextCursor: null });
+
+  const tooLong = await callRoute(router, "get", "/approved", { query: { q: "x".repeat(101) } });
+  assert.equal(tooLong.status, 400);
+  assert.equal((await callRoute(router, "get", "/approved", { query: { q: ["a", "b"] } })).status, 400);
+});

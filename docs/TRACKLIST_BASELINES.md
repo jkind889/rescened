@@ -10,7 +10,7 @@ Request a recommendation. The recommender browses up to 150 releases (three page
 
 Browse alternatives or paste a MusicBrainz release URL/UUID. The server validates and fetches a fixed provider endpoint and checks release-group identity and complete media/track positions. Missing/partial tracklists cannot be confirmed. Repeated recordings at different positions are preserved.
 
-Supply a reason to confirm, replace, defer, or revoke. Defer applies only while no current reviewed baseline or selection exists; use revoke to withdraw a reviewed one. A stale review may still be deferred. A confirmed baseline is a versioned snapshot with local track UUIDs, typed upstream references, source retrieval/license metadata, hash, reviewer, and catalog revision. Replacement creates a new version and preserves history. Ordinary catalog tracks do not establish baseline readiness.
+A reason is optional when you confirm, replace, defer, or revoke; a blank one records a standard note for that action (for example "Tracklist revoked by a moderator."). Defer applies only while no current reviewed baseline or selection exists; use revoke to withdraw a reviewed one. A stale review may still be deferred. A confirmed baseline is a versioned snapshot with local track UUIDs, typed upstream references, source retrieval/license metadata, hash, reviewer, and catalog revision. Replacement creates a new version and preserves history. Ordinary catalog tracks do not establish baseline readiness.
 
 Confirmation fills an empty public catalog tracklist and records provenance. It leaves nonempty tracks unchanged; use an explicit catalog correction to change them. Later catalog revisions make baseline readiness stale until reviewed again. Owner event reads check current validity while retained-event reprocessing catches up.
 
@@ -32,7 +32,7 @@ Moderator API prefix: `/moderation/album-baselines`.
 - `GET /groups?q=...`: release-group discovery.
 - `POST /:kind/:id/candidates`: suggested release or another browse page.
 - `POST /:kind/:id/preview`: alternative release preview.
-- `POST /:kind/:id/{confirm,replace,defer,revoke}`: reason, expected baseline/target revisions, and request UUID. Confirm/replace reference the server-held release/hash snapshot; clients cannot author tracks or reviewers.
+- `POST /:kind/:id/{confirm,replace,defer,revoke}`: optional reason (string, at most 1,000 characters), expected baseline/target revisions, and request UUID. Confirm/replace reference the server-held release/hash snapshot; clients cannot author tracks or reviewers.
 
 Mutations use MongoDB transactions and optimistic revision checks. Stale commands return 409; unavailable transactions return 503. Provider failures cannot block ordinary album approval without a baseline, catalog reads, or manual diary use. Provider calls are bounded, cached, and share the listening MusicBrainz request gate. Normal tests inject provider fixtures.
 
