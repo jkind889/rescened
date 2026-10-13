@@ -37,7 +37,7 @@ function stubAccountModels(calls, { failOn } = {}) {
   const names = {
     Board: "../models/Board", BoardItem: "../models/BoardItem", BoardListen: "../models/BoardListen", Follow: "../models/Follow",
     Like: "../models/Like", Listen: "../models/Listen", ListenCreation: "../models/ListenCreation",
-    Notification: "../models/Notification", Review: "../models/Reviews", UserProfile: "../models/UserProfile",
+    Notification: "../models/Notification", Review: "../models/Reviews", TrackRanking: "../models/TrackRanking", UserProfile: "../models/UserProfile",
   };
   const restores = [];
   for (const [name, path] of Object.entries(names)) {
@@ -286,6 +286,7 @@ test("Clerk user deletion webhook rejects unsigned requests and accepts a valid 
       ["UserProfile.updateMany", { pinnedBoardId: { $in: ["board-1"] } }, true],
       ["Board.deleteMany", { userId: user }, true],
       ["Like.deleteMany", { userId: user }, true],
+      ["TrackRanking.deleteMany", { userId: user }, true],
       ["Follow.deleteMany", { $or: [{ followerId: user }, { followingId: user }] }, true],
       ["Notification.deleteMany", { $or: [{ recipientUserId: user }, { actorUserId: user }] }, true],
       ["UserProfile.deleteOne", { userId: user }, true],

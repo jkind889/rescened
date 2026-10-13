@@ -85,6 +85,15 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `CATALOG_ALBUM_NOT_FOUND` | `409` | An approval command supplies an `albumId` that does not resolve to a usable catalog album. |
 | `CATALOG_TARGET_MISSING` | `409` | A previously created correction has lost its target album before revision or approval. |
 
+### Track rankings
+
+`GET /track-rankings/album/:albumId` is public; `PUT` and `DELETE` require Clerk authentication and share the `trackRankingMutation` limit. An unknown album returns the existing code-less `404`, and a malformed `albumId` the code-less `400`. See [track rankings](TRACK_RANKINGS.md) for the request and response contract.
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `INVALID_TRACK_RANKING` | `400` | The body is not exactly `{ rankedTrackIds }`, or the list is empty, too long, contains duplicates or non-strings, or names a track that is not on the album's current tracklist. |
+| `TRACKLIST_UNAVAILABLE` | `409` | The album has no mapped tracklist yet, so it cannot be ranked. |
+
 ### Submission and moderation conflicts
 
 | Code | Status | Meaning |

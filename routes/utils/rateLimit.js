@@ -55,6 +55,12 @@ const RATE_LIMITS = {
     duration: 10 * 60,
     message: "Too many like updates. Please try again soon.",
   },
+  trackRankingMutation: {
+    keyPrefix: "rescened:track-ranking-mutation",
+    points: 60,
+    duration: 10 * 60,
+    message: "Too many track ranking updates. Please try again soon.",
+  },
   submissionCreate: {
     keyPrefix: "rescened:submission-create",
     points: 6,
@@ -206,6 +212,7 @@ const reviewCreateLimiter = createRateLimiter(RATE_LIMITS.reviewCreate);
 const diaryMutationLimiter = createRateLimiter(RATE_LIMITS.diaryMutation);
 const reviewMutationLimiter = createRateLimiter(RATE_LIMITS.reviewMutation);
 const likeMutationLimiter = createRateLimiter(RATE_LIMITS.likeMutation);
+const trackRankingMutationLimiter = createRateLimiter(RATE_LIMITS.trackRankingMutation);
 const submissionCreateLimiter = createRateLimiter(RATE_LIMITS.submissionCreate);
 const submissionMutationLimiter = createRateLimiter(RATE_LIMITS.submissionMutation);
 const moderationMutationLimiter = createRateLimiter(RATE_LIMITS.moderationMutation);
@@ -250,6 +257,10 @@ module.exports = {
   reviewMutationRateLimit: createRateLimitMiddleware(reviewMutationLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,
     message: RATE_LIMITS.reviewMutation.message,
+  }),
+  trackRankingMutationRateLimit: createRateLimitMiddleware(trackRankingMutationLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.trackRankingMutation.message,
   }),
   submissionCreateRateLimit: createRateLimitMiddleware(submissionCreateLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,

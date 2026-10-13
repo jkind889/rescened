@@ -8,6 +8,7 @@ const routePaths = {
   likes: require.resolve("../routes/likes"),
   reviews: require.resolve("../routes/reviews"),
   search: require.resolve("../routes/search"),
+  trackRankings: require.resolve("../routes/trackRankings"),
 };
 
 function response() {
@@ -64,6 +65,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
     reviewCreate: 0,
     reviewMutation: 0,
     search: 0,
+    trackRankingMutation: 0,
   };
 
   function blocker(name, retryAfterSeconds) {
@@ -86,6 +88,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
     reviewCreateRateLimit: blocker("reviewCreate", 53),
     reviewMutationRateLimit: blocker("reviewMutation", 54),
     searchRateLimit: blocker("search", 55),
+    trackRankingMutationRateLimit: blocker("trackRankingMutation", 56),
   };
 
   require.cache[clerkPath] = {
@@ -114,6 +117,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
       likes: require("../routes/likes"),
       reviews: require("../routes/reviews"),
       search: require("../routes/search"),
+      trackRankings: require("../routes/trackRankings"),
     },
     setUserId(value) {
       userId = value;
@@ -170,6 +174,8 @@ test("routes register the intended limiter after authentication where required",
     [routers.likes, "put", "/album/:albumId", 1, limiters.likeMutationRateLimit],
     [routers.likes, "put", "/review/:reviewId", 1, limiters.likeMutationRateLimit],
     [routers.boards, "post", "/:boardId/albums", 1, limiters.albumSaveRateLimit],
+    [routers.trackRankings, "put", "/album/:albumId", 1, limiters.trackRankingMutationRateLimit],
+    [routers.trackRankings, "delete", "/album/:albumId", 1, limiters.trackRankingMutationRateLimit],
   ];
 
   for (const [router, method, path, limiterIndex, expectedLimiter] of cases) {
@@ -188,6 +194,8 @@ test("route-specific limiters stop work and preserve 429 response metadata", asy
     [routers.likes, "put", "/album/:albumId", { body: {}, headers: {}, params: { albumId: "album" } }, "likeMutation", 52],
     [routers.likes, "put", "/review/:reviewId", { body: {}, headers: {}, params: { reviewId: "review" } }, "likeMutation", 52],
     [routers.boards, "post", "/:boardId/albums", { body: {}, headers: {}, params: { boardId: "board" } }, "albumSave", 51],
+    [routers.trackRankings, "put", "/album/:albumId", { body: {}, headers: {}, params: { albumId: "album" } }, "trackRankingMutation", 56],
+    [routers.trackRankings, "delete", "/album/:albumId", { headers: {}, params: { albumId: "album" } }, "trackRankingMutation", 56],
   ];
 
   for (const [router, method, path, req, limiterName, retryAfterSeconds] of cases) {
@@ -210,6 +218,8 @@ test("authentication rejects mutations before consuming their route-specific lim
     [installed.routers.likes, "put", "/album/:albumId", { body: {}, headers: {}, params: { albumId: "album" } }],
     [installed.routers.likes, "put", "/review/:reviewId", { body: {}, headers: {}, params: { reviewId: "review" } }],
     [installed.routers.boards, "post", "/:boardId/albums", { body: {}, headers: {}, params: { boardId: "board" } }],
+    [installed.routers.trackRankings, "put", "/album/:albumId", { body: {}, headers: {}, params: { albumId: "album" } }],
+    [installed.routers.trackRankings, "delete", "/album/:albumId", { headers: {}, params: { albumId: "album" } }],
   ];
 
   for (const [router, method, path, req] of cases) {
@@ -222,5 +232,6 @@ test("authentication rejects mutations before consuming their route-specific lim
     reviewCreate: 0,
     reviewMutation: 0,
     search: 0,
+    trackRankingMutation: 0,
   });
 });
