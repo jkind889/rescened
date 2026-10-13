@@ -56,6 +56,7 @@ app.use("/profile", profileRoutes)
 app.use("/boards", boardRoutes)
 app.use("/diary", require("./routes/diary"));
 app.use("/likes", likeRoutes)
+app.use("/track-rankings", require("./routes/trackRankings"));
 app.use("/notifications", notificationRoutes)
 app.use("/suggestions", suggestionRoutes)
 app.use("/moderation/album-suggestions", moderationRoutes)

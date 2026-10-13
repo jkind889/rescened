@@ -1,5 +1,21 @@
 [
   {
+    "id": "track-rankings-and-fixes",
+    "date": "2026-10-13",
+    "title": "Rank an album’s tracks",
+    "summary": "Put an album’s songs in your own order and see which tracks the community rates highest, plus a round of fixes from your feedback.",
+    "changes": [
+      "Open the new Ranking tab on any album with a tracklist to rank every track or just your favorites.",
+      "Drag tracks into place, or use the arrows on a phone, then save. You can change or remove your ranking anytime.",
+      "The community view scores each track by where listeners tend to place it.",
+      "Search the Recently approved page by album title or artist.",
+      "Album suggestions and corrections save your draft as you type, so nothing is lost if you leave the page.",
+      "Profile review counts and average ratings now reflect all of your reviews, not just the ones on screen.",
+      "Expired Last.fm sessions are hidden by default, with an option to show them.",
+      "The Last.fm tab on your profile uses white backgrounds in light mode."
+    ]
+  },
+  {
     "id": "lastfm-detection-listening-diary",
     "date": "2026-09-30",
     "title": "Last.fm listen detection and your listening diary",

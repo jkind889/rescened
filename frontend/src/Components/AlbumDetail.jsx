@@ -5,6 +5,7 @@ import ReviewForm from "./ReviewForm";
 import ListenForm from "./ListenForm";
 import AlbumReviewFeed from "./AlbumReviewFeed";
 import LikeButton from "./LikeButton";
+import TrackRanking from "./TrackRanking";
 import AsyncState from "./Loading/AsyncState";
 import { SignInButton, useAuth } from "@clerk/react";
 import { getApiErrorMessage } from "../utils/apiErrors";
@@ -909,7 +910,7 @@ export function AlbumDetail()
                     </div>
 
                     <nav className="album-tabs" aria-label="Album sections">
-                        {["artist", "release", "format", "tracks"].map((tab) => (
+                        {["artist", "release", "format", "tracks", ...(sortedTracks.length > 0 ? ["ranking"] : [])].map((tab) => (
                             <button
                                 key={tab}
                                 type="button"
@@ -964,7 +965,7 @@ export function AlbumDetail()
                                 </dl>
                             )}
 
-                            {activeTab === "tracks" && (
+                            {(activeTab === "tracks" || (activeTab === "ranking" && sortedTracks.length === 0)) && (
                                 <div className="album-tracklist album-tracklist-tab">
                                     {sortedTracks.length > 0 ? (
                                         <>
@@ -995,6 +996,18 @@ export function AlbumDetail()
                                         </p>
                                     )}
                                 </div>
+                            )}
+
+                            {activeTab === "ranking" && sortedTracks.length > 0 && (
+                                <TrackRanking
+                                    key={albumId}
+                                    albumId={albumId}
+                                    tracks={sortedTracks}
+                                    getTrackLabel={(track) => (hasMultipleDiscs
+                                        ? `Track ${Number(track.discNumber) || 1}.${Number(track.trackNumber) || 1}`
+                                        : `Track ${Number(track.trackNumber) || 1}`)}
+                                    formatDuration={formatTrackDuration}
+                                />
                             )}
                         </section>
                     )}

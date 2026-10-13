@@ -16,6 +16,7 @@ const Listen = require("../models/Listen");
 const ListenCreation = require("../models/ListenCreation");
 const Notification = require("../models/Notification");
 const Review = require("../models/Reviews");
+const TrackRanking = require("../models/TrackRanking");
 const UserProfile = require("../models/UserProfile");
 const Listening = require("../models/Listening");
 const Automatic = require("../models/AutomaticListen");
@@ -26,7 +27,7 @@ const { mutateReviewLike } = require("../routes/utils/reviewInteractions");
 
 const enabled = process.env.RUN_MONGO_INTEGRATION === "true";
 const models = [
-  AlbumCatalog, AlbumSubmission, Board, BoardItem, BoardListen, Follow, Like, Listen, ListenCreation, Notification, Review, UserProfile,
+  AlbumCatalog, AlbumSubmission, Board, BoardItem, BoardListen, Follow, Like, Listen, ListenCreation, Notification, Review, TrackRanking, UserProfile,
   ...Object.values(Listening), ...Object.values(Automatic),
 ];
 let replSet;
@@ -55,13 +56,13 @@ async function diaryCounts(userId) {
   return { listens, memberships, receipts };
 }
 async function accountCounts(userId) {
-  const [boards, items, likes, follows, notifications, profiles, reviews] = await Promise.all([
+  const [boards, items, likes, follows, notifications, profiles, reviews, rankings] = await Promise.all([
     Board.countDocuments({ userId }), BoardItem.countDocuments({ userId }), Like.countDocuments({ userId }),
     Follow.countDocuments({ $or: [{ followerId: userId }, { followingId: userId }] }),
     Notification.countDocuments({ $or: [{ recipientUserId: userId }, { actorUserId: userId }] }),
-    UserProfile.countDocuments({ userId }), Review.countDocuments({ userId }),
+    UserProfile.countDocuments({ userId }), Review.countDocuments({ userId }), TrackRanking.countDocuments({ userId }),
   ]);
-  return { ...(await diaryCounts(userId)), boards, items, likes, follows, notifications, profiles, reviews };
+  return { ...(await diaryCounts(userId)), boards, items, likes, follows, notifications, profiles, reviews, rankings };
 }
 
 test.before(async () => {
@@ -125,6 +126,10 @@ integration("account deletion removes diary, boards, social data, and profile, a
   await mutateReviewLike(review.reviewId, other, true);
   await mutateReviewLike(otherReview.reviewId, deleted, true);
   await Like.create({ userId: deleted, targetType: "album", albumCatalogId: album._id });
+  await TrackRanking.create([
+    { userId: deleted, albumCatalogId: album._id, rankedTrackIds: ["t1"] },
+    { userId: other, albumCatalogId: album._id, rankedTrackIds: ["t1"] },
+  ]);
   await Follow.create([{ followerId: deleted, followingId: other }, { followerId: other, followingId: deleted }]);
   await Notification.create([
     { recipientUserId: other, actorUserId: deleted, type: "follow" },
@@ -138,7 +143,7 @@ integration("account deletion removes diary, boards, social data, and profile, a
   await cleanupUserData(deleted);
 
   assert.deepEqual(await accountCounts(deleted), {
-    listens: 0, memberships: 0, receipts: 0, boards: 0, items: 0, likes: 0, follows: 0, notifications: 0, profiles: 0, reviews: 0,
+    listens: 0, memberships: 0, receipts: 0, boards: 0, items: 0, likes: 0, follows: 0, notifications: 0, profiles: 0, reviews: 0, rankings: 0,
   });
   assert.equal(await BoardListen.countDocuments({ boardId: { $in: [board._id, secondBoard._id] } }), 0);
   // The other user keeps everything except the follow edge and notification involving the deleted user.
@@ -224,6 +229,7 @@ integration("account deletion rolls back every removal when the cleanup transact
   await saveAlbum(deleted, board.boardId, album._id);
   const review = await Review.create({ userId: deleted, albumCatalogId: album._id, rating: 4, reviewText: "Rolled back", creationKey: crypto.randomUUID() });
   await Like.create({ userId: deleted, targetType: "album", albumCatalogId: album._id });
+  await TrackRanking.create({ userId: deleted, albumCatalogId: album._id, rankedTrackIds: ["t1"] });
   await Follow.create({ followerId: other, followingId: deleted });
   await Notification.create({ recipientUserId: deleted, actorUserId: other, type: "follow" });
   const { insertedId: connectionId } = await Listening.Connection.collection.insertOne({ userId: deleted, username: "kept-listener", usernameKey: "kept-listener", state: "active", revision: 1 });
@@ -239,7 +245,7 @@ integration("account deletion rolls back every removal when the cleanup transact
 
   assert.deepEqual(await accountCounts(deleted), before);
   assert.deepEqual(before, {
-    listens: 1, memberships: 1, receipts: 1, boards: 2, items: 1, likes: 1, follows: 1, notifications: 1, profiles: 1, reviews: 1,
+    listens: 1, memberships: 1, receipts: 1, boards: 2, items: 1, likes: 1, follows: 1, notifications: 1, profiles: 1, reviews: 1, rankings: 1,
   });
   assert.ok((await Review.findById(review._id).select("+creationKey").lean()).creationKey);
   assert.equal((await Listening.Connection.findById(connectionId).lean()).state, "active");
