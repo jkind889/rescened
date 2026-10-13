@@ -9746,8 +9746,24 @@ label.moderation-candidate-choice {
   background: rgba(0, 0, 0, 0.4);
 }
 
-:root[data-theme="light"] .lastfm-detection {
+/* Light mode: the profile Last.fm tab uses white surfaces instead of the
+   gray page background and the translucent-black dark-mode cards. */
+:root[data-theme="light"] .lastfm-panel,
+:root[data-theme="light"] .lastfm-panel .lastfm-connection-summary,
+:root[data-theme="light"] .lastfm-panel .lastfm-event,
+:root[data-theme="light"] .lastfm-panel .lastfm-detection,
+:root[data-theme="light"] .lastfm-panel .album-action-button,
+:root[data-theme="light"] .lastfm-panel .profile-secondary-button,
+:root[data-theme="light"] .lastfm-panel .album-action-button:hover,
+:root[data-theme="light"] .lastfm-panel .profile-secondary-button:hover {
   background: #ffffff;
+}
+
+:root[data-theme="light"] .lastfm-panel select,
+:root[data-theme="light"] .lastfm-panel input {
+  border-color: var(--app-line-strong);
+  background: #ffffff;
+  color: var(--app-text);
 }
 
 .lastfm-detection-heading,
