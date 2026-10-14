@@ -23,6 +23,9 @@ const genreSchema = new mongoose.Schema(
     status: { type: String, enum: ["active", "retired"], default: "active", required: true },
     // Reserved so descriptors can share the pipeline later; version 1 has genres only.
     kind: { type: String, enum: ["genre"], default: "genre", required: true },
+    // Optimistic-concurrency token for vocabulary commands; a missing field
+    // counts as 0. Album genre writes don't touch it.
+    revision: { type: Number, min: 0, default: 0 },
     origin: {
       source: { type: String, enum: ["seed", "community"], required: true },
       datasetId: { type: String, default: null },
@@ -42,7 +45,7 @@ const genreEventSchema = new mongoose.Schema(
   {
     genre: { type: mongoose.Schema.Types.ObjectId, ref: "Genre", required: true, immutable: true },
     genreId: { type: String, required: true, immutable: true },
-    action: { type: String, enum: ["create", "rename", "alias_add", "reparent", "retire", "merge"], required: true, immutable: true },
+    action: { type: String, enum: ["create", "rename", "alias_add", "reparent", "retire", "restore", "merge"], required: true, immutable: true },
     actorUserId: { type: String, required: true, immutable: true },
     reason: { type: String, default: "", immutable: true },
     before: { type: mongoose.Schema.Types.Mixed, default: null, immutable: true },

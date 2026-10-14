@@ -64,6 +64,7 @@ app.use("/moderation/album-suggestions", moderationRoutes)
 app.use("/connections/lastfm", require("./routes/lastfmConnections"));
 app.use("/moderation/album-mappings", require("./routes/albumMappings"));
 app.use("/moderation/album-baselines", require("./routes/albumBaselines"));
+app.use("/moderation/genres", require("./routes/genreModeration"));
 
 async function startServer({
   connect = mongoose.connect.bind(mongoose),

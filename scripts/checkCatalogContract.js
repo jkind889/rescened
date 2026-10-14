@@ -20,6 +20,7 @@ const roots = [
   "scripts/importCatalogDataset.js",
   "scripts/validateCatalogDataset.js",
   "scripts/importGenres.js",
+  "scripts/mergeGenres.js",
   "scripts/backfillMissingAlbumCovers.js",
 ];
 const allowed = ["spotifyProfileUrl", "Spotify Profile", "open.spotify.com/user/"];

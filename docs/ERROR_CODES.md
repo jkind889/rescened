@@ -117,6 +117,12 @@ The `/genres` routes are public reads. See [community genres](COMMUNITY_GENRES.m
 | `GENRE_PROPOSAL_LIMIT` | `409` | The user would have more than 10 proposed new genre names across their open genre suggestions. |
 | `GENRE_NAME_CONFLICT` | `409` | Approval would create a genre, or add an alias, whose name or slug another genre already uses. `details[0]` names that genre. Nothing was written. |
 | `GENRES_CHANGED` | `409` | The album's `genresRevision` changed between the approval's read and write. Retry the approval. |
+| `INVALID_GENRE_COMMAND` | `400` | A moderator vocabulary command has an unknown field, a missing `expectedRevision`, an invalid name or parent, no change, or (for retire) no reason. |
+| `GENRE_REVISION_CONFLICT` | `409` | The genre's `revision` no longer matches `expectedRevision`. Reload the genre and retry. |
+| `GENRE_HAS_CHILDREN` | `409` | The genre has active sub-genres, so it can't be retired, given a parent, or merged away. |
+| `GENRE_NOT_TOP_LEVEL` | `409` | The chosen parent itself has a parent; genres nest one level deep. |
+| `INVALID_GENRE_STATE` | `409` | `restore` was sent for a genre that isn't retired. |
+| `GENRE_COMMAND_UNAVAILABLE` | `503` | Vocabulary commands need a transaction-capable MongoDB deployment. |
 
 At approval, `GENRE_RETIRED` and `GENRE_NOT_FOUND` are `409`: an added genre was retired, or a mapped genre no longer exists, after the suggestion was made. `GENRE_LIMIT_EXCEEDED` (`409`) also applies at approval when the accepted operations would leave more than 5 genres. Approval failures roll back every write, including genres created in the same approval.
 
@@ -168,7 +174,7 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Suggestion create | `POST /suggestions`, `POST /suggestions/corrections` | authenticated user | 6 attempts per 10 minutes |
 | Suggestion mutation | `POST /suggestions/:submissionId/revise`, `POST /suggestions/:submissionId/withdraw` | authenticated user | 20 attempts per 10 minutes |
 | Genre suggestion | `POST /suggestions/genres` | authenticated user | 20 attempts per hour |
-| Moderation mutation | Request-changes, reject, duplicate, and approve commands | authenticated moderator | 120 attempts per 10 minutes |
+| Moderation mutation | Request-changes, reject, duplicate, and approve commands, and genre vocabulary commands | authenticated moderator | 120 attempts per 10 minutes |
 
 The current implementation uses in-process memory. Counters reset on restart and are not shared between workers or instances. `TRUST_PROXY_HOPS` must match the real proxy chain so IP keys are neither collapsed onto the proxy nor client-spoofable. Unexpected limiter infrastructure errors currently log and fail open; ordinary exhausted buckets fail closed with `429 RATE_LIMITED`.
 
@@ -362,6 +368,23 @@ Source: [`scripts/backfillMissingAlbumCovers.js`](../scripts/backfillMissingAlbu
 | `GENRE_SEED_COMMITTED_REPORT_FAILED` | The apply committed, but the report could not be written. This is not a rollback. |
 
 Source: [`scripts/importGenres.js`](../scripts/importGenres.js) and [`lib/genres/seed.js`](../lib/genres/seed.js).
+
+## Genre merge command codes
+
+| Code | Meaning |
+| --- | --- |
+| `GENRE_MERGE_FAILED` | Generic fatal merge failure. |
+| `INVALID_ARGUMENTS` | CLI flags are invalid, duplicated, or contradictory; the genres are the same; or `--apply` lacks a 64-character `--expect-plan-sha256`. |
+| `GENRE_NOT_FOUND` | No genre has the `--from` or `--into` slug. |
+| `GENRE_RETIRED` | The `--into` genre is retired. |
+| `GENRE_HAS_CHILDREN` | The `--from` genre has active sub-genres. `details` lists their slugs. |
+| `GENRE_MERGE_TOO_LARGE` | More than 5,000 albums would change in one transaction. |
+| `GENRE_MERGE_PLAN_CHANGED` | The plan no longer matches the reviewed `planSha256`, or an album or genre changed during the apply. Nothing was written. |
+| `TRANSACTION_UNAVAILABLE` | MongoDB is not a replica set or sharded deployment. |
+| `MISSING_MONGO_URI` | `MONGO_URI` was not supplied. |
+| `GENRE_MERGE_COMMITTED_REPORT_FAILED` | The apply committed, but the report could not be written. This is not a rollback. |
+
+Source: [`scripts/mergeGenres.js`](../scripts/mergeGenres.js) and [`lib/genres/merge.js`](../lib/genres/merge.js).
 
 ## Community reconciliation command codes
 

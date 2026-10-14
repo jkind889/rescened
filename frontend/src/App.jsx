@@ -27,6 +27,7 @@ const SuggestionEditor = lazy(() => import("./Pages/SuggestionEditor"));
 const ApprovedSuggestions = lazy(() => import("./Pages/ApprovedSuggestions"));
 const ModerationSuggestions = lazy(() => import("./Pages/ModerationSuggestions"));
 const AlbumBaselines = lazy(() => import("./Pages/AlbumBaselines"));
+const GenreVocabulary = lazy(() => import("./Pages/GenreVocabulary"));
 
 export function App() {
    return (
@@ -92,6 +93,14 @@ export function App() {
             <Route path="/moderation/album-suggestions/:submissionId" element={
               <ProtectedRoute>
                 <ModerationSuggestions />
+              </ProtectedRoute>} />
+            <Route path="/moderation/genres" element={
+              <ProtectedRoute>
+                <GenreVocabulary />
+              </ProtectedRoute>} />
+            <Route path="/moderation/genres/:genreId" element={
+              <ProtectedRoute>
+                <GenreVocabulary />
               </ProtectedRoute>} />
             <Route path="/moderation/album-mappings" element={
               <ProtectedRoute>

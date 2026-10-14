@@ -273,3 +273,146 @@
   font-size: .8rem;
   margin: .6rem 0 0;
 }
+
+.genre-vocab-workspace {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 760px) {
+  .genre-vocab-workspace {
+    grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr);
+  }
+}
+
+.genre-vocab-list,
+.genre-vocab-detail {
+  display: grid;
+  gap: .75rem;
+  align-content: start;
+  padding: 1rem;
+}
+
+.genre-vocab-filters {
+  display: grid;
+  gap: .5rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.genre-vocab-filters input,
+.genre-vocab-filters select,
+.genre-vocab-command input,
+.genre-vocab-command select {
+  background: var(--app-surface-strong);
+  border: 1px solid var(--app-line-strong);
+  color: var(--app-text);
+  font: inherit;
+  min-height: 40px;
+  padding: .4rem .6rem;
+  width: 100%;
+}
+
+.genre-vocab-rows {
+  display: grid;
+  list-style: none;
+  margin: 0;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.genre-vocab-row {
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--app-line);
+  color: var(--app-text);
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: .15rem;
+  padding: .5rem .25rem;
+  text-align: left;
+  width: 100%;
+}
+
+.genre-vocab-row span {
+  color: var(--app-muted);
+  font-size: .75rem;
+}
+
+.genre-vocab-row-active {
+  border-left: 3px solid var(--app-accent);
+  padding-left: .5rem;
+}
+
+.genre-vocab-heading {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .75rem;
+  justify-content: space-between;
+}
+
+.genre-vocab-heading h2 {
+  margin: 0;
+}
+
+.genre-vocab-facts {
+  display: grid;
+  gap: .35rem;
+  margin: 0;
+}
+
+.genre-vocab-facts div {
+  display: grid;
+  gap: .75rem;
+  grid-template-columns: 9rem minmax(0, 1fr);
+}
+
+.genre-vocab-facts dt {
+  color: var(--app-muted);
+}
+
+.genre-vocab-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.genre-vocab-commands {
+  display: grid;
+  gap: .75rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.genre-vocab-command {
+  border: 1px solid var(--app-line);
+  display: grid;
+  gap: .45rem;
+  padding: .75rem;
+}
+
+.genre-vocab-command h3 {
+  font-size: .85rem;
+  margin: 0;
+}
+
+.genre-vocab-events {
+  display: grid;
+  gap: .5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.genre-vocab-events li {
+  border-left: 2px solid var(--app-line-strong);
+  display: grid;
+  gap: .15rem;
+  padding-left: .6rem;
+}
+
+.genre-vocab-events small {
+  color: var(--app-muted);
+  overflow-wrap: anywhere;
+}

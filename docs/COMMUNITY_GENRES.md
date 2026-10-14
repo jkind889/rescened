@@ -8,8 +8,9 @@ Built so far:
 - **Slice 2:** contributor genre suggestions through the API. See [Genre suggestions](#genre-suggestions).
 - **Slice 3:** moderator approval through the API, which is the only way an album's genres change. See [Moderator approval](#moderator-approval).
 - **Slice 4:** the contributor and moderator UI. See [Frontend](#frontend).
+- **Slice 5:** moderator vocabulary commands and the operator merge. See [Vocabulary maintenance](#vocabulary-maintenance).
 
-Vocabulary commands, browsing, and the search filter are not built yet.
+Browsing and the search filter are not built yet.
 
 ## Feature flag
 
@@ -36,10 +37,11 @@ The seed command does not read the flag. It writes to whichever database `MONGO_
 | `aliases` | `[{ name, normalizedName, slug }]`: alternative spellings and retired slugs, used by search and slug lookups. |
 | `parent` | Optional broader genre. There is one level only: a parent has no parent. |
 | `status` | `active` or `retired`. Retired genres are hidden from search, detail, children lists, and album chips, but stay referenced by albums until a reviewed merge remaps them. |
+| `revision` | Concurrency token for vocabulary commands, a merge, and approval's alias additions. A missing field counts as `0`. |
 | `kind` | Always `genre` in version 1. It is reserved so descriptors can reuse the pipeline later. |
 | `origin` | `{ source: "seed" \| "community", datasetId, submissionId }`. |
 
-`GenreEvent` is the append-only vocabulary audit: `genre`, `genreId`, `action` (`create`, `rename`, `alias_add`, `reparent`, `retire`, `merge`), `actorUserId`, `reason`, `before`, `after`, `datasetId`, `datasetSha256`, `submissionId`, and `createdAt`. Nothing updates or deletes these records. The seed writes one `create` event per genre, with actor `operator:genres-import`.
+`GenreEvent` is the append-only vocabulary audit: `genre`, `genreId`, `action` (`create`, `rename`, `alias_add`, `reparent`, `retire`, `restore`, `merge`), `actorUserId`, `reason`, `before`, `after`, `datasetId`, `datasetSha256`, `submissionId`, and `createdAt`. Nothing updates or deletes these records. The seed writes one `create` event per genre, with actor `operator:genres-import`.
 
 `AlbumCatalog` gains:
 
@@ -94,6 +96,63 @@ The apply refuses a checksum mismatch, refuses any conflict, and re-plans inside
 Exit codes follow the [shared meanings](ERROR_CODES.md#workflow-statuses-and-command-exit-codes): `0` success, `1` fatal, and `2` for a dry run that found drift or conflicts. Standalone MongoDB returns `TRANSACTION_UNAVAILABLE`. If the report can't be written after a commit, the command prints `GENRE_SEED_COMMITTED_REPORT_FAILED`. The database changed, so don't treat that as a rollback.
 
 Keep the report with the dataset checksum. To change the vocabulary later, add a new dataset version with its own sidecar, rather than editing a seeded file. Rename, retire, and merge are planned moderator commands and a merge CLI, not seed edits.
+
+## Vocabulary maintenance
+
+### Moderator commands
+
+`/moderation/genres` needs a Clerk session, membership in `MODERATOR_USER_IDS`, and `GENRES_ENABLED`. The commands also need `COMMUNITY_MODERATION_ENABLED` and share the moderation-mutation rate limit. The logic is in `lib/genres/vocabularyCommands.js`.
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| `GET` | `/moderation/genres?status=active\|retired\|all&q=` | Genres by name, filtered by status and by name or alias. Each has `genreId`, `slug`, `name`, `status`, `revision`, `parent`, `aliases`, `origin.source`, `albumCount`, `childCount`, and `updatedAt`. |
+| `GET` | `/moderation/genres/:genreId` | `{ genre, events }`, with the latest 50 `GenreEvent`s. |
+| `POST` | `/moderation/genres/:genreId/rename` | `{ name }`. The old name becomes an alias, keeping its slug as a redirect, unless only its case changed. A name that was an alias is promoted instead of duplicated. |
+| `POST` | `/moderation/genres/:genreId/aliases` | `{ name }`. Adds an alternative name. |
+| `POST` | `/moderation/genres/:genreId/parent` | `{ parentGenreId }`. An active top-level genre, or `null` for top-level. A genre with active sub-genres can't get a parent (`GENRE_HAS_CHILDREN`), and the parent must be top-level (`GENRE_NOT_TOP_LEVEL`). |
+| `POST` | `/moderation/genres/:genreId/retire` | `reason` required. Refused while the genre has active sub-genres. Albums keep their reference; the genre stops appearing anywhere public. |
+| `POST` | `/moderation/genres/:genreId/restore` | Makes a retired genre active again. |
+
+Every command body needs the genre's current `expectedRevision`; a stale one returns `409 GENRE_REVISION_CONFLICT`. `reason` is optional except for retiring. A blank reason records a standard note.
+
+Each command checks the revision, writes the genre (incrementing `revision`), and appends one `GenreEvent` with `before` and `after`, all in a single transaction. Standalone MongoDB returns `503 GENRE_COMMAND_UNAVAILABLE`.
+
+Names share one namespace across all genres, active or retired: a rename or alias that matches another genre's name, alias, or slug returns `409 GENRE_NAME_CONFLICT` with that genre in `details`. Only an active genre can be renamed, aliased, reparented, or retired (`GENRE_RETIRED` otherwise), and only a retired genre can be restored (`INVALID_GENRE_STATE`). No command rewrites albums.
+
+The moderator page is `/moderation/genres`, linked from the suggestion queue. It has a searchable list, the genre's facts, one form per command, and the history. On a revision conflict it reloads the genre and asks the moderator to try again.
+
+### Merging genres
+
+Merging rewrites many albums, so it's an operator command rather than a moderator button, and it follows the dry-run-first rule:
+
+```bash
+npm run genres:merge -- --from <slug> --into <slug> --dry-run
+```
+
+The dry run connects with `autoIndex` and `autoCreate` off and changes nothing. It writes `data/genres/merges/<from>-into-<into>.merge-report.json` (or `--report <path>`) with:
+
+- the `database` and a `planSha256`
+- every affected album's genres before and after
+- the aliases that will move
+- how many open genre suggestions reference the source genre
+
+For each album, the source genre is replaced by the target in the same position; if the album already has the target, the source is dropped. The source's name and aliases become the target's aliases (except spellings the target already has), so its links redirect to the target. The source is then retired.
+
+After someone reviews the report, an apply for the named database needs explicit authorization:
+
+```bash
+npm run genres:merge -- --from <slug> --into <slug> --apply --expect-plan-sha256 <planSha256 from the report>
+```
+
+The apply re-plans inside one transaction and refuses (`GENRE_MERGE_PLAN_CHANGED`) unless the plan checksum matches the reviewed one. The checksum covers both genres' revisions, every album's `genresRevision` and before and after genres, and the aliases to move. The apply then:
+
+- conditionally updates each album's `genres`, `genresRevision`, and `fieldProvenance.genres` (`source: "manual"`, `reason: "genre merge"`, both genre IDs, and the plan checksum)
+- adds the aliases to the target, with an `alias_add` event
+- retires the source, with a `merge` event
+
+The actor is `operator:genres-merge`. The merge refuses a source with active sub-genres (`GENRE_HAS_CHILDREN`), a retired target (`GENRE_RETIRED`), and more than 5,000 albums in one transaction (`GENRE_MERGE_TOO_LARGE`). Open suggestions that reference the source aren't changed; approving them later returns `GENRE_RETIRED` for the source, so a moderator skips that operation.
+
+Exit codes: `0` success, `1` fatal. If the report can't be written after a commit, the command prints `GENRE_MERGE_COMMITTED_REPORT_FAILED`; the database changed, so don't treat it as a rollback.
 
 ## Endpoints
 
@@ -266,6 +325,9 @@ The frontend treats an `album.genres` array on album detail as the signal that g
   - A new name defaults to mapping when a candidate is an exact or close-spelling match, and to creating otherwise.
 
 ## Tests
+
+- `tests/genreVocabulary.test.js` covers command and merge-argument validation.
+- `tests/genreVocabulary.integration.test.js` covers moderator access and flags, rename with alias promotion and slug redirects, name conflicts, stale revisions, parents and sub-genres, retire and restore, and a merge from dry run to apply (checksum refusal, remapping, alias transfer, and refusing to re-apply the same plan).
 
 - `tests/genreApproval.test.js` covers the decision rules and the candidate matching.
 - `tests/genreApproval.integration.test.js` covers the approval end to end: applying and retrying idempotently; creating and mapping with aliases; rollback on a name conflict; operations against a changed album; no-op approvals; concurrent approvals on one album; the cap, retired genres, and bad decisions; the public feed; and a correction keeping genre provenance.
