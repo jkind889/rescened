@@ -86,6 +86,12 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `CATALOG_ALBUM_NOT_FOUND` | `409` | An approval command supplies an `albumId` that does not resolve to a usable catalog album. |
 | `CATALOG_TARGET_MISSING` | `409` | A previously created correction has lost its target album before revision or approval. |
 
+### Listening stats
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `INVALID_STATS_REQUEST` | `400` | A stats request used an unsupported field, a `period` other than `2y` or a calendar year inside the two-year window, or an `automatic` value other than `include` or `exclude`. See [the stats guide](LISTENING_STATS.md). |
+
 ### Track rankings
 
 `GET /track-rankings/album/:albumId` is public; `PUT` and `DELETE` require Clerk authentication and share the `trackRankingMutation` limit. An unknown album returns the existing code-less `404`, and a malformed `albumId` the code-less `400`. See [track rankings](TRACK_RANKINGS.md) for the request and response contract.

@@ -17,6 +17,7 @@ const { listListens, listenCalendar } = require("./utils/listeningDiary");
 const { getListenActivity } = require("./utils/listenActivity");
 const { suggestPeople } = require("./utils/peopleSuggestions");
 const { getRankingActivity, listUserRankings } = require("./utils/trackRankings");
+const { listeningStats } = require("./utils/listeningStats");
 
 const router = express.Router();
 const MAX_FAVORITES = 5;
@@ -134,6 +135,13 @@ async function activity(userId, includePrivate = false, viewerId = "") {
 
 router.get("/me", auth, async (req, res) => { try { const profile = await ensureProfile(req.userId); res.json({ ...(await formatProfile(profile)), ...(await socialStats(req.userId, req.userId)) }); } catch { res.status(500).json({ error: "Failed to fetch profile" }); } });
 router.get("/me/saved", auth, async (req, res) => { try { res.json(await getSavedAlbums(req.userId)); } catch { res.status(500).json({ error: "Failed to fetch saved albums" }); } });
+function sendStatsError(res, error) {
+  res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch stats", ...(error.status && error.code ? { code: error.code } : {}) });
+}
+router.get("/me/stats", auth, async (req, res) => {
+  try { res.json(await listeningStats(req.userId, req.query)); }
+  catch (error) { sendStatsError(res, error); }
+});
 router.get("/me/activity", auth, async (req, res) => { try { res.json(await activity(req.userId, true, req.userId)); } catch { res.status(500).json({ error: "Failed to fetch activity" }); } });
 router.get("/me/network", auth, async (req, res) => {
   try {
@@ -210,6 +218,13 @@ router.get("/:userId/diary/calendar", async (req, res) => {
   } catch (error) {
     res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch diary", ...(error.status && error.code ? { code: error.code } : {}) });
   }
+});
+router.get("/:userId/stats", async (req, res) => {
+  try {
+    const access = await profileAccess(req.params.userId, viewer(req));
+    if (access.status !== 200) return res.status(access.status).json(access.body);
+    res.json(await listeningStats(req.params.userId, req.query));
+  } catch (error) { sendStatsError(res, error); }
 });
 router.get("/:userId/rankings", async (req, res) => {
   try {

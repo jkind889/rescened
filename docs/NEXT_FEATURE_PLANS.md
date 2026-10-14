@@ -1,6 +1,6 @@
 # Next feature plans: track rankings, listening stats, community genres
 
-Status, October 2026: plan 1 is implemented on branch `track-ranking-followups` (see [TRACK_RANKINGS.md](TRACK_RANKINGS.md) for the shipped contract). Plans 2 and 3 are proposals. Each lists the decisions that need an answer before work starts.
+Status, October 2026: plan 1 is implemented on branch `track-ranking-followups` (see [TRACK_RANKINGS.md](TRACK_RANKINGS.md)), and plan 2 on `listening-stats` (see [LISTENING_STATS.md](LISTENING_STATS.md)). Plan 3 is a proposal and lists the decisions that need an answer before work starts.
 
 The three plans are ordered by dependency rather than size. Genres (plan 3) make the stats page (plan 2) richer, but neither blocks the other. Track rankings (plan 1) are independent.
 
@@ -96,11 +96,13 @@ Response sections (each computed independently, so one empty section never fails
 - One integration test seeds listens, reviews and saves across two years and checks year isolation and private-profile denial.
 - `npm run check:catalog-contract` (album-bearing response), plus frontend lint and build.
 
-### Decisions needed
+### Decisions (answered 2026-10-14)
 
-1. Should other people see a user's stats on public profiles, or only the owner?
-2. Include automatic listens by default?
-3. Cap "all time" (for example, the last 10 years), or leave it unbounded?
+1. Stats are **visible on public profiles**. Private profiles stay owner-only.
+2. Automatic listens are **included by default**, with a toggle to exclude them.
+3. History is **capped at 2 years**. There is no unbounded "all time": the default period is the last two years, and single calendar years inside that window can be selected.
+
+Built as described above, except that the result is not cached and no benchmark case has been added yet. [LISTENING_STATS.md](LISTENING_STATS.md) is the maintained contract.
 
 ---
 

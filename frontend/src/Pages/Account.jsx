@@ -16,6 +16,7 @@ import LastfmConnectionPanel from "../Components/LastfmConnectionPanel.jsx";
 import ShareButton from "../Components/ShareButton";
 import DiaryCalendar from "../features/diary/DiaryCalendar";
 import ProfileRankings from "../features/rankings/ProfileRankings";
+import ProfileStats from "../features/stats/ProfileStats";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import { REVIEW_SORTS, REVIEW_SORT_OPTIONS } from "../utils/reviewSorts";
 
@@ -25,6 +26,7 @@ const tabs = [
   { id: "reviews", label: "Reviews" },
   { id: "activity", label: "Activity" },
   { id: "diary", label: "Diary" },
+  { id: "stats", label: "Stats" },
   { id: "rankings", label: "Rankings" },
   { id: "boards", label: "Boards" },
   { id: "network", label: "Network" },
@@ -1195,6 +1197,10 @@ export function Account() {
 
     if (activeTab === "diary") {
       return <DiaryCalendar key={profileUserId} userId={isPublicProfile ? profileUserId : ""} />;
+    }
+
+    if (activeTab === "stats") {
+      return <ProfileStats key={profileUserId} userId={profileUserId} isOwner={canManageProfile} />;
     }
 
     if (activeTab === "rankings") {

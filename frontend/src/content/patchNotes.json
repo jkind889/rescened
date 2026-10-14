@@ -1,5 +1,19 @@
 [
   {
+    "id": "profile-listening-stats",
+    "date": "2026-10-14",
+    "title": "Your listening stats",
+    "summary": "A new Stats tab on every profile sums up the last two years of listening, reviewing, and saving.",
+    "changes": [
+      "See total listens, albums, days listened, your longest streak, and an estimate of hours listened.",
+      "A month-by-month chart shows when you listened most, along with your busiest day of the week.",
+      "Find your top albums and artists, and which decades your music comes from.",
+      "Review stats show your rating spread, how many of the albums you heard you reviewed, how your ratings compare with everyone else's, and your most-liked review.",
+      "Pick the last two years or a single year, and turn automatically logged listens on or off.",
+      "Stats are visible on public profiles. Private profiles keep them to the owner."
+    ]
+  },
+  {
     "id": "track-ranking-takes-and-favorites",
     "date": "2026-10-14",
     "title": "Your take on track rankings",
