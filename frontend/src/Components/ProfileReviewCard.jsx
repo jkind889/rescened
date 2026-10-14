@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import LikeButton from "./LikeButton";
+import ShareButton from "./ShareButton";
 
 function formatDate(value) {
   if (!value) {
@@ -50,6 +51,7 @@ export function ProfileReviewCard({ review, likeMessage = "", onToggleLike }) {
           message={likeMessage}
           onToggle={onToggleLike ? () => onToggleLike(review) : undefined}
         />
+        {review.reviewId && <ShareButton className="review-share-button" path={`/review/${review.reviewId}`} title={`Review of ${review.album?.title || "an album"} on Rescened`} />}
       </div>
     </article>
   );

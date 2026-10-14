@@ -6,11 +6,30 @@ import ListenForm from "./ListenForm";
 import AlbumReviewFeed from "./AlbumReviewFeed";
 import LikeButton from "./LikeButton";
 import TrackRanking from "./TrackRanking";
+import ShareButton from "./ShareButton";
 import AsyncState from "./Loading/AsyncState";
 import { SignInButton, useAuth } from "@clerk/react";
 import { getApiErrorMessage } from "../utils/apiErrors";
+import { REVIEW_SORTS, REVIEW_SORT_OPTIONS } from "../utils/reviewSorts";
 
 const RATING_BUCKETS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
+function getReviewSort(search) {
+    const sort = new URLSearchParams(search).get("sort");
+    return Object.hasOwn(REVIEW_SORTS, sort || "") ? sort : "recent";
+}
+
+function finiteOrNull(value) {
+    return value !== null && value !== undefined && Number.isFinite(Number(value)) ? Number(value) : null;
+}
+
+// "1 hr 4 min" for long releases, "38 min" otherwise.
+function formatRuntime(totalMs) {
+    const totalMinutes = Math.round((Number(totalMs) || 0) / 60000);
+    if (!totalMinutes) return "";
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return hours ? `${hours} hr${minutes ? ` ${minutes} min` : ""}` : `${minutes} min`;
+}
 
 const getEmptyRatingDistribution = () => (
     RATING_BUCKETS.map((rating) => ({ rating, count: 0 }))
@@ -60,6 +79,8 @@ const getDefaultAlbumSocial = () => ({
     reviewCount: 0,
     averageRating: null,
     ratingDistribution: getEmptyRatingDistribution(),
+    viewerRating: null,
+    followedAverageRating: null,
     followedReviewers: [],
     followedAlbumLikers: [],
 });
@@ -100,6 +121,9 @@ export function AlbumDetail()
     const [isSavingBoard, setIsSavingBoard] = useState(false);
     const [albumLike, setAlbumLike] = useState({ likeCount: 0, likedByViewer: false });
     const [albumSocial, setAlbumSocial] = useState(getDefaultAlbumSocial);
+    // Bumped to reload the server's social summary after changes the page cannot
+    // reconstruct locally, such as which of the viewer's reviews is now newest.
+    const [socialVersion, setSocialVersion] = useState(0);
     const [expandedSocialSections, setExpandedSocialSections] = useState({});
     const [likeMessage, setLikeMessage] = useState("");
     const [reviewActionMessage, setReviewActionMessage] = useState("");
@@ -121,7 +145,7 @@ export function AlbumDetail()
         activeAlbumIdRef.current = albumId;
         const controller = new AbortController();
         const isReviewsRoute = location.pathname.endsWith("/reviews");
-        const reviewSort = new URLSearchParams(location.search).get("sort") === "popular" ? "popular" : "recent";
+        const reviewSort = getReviewSort(location.search);
 
         async function fetchReviews() {
             setIsReviewsLoading(true);
@@ -216,6 +240,8 @@ export function AlbumDetail()
                         reviewCount: Number(data.reviewCount) || 0,
                         averageRating: Number.isFinite(Number(data.averageRating)) ? Number(data.averageRating) : null,
                         ratingDistribution: normalizeRatingDistribution(data.ratingDistribution),
+                        viewerRating: finiteOrNull(data.viewerRating),
+                        followedAverageRating: finiteOrNull(data.followedAverageRating),
                         followedReviewers: Array.isArray(data.followedReviewers) ? data.followedReviewers : [],
                         followedAlbumLikers: Array.isArray(data.followedAlbumLikers) ? data.followedAlbumLikers : [],
                     });
@@ -229,7 +255,7 @@ export function AlbumDetail()
 
         if (albumId) void fetchAlbumSocial();
         return () => controller.abort();
-    }, [getToken, albumId, userId]);
+    }, [getToken, albumId, userId, socialVersion]);
 
     useEffect(() => {
         let shouldIgnore = false;
@@ -358,7 +384,7 @@ export function AlbumDetail()
             if (res.status === 201) {
                 setAlbumSocial((currentSocial) => {
                     const ratingDistribution = adjustRatingDistribution(currentSocial.ratingDistribution, newReview.rating, 1);
-                    return { ...currentSocial, reviewCount: (Number(currentSocial.reviewCount) || 0) + 1, averageRating: getAverageRatingFromDistribution(ratingDistribution), ratingDistribution };
+                    return { ...currentSocial, reviewCount: (Number(currentSocial.reviewCount) || 0) + 1, averageRating: getAverageRatingFromDistribution(ratingDistribution), ratingDistribution, viewerRating: finiteOrNull(newReview.rating) };
                 });
             }
             return true;
@@ -390,9 +416,19 @@ export function AlbumDetail()
             if (removedReview) {
                 setAlbumSocial((currentSocial) => {
                     const ratingDistribution = adjustRatingDistribution(currentSocial.ratingDistribution, removedReview.rating, -1);
-                    return { ...currentSocial, reviewCount: Math.max(0, (Number(currentSocial.reviewCount) || 0) - 1), averageRating: getAverageRatingFromDistribution(ratingDistribution), ratingDistribution };
+                    return {
+                        ...currentSocial,
+                        reviewCount: Math.max(0, (Number(currentSocial.reviewCount) || 0) - 1),
+                        averageRating: getAverageRatingFromDistribution(ratingDistribution),
+                        ratingDistribution,
+                        viewerRating: null,
+                    };
                 });
             }
+            // Only the author can delete a review, so the viewer just lost one of
+            // their own. They may have reviewed this album more than once, so reload
+            // the summary to pick up the rating from their newest remaining review.
+            setSocialVersion((version) => version + 1);
             return true;
         } catch (error) {
             setDeleteErrors((current) => ({ ...current, [reviewId]: error.message || "Could not delete that review." }));
@@ -552,7 +588,7 @@ export function AlbumDetail()
     const maxRatingBucketCount = Math.max(...ratingDistribution.map((bucket) => bucket.count), 0);
     const albumArt = album.cover;
     const isReviewsRoute = location.pathname.endsWith("/reviews");
-    const reviewSort = new URLSearchParams(location.search).get("sort") === "popular" ? "popular" : "recent";
+    const reviewSort = getReviewSort(location.search);
     const releaseDateLabel = album.releaseDate
         ? new Date(`${album.releaseDate}T00:00:00`).toLocaleDateString(undefined, {
             year: "numeric",
@@ -569,6 +605,12 @@ export function AlbumDetail()
         return firstDisc - secondDisc || firstTrack - secondTrack;
     });
     const hasMultipleDiscs = sortedTracks.some((track) => Number(track.discNumber) > 1);
+    const discCount = new Set(sortedTracks.map((track) => Number(track.discNumber) || 1)).size;
+    // Only report a runtime when every track has a duration; a partial sum would understate it.
+    const runtimeLabel = sortedTracks.length > 0 && sortedTracks.every((track) => Number(track.durationMs) > 0)
+        ? formatRuntime(sortedTracks.reduce((total, track) => total + Number(track.durationMs), 0))
+        : "";
+    const viewerRating = finiteOrNull(albumSocial.viewerRating);
     const previewTracks = sortedTracks.slice(0, 14);
     const hasMoreTracks = sortedTracks.length > 14;
     const selectedReviews = reviews;
@@ -738,16 +780,24 @@ export function AlbumDetail()
         return username ? username.charAt(0).toUpperCase() : "?";
     };
 
-    const renderSocialUser = (user) => (
-        <Link className="album-social-user" key={user.userId} to={`/profile/${encodeURIComponent(user.userId)}`}>
-            <span className="album-social-avatar" aria-hidden="true">
-                {user.imageUrl ? <img src={user.imageUrl} alt="" /> : getSocialInitial(user)}
-            </span>
-            <span>{user.username || "rescened user"}</span>
-        </Link>
-    );
+    const renderSocialUser = (user) => {
+        const rating = finiteOrNull(user.rating);
+        return (
+            <Link
+                className="album-social-user"
+                key={user.userId}
+                to={user.reviewId ? `/review/${user.reviewId}` : `/profile/${encodeURIComponent(user.userId)}`}
+            >
+                <span className="album-social-avatar" aria-hidden="true">
+                    {user.imageUrl ? <img src={user.imageUrl} alt="" /> : getSocialInitial(user)}
+                </span>
+                <span>{user.username || "rescened user"}</span>
+                {rating !== null && <span className="album-social-rating" aria-label={`rated ${rating} out of 5`}>★ {rating}</span>}
+            </Link>
+        );
+    };
 
-    const renderSocialSection = ({ id: sectionId, title, users }) => {
+    const renderSocialSection = ({ id: sectionId, title, users, summary }) => {
         if (users.length === 0) {
             return null;
         }
@@ -762,6 +812,7 @@ export function AlbumDetail()
                     <span>{title}</span>
                     <strong>{users.length}</strong>
                 </div>
+                {summary && <p className="album-social-summary">{summary}</p>}
                 <div className="album-social-users">
                     {visibleUsers.map(renderSocialUser)}
                 </div>
@@ -786,6 +837,9 @@ export function AlbumDetail()
             id: "reviewers",
             title: "Reviewed by people you follow",
             users: albumSocial.followedReviewers,
+            summary: finiteOrNull(albumSocial.followedAverageRating) !== null
+                ? `Their average: ★ ${Number(albumSocial.followedAverageRating).toFixed(1)}`
+                : "",
         },
         {
             id: "likers",
@@ -845,6 +899,7 @@ export function AlbumDetail()
                                 Suggest a correction
                             </Link>
                         ) : renderSignInAction("Suggest a correction")}
+                        <ShareButton className="album-side-action" path={`/album/${album.albumId}`} title={`${album.title} on Rescened`} label="Share album" />
                         {listenMessage && <p className="board-save-message" role="status">{listenMessage}</p>}
                         {boardSaveMessage && <p className="board-save-message" role="status">{boardSaveMessage}</p>}
                     </div>
@@ -868,7 +923,7 @@ export function AlbumDetail()
                             <div className="album-rating-bars" role="list" aria-label="Community rating distribution">
                                 {ratingDistribution.map((bucket) => (
                                     <div
-                                        className="album-rating-bucket"
+                                        className={bucket.rating === viewerRating ? "album-rating-bucket album-rating-bucket-viewer" : "album-rating-bucket"}
                                         key={bucket.rating}
                                         role="listitem"
                                         aria-label={`${bucket.count} review${bucket.count === 1 ? "" : "s"} rated ${bucket.rating} stars`}
@@ -889,6 +944,7 @@ export function AlbumDetail()
                             </div>
                             <strong>{averageRating || "--"}</strong>
                         </div>
+                        {viewerRating !== null && <p className="album-rating-viewer-note">Your rating: ★ {viewerRating}</p>}
                     </div>
 
                     {hasAlbumSocialConnections && (
@@ -906,6 +962,7 @@ export function AlbumDetail()
                             <span>{album.releaseYear || "Unknown year"}</span>
                             <span>{artistNames.join(", ")}</span>
                             {album.label && <span>{album.label}</span>}
+                            {sortedTracks.length > 0 && <span>{sortedTracks.length} track{sortedTracks.length === 1 ? "" : "s"}{runtimeLabel ? ` · ${runtimeLabel}` : ""}</span>}
                         </div>
                     </div>
 
@@ -949,6 +1006,12 @@ export function AlbumDetail()
                                         <dt>Year</dt>
                                         <dd>{album.releaseYear || "Unknown"}</dd>
                                     </div>
+                                    {album.label && (
+                                        <div>
+                                            <dt>Label</dt>
+                                            <dd>{album.label}</dd>
+                                        </div>
+                                    )}
                                 </dl>
                             )}
 
@@ -962,6 +1025,16 @@ export function AlbumDetail()
                                         <dt>Tracks</dt>
                                         <dd>{sortedTracks.length || "Unknown"}</dd>
                                     </div>
+                                    <div>
+                                        <dt>Runtime</dt>
+                                        <dd>{runtimeLabel || "Unknown"}</dd>
+                                    </div>
+                                    {discCount > 1 && (
+                                        <div>
+                                            <dt>Discs</dt>
+                                            <dd>{discCount}</dd>
+                                        </div>
+                                    )}
                                 </dl>
                             )}
 
@@ -1015,10 +1088,9 @@ export function AlbumDetail()
                     {isReviewsRoute ? (
                         <section className="album-reviews-section">
                             <div className="album-section-heading">
-                                <h2>{reviewSort === "popular" ? "Popular Reviews" : "Recent Reviews"}</h2>
+                                <h2>{REVIEW_SORTS[reviewSort].heading}</h2>
                                 <select aria-label="Review order" value={reviewSort} onChange={(event) => navigate(`/album/${albumId}/reviews?sort=${event.target.value}`)} disabled={isReviewsLoading}>
-                                    <option value="recent">Latest first</option>
-                                    <option value="popular">Most liked</option>
+                                    {REVIEW_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                                 </select>
                                 <Link className="album-more-link" to={`/album/${albumId}`}>Back to album</Link>
                             </div>

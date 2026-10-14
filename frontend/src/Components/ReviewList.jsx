@@ -1,5 +1,6 @@
 import { useState } from "react";
 import LikeButton from "./LikeButton";
+import ShareButton from "./ShareButton";
 
 function ReviewEditForm({
     review,
@@ -140,6 +141,7 @@ function ReviewListCard({
                                 message={likeMessage}
                                 onToggle={() => onToggleReviewLike?.(review)}
                             />
+                            {review.reviewId && <ShareButton className="review-share-button" path={`/review/${review.reviewId}`} title={`Review of ${review.title || "an album"} on Rescened`} />}
                             {canEditReviews && (
                                 <button className="review-edit-button" type="button" onClick={() => onStartEdit?.(review.reviewId, listId)}>
                                     Edit Review

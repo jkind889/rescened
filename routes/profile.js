@@ -13,7 +13,7 @@ const { runReviewTransaction, assertPinnedReview, isReviewId, persistedReviewId 
 const { NETWORK_ACTIVITY_LIMIT, getNetworkActivity } = require("./utils/networkActivity");
 const { formatBoard: libraryBoard, savedAlbums: getSavedAlbums } = require("./utils/boardLibrary");
 const { transaction, claimBoard } = require("./utils/boardMutations");
-const { listListens } = require("./utils/listeningDiary");
+const { listListens, listenCalendar } = require("./utils/listeningDiary");
 const { getListenActivity } = require("./utils/listenActivity");
 const { suggestPeople } = require("./utils/peopleSuggestions");
 
@@ -201,6 +201,15 @@ for (const path of ["/:userId/diary", "/:userId/boards/:boardId/albums/:albumId/
   });
 }
 
+router.get("/:userId/diary/calendar", async (req, res) => {
+  try {
+    const access = await profileAccess(req.params.userId, viewer(req));
+    if (access.status !== 200) return res.status(access.status).json(access.body);
+    res.json(await listenCalendar(req.params.userId, req.query));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch diary", ...(error.status && error.code ? { code: error.code } : {}) });
+  }
+});
 router.get("/:userId/boards/:boardId", async (req, res) => { try { const access = await profileAccess(req.params.userId, viewer(req)); if (access.status !== 200) return res.status(access.status).json(access.body); const requestedBoardId = String(req.params.boardId || "").trim().toLowerCase(); const board = requestedBoardId === "default" ? await Board.findOne({ userId: req.params.userId, isDefault: true }) : await Board.findOne({ boardId: publicBoardId(requestedBoardId), userId: req.params.userId }); if (!board) return res.status(404).json({ error: "Board not found" }); res.json(await formatBoard(board)); } catch { res.status(500).json({ error: "Failed to fetch board" }); } });
 router.get("/:userId/boards", async (req, res) => { try { const access = await profileAccess(req.params.userId, viewer(req)); if (access.status !== 200) return res.status(access.status).json(access.body); res.json(await Promise.all((await Board.find({ userId: req.params.userId }).sort({ isDefault: -1, updatedAt: -1 })).map(formatBoard))); } catch { res.status(500).json({ error: "Failed to fetch boards" }); } });
 router.get("/:userId/network", async (req, res) => { try { const access = await profileAccess(req.params.userId, viewer(req)); if (access.status !== 200) return res.status(access.status).json(access.body); const [followers, following] = await Promise.all([Follow.find({ followingId: req.params.userId }), Follow.find({ followerId: req.params.userId })]); const [fm, nm] = await Promise.all([authors(followers.map((row) => plain(row).followerId)), authors(following.map((row) => plain(row).followingId))]); res.json({ userId: req.params.userId, followers: followers.map((row) => fm.get(plain(row).followerId)), following: following.map((row) => nm.get(plain(row).followingId)), followerCount: followers.length, followingCount: following.length }); } catch { res.status(500).json({ error: "Failed to fetch network" }); } });

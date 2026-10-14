@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import LikeButton from "./LikeButton";
+import ShareButton from "./ShareButton";
 
 const DEFAULT_USERNAME = "rescened user";
 
@@ -82,6 +83,7 @@ function AlbumReviewCard({
                         message={likeMessage}
                         onToggle={() => onToggleReviewLike?.(review)}
                     />
+                    {review.reviewId && <ShareButton className="review-share-button" path={`/review/${review.reviewId}`} title={`${username}'s review on Rescened`} />}
                 </div>
 
                 {canDelete && (

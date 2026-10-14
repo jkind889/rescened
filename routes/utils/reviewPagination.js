@@ -7,8 +7,19 @@ const DEFAULT_REVIEW_PAGE_SIZE = 20;
 const MAX_REVIEW_PAGE_SIZE = 50;
 const CURSOR_VERSION = 1;
 const POPULAR_CURSOR_VERSION = 2;
+const RATING_CURSOR_VERSION = 3;
 const POPULAR_PAGE_TIMEOUT_MS = 10000;
-const VALID_SORTS = new Set(["recent", "popular"]);
+const VALID_SORTS = new Set(["recent", "popular", "highest", "lowest"]);
+const RATING_SORTS = new Set(["highest", "lowest"]);
+
+function cursorVersion(sort) {
+  if (sort === "popular") return POPULAR_CURSOR_VERSION;
+  return RATING_SORTS.has(sort) ? RATING_CURSOR_VERSION : CURSOR_VERSION;
+}
+
+function validRating(value) {
+  return Number.isFinite(value) && value >= 1 && value <= 5 && Number.isInteger(value * 2);
+}
 
 class ReviewFeedValidationError extends Error {
   constructor(message, code) {
@@ -29,7 +40,7 @@ function cursorKey() {
 function encodeCursor(payload) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", cursorKey(), iv);
-  const version = payload.sort === "popular" ? POPULAR_CURSOR_VERSION : CURSOR_VERSION;
+  const version = cursorVersion(payload.sort);
   const encrypted = Buffer.concat([cipher.update(JSON.stringify({ v: version, ...payload }), "utf8"), cipher.final()]);
   return [iv.toString("base64url"), cipher.getAuthTag().toString("base64url"), encrypted.toString("base64url")].join(".");
 }
@@ -48,7 +59,7 @@ function decodeCursor(cursor, expected) {
     decipher.setAuthTag(Buffer.from(parts[1], "base64url"));
     const payload = JSON.parse(Buffer.concat([decipher.update(Buffer.from(parts[2], "base64url")), decipher.final()]).toString("utf8"));
     if (
-      payload?.v !== (expected.sort === "popular" ? POPULAR_CURSOR_VERSION : CURSOR_VERSION)
+      payload?.v !== cursorVersion(expected.sort)
       || payload.sort !== expected.sort
       || payload.scope !== expected.scope
       || !mongoose.isValidObjectId(payload.id)
@@ -56,6 +67,7 @@ function decodeCursor(cursor, expected) {
       || (payload.sort === "popular" && (
         !Number.isSafeInteger(payload.likeCount) || payload.likeCount < 0 || !validSnapshotTime(payload.snapshotTime)
       ))
+      || (RATING_SORTS.has(payload.sort) && !validRating(payload.rating))
     ) {
       throw new Error("cursor shape");
     }
@@ -76,7 +88,7 @@ function parseLimit(value) {
 function parseReviewFeedQuery(query, scope) {
   const sort = String(query?.sort || "recent").trim().toLowerCase();
   if (!VALID_SORTS.has(sort)) {
-    throw new ReviewFeedValidationError("Review sort must be recent or popular", "INVALID_REVIEW_SORT");
+    throw new ReviewFeedValidationError("Review sort must be recent, popular, highest, or lowest", "INVALID_REVIEW_SORT");
   }
   const limit = parseLimit(query?.limit);
   const cursor = query?.cursor ? decodeCursor(query.cursor, { sort, scope }) : null;
@@ -89,6 +101,23 @@ function recentCursorFilter(cursor) {
     $or: [
       { date: { $lt: cursor.date } },
       { date: cursor.date, _id: { $lt: cursor.id } },
+    ],
+  };
+}
+
+// Rating sorts break ties newest first so equal ratings read like the recent feed.
+function ratingSortStage(sort) {
+  return { rating: sort === "lowest" ? 1 : -1, date: -1, _id: -1 };
+}
+
+function ratingCursorFilter(cursor, sort) {
+  if (!cursor) return {};
+  const beyond = sort === "lowest" ? { $gt: cursor.rating } : { $lt: cursor.rating };
+  return {
+    $or: [
+      { rating: beyond },
+      { rating: cursor.rating, date: { $lt: cursor.date } },
+      { rating: cursor.rating, date: cursor.date, _id: { $lt: cursor.id } },
     ],
   };
 }
@@ -223,6 +252,7 @@ function nextCursorFor(review, { sort, scope, snapshotTime }) {
     scope,
     snapshotTime: sort === "popular" ? snapshotTime : undefined,
     likeCount: sort === "popular" ? Number(review.likeCount) || 0 : undefined,
+    rating: RATING_SORTS.has(sort) ? Number(review.rating) : undefined,
     date: new Date(review.date).toISOString(),
     id: String(review._id),
   });
@@ -237,6 +267,9 @@ module.exports = {
   encodeCursor,
   nextCursorFor,
   parseReviewFeedQuery,
+  RATING_SORTS,
+  ratingCursorFilter,
+  ratingSortStage,
   readPopularReviewPage,
   recentCursorFilter,
 };

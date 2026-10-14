@@ -58,10 +58,15 @@ async function ratingSummary(albumCatalogId) {
   };
 }
 
+function averageOf(ratings) {
+  return ratings.length ? Math.round((ratings.reduce((total, value) => total + value, 0) / ratings.length) * 10) / 10 : null;
+}
+
 async function socialContext(album, viewerId) {
-  const [savedCount, summary] = await Promise.all([
+  const [savedCount, summary, viewerReview] = await Promise.all([
     savedUserCount(album._id),
     ratingSummary(album._id),
+    viewerId ? Review.findOne({ albumCatalogId: album._id, userId: viewerId }).sort({ date: -1, _id: -1 }) : null,
   ]);
   let followedReviewers = [];
   let followedAlbumLikers = [];
@@ -70,15 +75,25 @@ async function socialContext(album, viewerId) {
     const followedIds = follows.map((follow) => plain(follow).followingId).filter((id) => id && id !== viewerId);
     if (followedIds.length) {
       const [reviews, likes] = await Promise.all([
-        Review.find({ albumCatalogId: album._id, userId: { $in: followedIds } }),
+        Review.find({ albumCatalogId: album._id, userId: { $in: followedIds } }).sort({ date: -1, _id: -1 }),
         Like.find({ targetType: "album", albumCatalogId: album._id, userId: { $in: followedIds } }),
       ]);
       const userMap = await authors([...reviews, ...likes].map((row) => plain(row).userId));
-      followedReviewers = [...new Set(reviews.map((row) => plain(row).userId))].map((id) => userMap.get(id));
+      // Reviews arrive newest first, so the first one per person is their latest.
+      const latestByUser = new Map();
+      reviews.map(plain).forEach((review) => { if (!latestByUser.has(review.userId)) latestByUser.set(review.userId, review); });
+      followedReviewers = [...latestByUser.values()].map((review) => ({
+        ...userMap.get(review.userId), rating: review.rating, reviewId: review.reviewId || null,
+      }));
       followedAlbumLikers = [...new Set(likes.map((row) => plain(row).userId))].map((id) => userMap.get(id));
     }
   }
-  return { savedCount, ...summary, followedReviewers, followedAlbumLikers };
+  return {
+    savedCount, ...summary,
+    viewerRating: viewerReview ? plain(viewerReview).rating : null,
+    followedAverageRating: averageOf(followedReviewers.map((reviewer) => Number(reviewer.rating)).filter(Number.isFinite)),
+    followedReviewers, followedAlbumLikers,
+  };
 }
 
 function catalogQuery(q) {

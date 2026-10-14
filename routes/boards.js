@@ -7,6 +7,7 @@ const { fail, fields } = require("./utils/diaryValidation");
 const { getDefaultBoard, ownedBoard, formatBoard, albumBoards, publicBoardId } = require("./utils/boardLibrary");
 const { saveAlbum, removeAlbum, deleteBoard, setMembership } = require("./utils/boardMutations");
 const { listListens } = require("./utils/listeningDiary");
+const { pickUnplayedAlbum } = require("./utils/boardPick");
 
 const router = express.Router();
 
@@ -16,7 +17,16 @@ function auth(req, res, next) {
   req.userId = userId;
   next();
 }
+const MAX_DESCRIPTION_LENGTH = 280;
 function title(value) { return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : ""; }
+// Descriptions keep line breaks but drop trailing spaces and runs of blank lines.
+function description(value) {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw fail(400, "INVALID_BOARD_DESCRIPTION", "Board description must be text");
+  const text = value.replace(/\r\n?/g, "\n").split("\n").map((line) => line.trimEnd()).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (text.length > MAX_DESCRIPTION_LENGTH) throw fail(400, "INVALID_BOARD_DESCRIPTION", "Board description must be 280 characters or fewer");
+  return text;
+}
 function body(req, allowed) {
   const value = req.body === undefined ? {} : req.body;
   if (value && (Object.hasOwn(value, "boardId") || Object.hasOwn(value, "_id"))) {
@@ -44,10 +54,21 @@ router.get("/", auth, async (req, res) => {
 
 router.post("/", auth, async (req, res) => {
   try {
-    const boardTitle = title(body(req, ["title"]).title);
+    const input = body(req, ["title", "description"]);
+    const boardTitle = title(input.title);
     if (!boardTitle || boardTitle.length > 80) return res.status(400).json({ error: "Board title must be 1–80 characters" });
-    res.status(201).json(await formatBoard(await Board.create({ userId: req.userId, title: boardTitle })));
+    const boardDescription = description(input.description) || "";
+    res.status(201).json(await formatBoard(await Board.create({ userId: req.userId, title: boardTitle, description: boardDescription })));
   } catch (error) { sendError(res, error, "Failed to create board"); }
+});
+
+// Registered before /:boardId so "pick" is never read as a board ID.
+router.get("/pick", auth, async (req, res) => {
+  try {
+    fields(req.query, ["boardId"]);
+    const boardId = req.query.boardId === undefined ? null : target({ params: { boardId: req.query.boardId } });
+    res.json(await pickUnplayedAlbum(req.userId, boardId));
+  } catch (error) { sendError(res, error, "Failed to pick an album"); }
 });
 
 router.get("/album/:albumId", auth, async (req, res) => {
@@ -66,13 +87,19 @@ router.get("/:boardId", auth, async (req, res) => {
   } catch (error) { sendError(res, error, "Failed to fetch board"); }
 });
 
+// Accepts a title, a description, or both. Omitted fields stay unchanged.
 router.patch("/:boardId", auth, async (req, res) => {
   try {
-    const boardTitle = title(body(req, ["title"]).title);
-    if (!boardTitle || boardTitle.length > 80) return res.status(400).json({ error: "Board title must be 1–80 characters" });
+    const input = body(req, ["title", "description"]);
+    const hasTitle = input.title !== undefined;
+    const boardTitle = title(input.title);
+    if (hasTitle && (!boardTitle || boardTitle.length > 80)) return res.status(400).json({ error: "Board title must be 1–80 characters" });
+    const boardDescription = description(input.description);
+    if (!hasTitle && boardDescription === undefined) throw fail(400, "INVALID_DIARY_REQUEST", "Board update must include a title or description");
     const board = await ownedBoard(req.userId, req.params.boardId);
     if (!board) return res.status(404).json({ error: "Board not found" });
-    board.title = boardTitle;
+    if (hasTitle) board.title = boardTitle;
+    if (boardDescription !== undefined) board.description = boardDescription;
     await board.save();
     res.json(await formatBoard(board));
   } catch (error) { sendError(res, error, "Failed to rename board"); }

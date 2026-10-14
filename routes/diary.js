@@ -2,7 +2,7 @@ const express = require("express");
 const { getAuth } = require("@clerk/express");
 const { diaryMutationRateLimit } = require("./utils/rateLimit");
 const { fields } = require("./utils/diaryValidation");
-const { createListen, updateListen, deleteListen, listListens, listUnreviewedAlbums } = require("./utils/listeningDiary");
+const { createListen, updateListen, deleteListen, listListens, listUnreviewedAlbums, listenCalendar } = require("./utils/listeningDiary");
 
 const router = express.Router();
 router.use((req, res, next) => {
@@ -25,6 +25,10 @@ router.get("/", async (req, res) => {
 });
 router.get("/unreviewed", async (req, res) => {
   try { res.json(await listUnreviewedAlbums(req.userId, req.query)); }
+  catch (error) { errorResponse(res, error); }
+});
+router.get("/calendar", async (req, res) => {
+  try { res.json(await listenCalendar(req.userId, req.query)); }
   catch (error) { errorResponse(res, error); }
 });
 router.post("/", diaryMutationRateLimit, async (req, res) => {

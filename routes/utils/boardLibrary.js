@@ -92,9 +92,11 @@ async function collectionAlbums(match) {
 async function formatBoard(board, includeAlbums = false) {
   const albums = await collectionAlbums({ boardId: board._id });
   return {
-    boardId: persistedBoardId(board), userId: board.userId, title: board.title,
+    boardId: persistedBoardId(board), userId: board.userId, title: board.title, description: board.description || "",
     isDefault: Boolean(board.isDefault), createdAt: board.createdAt, updatedAt: board.updatedAt,
     itemCount: albums.length, listenCount: albums.reduce((sum, album) => sum + album.listenCount, 0),
+    // Albums saved on purpose, the only ones "Pick something for me" can suggest.
+    explicitSaveCount: albums.filter((album) => album.explicitlySaved).length,
     previewAlbums: albums.slice(0, 4), ...(includeAlbums ? { albums } : {}),
   };
 }

@@ -10,6 +10,8 @@ const {
   encodeCursor,
   nextCursorFor,
   parseReviewFeedQuery,
+  ratingCursorFilter,
+  ratingSortStage,
   recentCursorFilter,
   readPopularReviewPage,
 } = require("../routes/utils/reviewPagination");
@@ -103,4 +105,44 @@ test("recent and popular pages use deterministic, bounded continuation filters",
       { likeCount: 4, date, _id: { $lt: id } },
     ],
   });
+});
+
+test("rating sorts round-trip their rating in the cursor and page in a stable order", () => {
+  const id = new mongoose.Types.ObjectId();
+  const date = new Date("2026-09-03T00:00:00Z");
+  const scope = "user:owner";
+  for (const sort of ["highest", "lowest"]) {
+    const cursor = nextCursorFor({ _id: id, date, rating: 3.5 }, { sort, scope });
+    const parsed = parseReviewFeedQuery({ sort, cursor }, scope);
+    assert.equal(parsed.cursor.rating, 3.5);
+    assert.throws(() => parseReviewFeedQuery({ sort: sort === "highest" ? "lowest" : "highest", cursor }, scope), (error) => error.code === "INVALID_REVIEW_CURSOR");
+    assert.throws(() => parseReviewFeedQuery({ sort: "recent", cursor }, scope), (error) => error.code === "INVALID_REVIEW_CURSOR");
+  }
+  assert.deepEqual(ratingSortStage("highest"), { rating: -1, date: -1, _id: -1 });
+  assert.deepEqual(ratingSortStage("lowest"), { rating: 1, date: -1, _id: -1 });
+  assert.deepEqual(ratingCursorFilter({ id, date, rating: 4 }, "highest"), {
+    $or: [{ rating: { $lt: 4 } }, { rating: 4, date: { $lt: date } }, { rating: 4, date, _id: { $lt: id } }],
+  });
+  assert.deepEqual(ratingCursorFilter({ id, date, rating: 4 }, "lowest").$or[0], { rating: { $gt: 4 } });
+  assert.deepEqual(ratingCursorFilter(null, "highest"), {});
+});
+
+test("rating cursors without a valid half-step rating are rejected", () => {
+  const scope = "user:owner";
+  const base = { sort: "highest", scope, id: String(new mongoose.Types.ObjectId()), date: "2026-09-03T00:00:00Z" };
+  for (const rating of [undefined, 0, 5.5, 3.3, "4"]) {
+    const cursor = encodeCursor({ ...base, rating });
+    assert.throws(() => decodeCursor(cursor, { sort: "highest", scope }), (error) => error.code === "INVALID_REVIEW_CURSOR");
+  }
+});
+
+test("each rating sort has a matching index for album and user review lists", () => {
+  const Review = require("../models/Reviews");
+  const indexes = Review.schema.indexes().map(([keys]) => JSON.stringify(keys));
+  for (const scopeField of ["albumCatalogId", "userId"]) {
+    for (const sort of ["highest", "lowest"]) {
+      const expected = JSON.stringify({ [scopeField]: 1, ...ratingSortStage(sort) });
+      assert.ok(indexes.includes(expected), `missing index ${expected}`);
+    }
+  }
 });
