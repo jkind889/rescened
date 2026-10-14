@@ -305,6 +305,8 @@ const genreApplicationSchema = new mongoose.Schema(
       }, { _id: false, strict: "throw" })],
       default: [],
     },
+    // Retired genres dropped to keep the stored list within the cap.
+    retiredRemoved: { type: [genreRefSchema], default: [] },
     resultGenres: { type: [genreRefSchema], default: [] },
     baseGenresRevision: { type: Number, required: true, min: 0 },
     resultGenresRevision: { type: Number, required: true, min: 0 },

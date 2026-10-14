@@ -301,6 +301,31 @@ integration("the genre cap, retired genres, and bad decisions are refused withou
   assert.deepEqual((await albumGenres(album)).slugs, ["hip-hop", "jazz", "disco", "electronic", "soul"]);
 });
 
+integration("retired genres don't count toward the cap and are dropped only to make room", async () => {
+  const full = await newAlbum(["hip-hop", "jazz", "soul", "funk", "disco"]);
+  const roomy = await newAlbum(["disco", "jazz"]);
+  await Genre.updateOne({ _id: genres.disco._id }, { $set: { status: "retired" } });
+  try {
+    // Contributors see four genres on the full album, so a fifth fits.
+    const suggestion = await suggest(full, { add: [{ genreId: genres.electronic.genreId }] });
+    const approved = await approve(suggestion.submissionId, { add: [{ decision: "apply" }] });
+    assert.equal(approved.status, 200, JSON.stringify(approved.body));
+    assert.deepEqual((await albumGenres(full)).slugs, ["hip-hop", "jazz", "soul", "funk", "electronic"]);
+    assert.deepEqual(approved.body.suggestion.moderationHistory.at(-1).genreApplication.retiredRemoved.map((genre) => genre.slug), ["disco"]);
+
+    // With room to spare, the retired genre stays for a later merge.
+    const kept = await suggest(roomy, { add: [{ genreId: genres.soul.genreId }] });
+    assert.equal((await approve(kept.submissionId, { add: [{ decision: "apply" }] })).status, 200);
+    assert.deepEqual((await albumGenres(roomy)).slugs, ["disco", "jazz", "soul"]);
+
+    // Jazz is already the first genre anyone sees, so promoting it changes nothing.
+    const promote = await call("POST", "/suggestions/genres", "contributor-promote", { albumId: roomy.albumId, primaryGenreId: genres.jazz.genreId });
+    assert.equal(promote.status, 400);
+  } finally {
+    await Genre.updateOne({ _id: genres.disco._id }, { $set: { status: "active" } });
+  }
+});
+
 integration("a catalog correction keeps the album's genre provenance", async () => {
   const album = await newAlbum();
   const suggestion = await suggest(album, { add: [{ genreId: genres.jazz.genreId }] });

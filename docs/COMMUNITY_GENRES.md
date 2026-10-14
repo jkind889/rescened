@@ -37,7 +37,7 @@ The seed command does not read the flag. It writes to whichever database `MONGO_
 | `normalizedName` | Unique matching key (see [Name rules](#name-rules)). |
 | `aliases` | `[{ name, normalizedName, slug }]`: alternative spellings and retired slugs, used by search and slug lookups. |
 | `parent` | Optional broader genre. There is one level only: a parent has no parent. |
-| `status` | `active` or `retired`. Retired genres are hidden from search, detail, children lists, and album chips, but stay referenced by albums until a reviewed merge remaps them. |
+| `status` | `active` or `retired`. Retired genres are hidden from search, detail, children lists, and album chips, but stay referenced by albums until a reviewed merge remaps them. They don't count toward an album's 5-genre cap or decide its primary genre. |
 | `revision` | Concurrency token for vocabulary commands, a merge, and approval's alias additions. A missing field counts as `0`. |
 | `kind` | Always `genre` in version 1. It is reserved so descriptors can reuse the pipeline later. |
 | `origin` | `{ source: "seed" \| "community", datasetId, submissionId }`. |
@@ -112,7 +112,7 @@ Keep the report with the dataset checksum. To change the vocabulary later, add a
 | `POST` | `/moderation/genres/:genreId/aliases` | `{ name }`. Adds an alternative name. |
 | `POST` | `/moderation/genres/:genreId/parent` | `{ parentGenreId }`. An active top-level genre, or `null` for top-level. A genre with active sub-genres can't get a parent (`GENRE_HAS_CHILDREN`), and the parent must be top-level (`GENRE_NOT_TOP_LEVEL`). |
 | `POST` | `/moderation/genres/:genreId/retire` | `reason` required. Refused while the genre has active sub-genres. Albums keep their reference; the genre stops appearing anywhere public. |
-| `POST` | `/moderation/genres/:genreId/restore` | Makes a retired genre active again. |
+| `POST` | `/moderation/genres/:genreId/restore` | Makes a retired genre active again. Refused with `409 GENRE_NAME_CONFLICT` when another genre now owns its name, an alias, or a slug (always the case after a merge, whose target holds the source's names), and with `409 GENRE_RETIRED` or `GENRE_NOT_TOP_LEVEL` when its parent is retired or no longer top-level. |
 
 Every command body needs the genre's current `expectedRevision`; a stale one returns `409 GENRE_REVISION_CONFLICT`. `reason` is optional except for retiring. A blank reason records a standard note.
 
@@ -147,7 +147,7 @@ npm run genres:merge -- --from <slug> --into <slug> --apply --expect-plan-sha256
 
 The apply re-plans inside one transaction and refuses (`GENRE_MERGE_PLAN_CHANGED`) unless the plan checksum matches the reviewed one. The checksum covers both genres' revisions, every album's `genresRevision` and before and after genres, and the aliases to move. The apply then:
 
-- conditionally updates each album's `genres`, `genresRevision`, and `fieldProvenance.genres` (`source: "manual"`, `reason: "genre merge"`, both genre IDs, and the plan checksum)
+- conditionally updates each album's `genres`, `genresRevision`, and `fieldProvenance.genres` (a whole `fieldProvenance` object on legacy albums where it isn't one) (`source: "manual"`, `reason: "genre merge"`, both genre IDs, and the plan checksum)
 - adds the aliases to the target, with an `alias_add` event
 - retires the source, with a `merge` event
 
@@ -227,7 +227,7 @@ Unknown fields are rejected. The suggestion must change something.
 
 - **Existing names are reused.** A `newGenre` whose name matches an active genre's name or alias, under the [name rules](#name-rules), is stored as a reference to that genre. The response lists each such rewrite in `resolvedNewGenres` (`{ name, matchedBy: "name" | "alias", genre }`), so the UI can say "Using existing genre *Hip hop*". A match on a retired genre returns `GENRE_RETIRED`.
 - **At most 2 genuinely new names per suggestion,** counted after that rewrite. A user can have at most 10 new names across all their open genre suggestions (`409 GENRE_PROPOSAL_LIMIT`). A revision doesn't count against its own earlier names.
-- **The album can end with at most 5 genres** (`409 GENRE_LIMIT_EXCEEDED`). A suggestion can swap genres by removing some while adding others.
+- **The album can end with at most 5 genres** (`409 GENRE_LIMIT_EXCEEDED`). A suggestion can swap genres by removing some while adding others. Only active genres count, matching what the album page shows; for the same reason, the primary genre is the first active one.
 - **One open suggestion per user per album** (`409 GENRE_SUGGESTION_EXISTS`). The submission stores `openGenreSuggestionKey` (`<userId>:<album _id>`) under a unique sparse index while the suggestion is pending or needs changes. Withdrawal, rejection, and approval unset it, so two simultaneous creates can't both succeed.
 
 ### Stored value
@@ -279,7 +279,7 @@ One transaction (standalone MongoDB returns `503 APPROVAL_UNAVAILABLE`):
    - A `map` with `addAlias` pushes the alias and appends an `alias_add` event.
    - Created or mapped names that collide with any genre's name, alias, or slug (active or retired) return `409 GENRE_NAME_CONFLICT` with that genre in `details`.
    - Adding a genre retired since the suggestion was made returns `409 GENRE_RETIRED`; mapping onto one that no longer exists returns `409 GENRE_NOT_FOUND`.
-   - A result over 5 genres returns `409 GENRE_LIMIT_EXCEEDED`; skip some additions and approve again.
+   - A result over 5 active genres returns `409 GENRE_LIMIT_EXCEEDED`; skip some additions and approve again. Retired genres don't count, but the stored list holds at most 5 in all, so retired genres that no longer fit are dropped, last first, and listed in `retiredRemoved`. Retired genres that still fit stay for a later merge.
 3. **Write the album, if the list changed.** The write is conditional on `genresRevision`; a missing field counts as `0`, so it matches `{ $in: [null, 0] }`. It sets `genres`, increments `genresRevision`, and sets `fieldProvenance.genres` (`source: "community"`, `submissionId`, `revision`, `approvedByUserId`, `approvedAt`) as a dotted path. `catalogRevision` is untouched. If every accepted operation was a no-op, the album isn't written and its revision stays the same.
 4. **Close the suggestion.** It sets the suggestion to `approved` with `approvalPublicationType: "genres_updated"` and `approvedAlbumCatalogId`, unsets `openGenreSuggestionKey`, and appends one `approved` event with a `genreApplication` record.
 
@@ -302,6 +302,7 @@ The response keeps the approval shape `{ suggestion, album, albumUrl, idempotent
 | `primary` | `applied`, `skipped`, `noop`, or `null`. |
 | `createdGenres` | New genres created by this approval. |
 | `aliasesAdded` | Aliases added, as `{ genre, alias }` pairs. |
+| `retiredRemoved` | Retired genres dropped to keep the stored list within the cap. |
 | `resultGenres` | The album's genres afterwards. |
 | `baseGenresRevision`, `resultGenresRevision` | The album's genre revision before and after. |
 

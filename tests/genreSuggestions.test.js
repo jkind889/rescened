@@ -157,9 +157,17 @@ test("promotions, retired removals, and the five-genre cap", async () => {
   const cleaned = await normalize({ remove: [vaporwave.genreId] }, target);
   assert.deepEqual(cleaned.genreChanges.removals.map((row) => row.slug), ["vaporwave"]);
 
-  await rejects(normalize({ add: [{ genreId: jazz.genreId }, { genreId: funk.genreId }, { genreId: disco.genreId }] }, target), /at most 5 genres; this would leave 6/, "GENRE_LIMIT_EXCEEDED");
-  const swapped = await normalize({ add: [{ genreId: jazz.genreId }, { genreId: funk.genreId }, { genreId: disco.genreId }], remove: [vaporwave.genreId] }, target);
-  assert.equal(swapped.genreChanges.additions.length, 3);
+  // The retired genre is hidden from the album, so it doesn't count toward the cap.
+  const filled = await normalize({ add: [{ genreId: jazz.genreId }, { genreId: funk.genreId }, { genreId: disco.genreId }] }, target);
+  assert.equal(filled.genreChanges.additions.length, 3);
+  const fourMore = { add: [{ genreId: jazz.genreId }, { genreId: funk.genreId }, { genreId: disco.genreId }, { genreId: jazzRap.genreId }] };
+  await rejects(normalize(fourMore, target), /at most 5 genres; this would leave 6/, "GENRE_LIMIT_EXCEEDED");
+  await rejects(normalize({ ...fourMore, remove: [vaporwave.genreId] }, target), /this would leave 6/, "GENRE_LIMIT_EXCEEDED");
+  const swapped = await normalize({ ...fourMore, remove: [soul.genreId] }, target);
+  assert.equal(swapped.genreChanges.additions.length, 4);
+
+  // The primary is the first active genre, so promoting it past a retired one changes nothing.
+  await rejects(normalize({ primaryGenreId: soul.genreId }, album([vaporwave, soul])), /does not change/);
 });
 
 // The type rules live in a pre("validate") hook, which validateSync skips.

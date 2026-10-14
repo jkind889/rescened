@@ -207,6 +207,41 @@ integration("a merge is planned, reviewed, and applied as one transaction", asyn
   assert.match(again.lines.join("\n"), /GENRE_MERGE_PLAN_CHANGED/);
 });
 
+integration("restore refuses a merged genre and a sub-genre of a retired parent", async () => {
+  const krautrock = await genre("Krautrock");
+  const kosmische = await genre("Kosmische");
+  const legacy = await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Legacy", artistDisplayName: "D", genres: [kosmische._id], genresRevision: 1 });
+  // Some legacy albums store fieldProvenance as null, where a dotted $set fails.
+  await AlbumCatalog.collection.updateOne({ _id: legacy._id }, { $set: { fieldProvenance: null } });
+  const report = path.join(workDir, "kosmische.json");
+  const args = ["--from", "kosmische", "--into", "krautrock", "--report", report];
+  const dry = quietOutput();
+  assert.equal(await mergeMain(args, { output: dry }), 0, dry.lines.join("\n"));
+  const { planSha256 } = JSON.parse(fs.readFileSync(report, "utf8"));
+  const applied = quietOutput();
+  assert.equal(await mergeMain([...args, "--apply", "--expect-plan-sha256", planSha256], { output: applied }), 0, applied.lines.join("\n"));
+  const merged = await AlbumCatalog.findById(legacy._id).lean();
+  assert.deepEqual(merged.genres.map(String), [String(krautrock._id)]);
+  assert.equal(merged.fieldProvenance.genres.reason, "genre merge");
+
+  // The merged genre's names now belong to Krautrock, so it can't come back.
+  const restoreMerged = await command(kosmische, "restore", {});
+  assert.equal(restoreMerged.status, 409);
+  assert.equal(restoreMerged.body.code, "GENRE_NAME_CONFLICT");
+  assert.equal(restoreMerged.body.details[0].slug, "krautrock");
+  assert.equal((await call("GET", "/genres/kosmische")).body.genre.slug, "krautrock");
+
+  const ambient = await genre("Ambient X");
+  const darkAmbient = await genre("Dark ambient X", { parent: ambient._id });
+  await command(darkAmbient, "retire", { reason: "Testing" });
+  await command(ambient, "retire", { reason: "Testing" });
+  const orphan = await command(darkAmbient, "restore", {});
+  assert.equal(orphan.status, 409);
+  assert.equal(orphan.body.code, "GENRE_RETIRED");
+  assert.equal((await command(ambient, "restore", {})).status, 200);
+  assert.equal((await command(darkAmbient, "restore", {})).body.genre.status, "active");
+});
+
 integration("a merge refuses a source with sub-genres or a retired target", async () => {
   const parent = await genre("Synth");
   await genre("Synthwave revival", { parent: parent._id });
