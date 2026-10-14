@@ -19,6 +19,7 @@ import BoardDetail from "./Pages/BoardDetail";
 import Notifications from "./Pages/Notifications";
 import PatchNotes from "./Pages/PatchNotes";
 import Community from "./Pages/Community";
+import ReviewPermalink from "./Pages/ReviewPermalink";
 import ProtectedRoute from "./Components/ProtectedRoute";
 
 const Suggestions = lazy(() => import("./Pages/Suggestions"));
@@ -44,6 +45,7 @@ export function App() {
             />
             <Route path="/album/:albumId" element={<AlbumDetail />} />
             <Route path="/album/:albumId/reviews" element={<AlbumDetail />} />
+            <Route path="/review/:reviewId" element={<ReviewPermalink />} />
             <Route path="/viewreviews" element={
             <ProtectedRoute>
               <ViewReviews />

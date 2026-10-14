@@ -27,6 +27,12 @@ const boardSchema = new mongoose.Schema(
       trim: true,
       maxlength: 80,
     },
+    description: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: 280,
+    },
     isDefault: {
       type: Boolean,
       default: false,

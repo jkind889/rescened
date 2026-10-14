@@ -1,5 +1,20 @@
 [
   {
+    "id": "diary-calendar-sharing-and-sorting",
+    "date": "2026-10-13",
+    "title": "A diary calendar, shareable reviews, and smarter boards",
+    "summary": "See your listening month at a glance, share any review with its own link, and let Rescened pick something from your backlog.",
+    "changes": [
+      "Open the new Diary tab on any profile to see a month of listens as a calendar. Tap a day to see what was played.",
+      "Every review has its own page now. Use Share on a review, an album, a profile, or a board to copy its link.",
+      "Sort reviews by highest or lowest rating, as well as latest and most liked.",
+      "Not sure what to play? “Pick something for me” suggests a saved album you haven’t logged or reviewed yet, from all your boards or just one.",
+      "Add a short description to any board, and sort a board’s albums by date added, release year, artist, title, or listens.",
+      "Album pages show your own rating, the average from people you follow, the track count and total runtime, and the label.",
+      "Tap a follower in “Reviewed by people you follow” to jump straight to their review."
+    ]
+  },
+  {
     "id": "track-rankings-and-fixes",
     "date": "2026-10-13",
     "title": "Rank an album’s tracks",

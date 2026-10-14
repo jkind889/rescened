@@ -7,6 +7,7 @@ const Board = require("../models/Board");
 const BoardItem = require("../models/BoardItem");
 const BoardListen = require("../models/BoardListen");
 const Follow = require("../models/Follow");
+const Listen = require("../models/Listen");
 const Review = require("../models/Reviews");
 const UserProfile = require("../models/UserProfile");
 
@@ -311,4 +312,102 @@ test("profile pins resolve a board UUID to the internal relation and serialize a
   assert.equal(String(storedUpdate.$set.pinnedBoardId), String(sourceBoard._id));
   assert.equal(response.body.pinnedBoard.boardId, BOARD_ID);
   assertNoInternalIds(response.body.pinnedBoard, sourceBoard._id, internalItemId);
+});
+
+test("board descriptions are optional, normalized, bounded, and patchable on their own", async (t) => {
+  const sourceBoard = { ...board(), description: "", save: async () => {} };
+  let created;
+  t.mock.method(Board, "findOne", async () => sourceBoard);
+  t.mock.method(Board, "create", async (doc) => { created = doc; return { ...board(), ...doc }; });
+  t.mock.method(BoardItem, "find", () => chainQuery([]));
+  const router = loadRoute(t, boardRoutePath);
+
+  const withDescription = await invokeLastHandler(router, "/", "post", {
+    userId: "owner",
+    body: { title: "Late night", description: "  For 2am.  \r\n\r\n\r\nQuiet ones only.  " },
+  });
+  assert.equal(withDescription.status, 201);
+  assert.equal(created.description, "For 2am.\n\nQuiet ones only.");
+  assert.equal(withDescription.body.description, "For 2am.\n\nQuiet ones only.");
+
+  await invokeLastHandler(router, "/", "post", { userId: "owner", body: { title: "No description" } });
+  assert.equal(created.description, "");
+
+  for (const description of ["x".repeat(281), 42]) {
+    const rejected = await invokeLastHandler(router, "/", "post", { userId: "owner", body: { title: "Too much", description } });
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.body.code, "INVALID_BOARD_DESCRIPTION");
+  }
+
+  const patched = await invokeLastHandler(router, "/:boardId", "patch", {
+    userId: "owner",
+    params: { boardId: BOARD_ID },
+    body: { description: "Only the description changes" },
+  });
+  assert.equal(patched.status, 200);
+  assert.equal(sourceBoard.title, "Essential listens");
+  assert.equal(patched.body.description, "Only the description changes");
+
+  const empty = await invokeLastHandler(router, "/:boardId", "patch", { userId: "owner", params: { boardId: BOARD_ID }, body: {} });
+  assert.equal(empty.status, 400);
+  assert.equal(empty.body.code, "INVALID_DIARY_REQUEST");
+  assert.match(empty.body.error, /title or description/);
+  const blankTitle = await invokeLastHandler(router, "/:boardId", "patch", { userId: "owner", params: { boardId: BOARD_ID }, body: { title: " ", description: "ok" } });
+  assert.equal(blankTitle.status, 400);
+});
+
+test("the album pick route is matched before board IDs and validates its board filter first", async (t) => {
+  const findOne = t.mock.method(Board, "findOne", async () => null);
+  const distinct = t.mock.method(BoardItem, "distinct", async () => []);
+  t.mock.method(Listen, "distinct", async () => []);
+  t.mock.method(Review, "distinct", async () => []);
+  const router = loadRoute(t, boardRoutePath);
+
+  const getPaths = router.stack.filter((layer) => layer.route?.methods.get).map((layer) => layer.route.path);
+  assert.ok(getPaths.indexOf("/pick") >= 0 && getPaths.indexOf("/pick") < getPaths.indexOf("/:boardId"), "/pick must be registered before /:boardId");
+
+  const everyBoard = await invokeLastHandler(router, "/pick", "get", { userId: "owner", query: {} });
+  assert.equal(everyBoard.status, 200);
+  assert.deepEqual(everyBoard.body, { album: null, candidateCount: 0 });
+  assert.deepEqual(distinct.mock.calls[0].arguments[1], { userId: "owner" });
+
+  for (const boardId of ["not-a-board", "507f1f77bcf86cd799439011", [BOARD_ID, BOARD_ID]]) {
+    const rejected = await invokeLastHandler(router, "/pick", "get", { userId: "owner", query: { boardId } });
+    assert.equal(rejected.status, 404);
+    assert.equal(rejected.body.code, "BOARD_NOT_FOUND");
+  }
+  assert.equal(findOne.mock.callCount(), 0);
+
+  const unknownField = await invokeLastHandler(router, "/pick", "get", { userId: "owner", query: { userId: "someone-else" } });
+  assert.equal(unknownField.status, 400);
+  assert.equal(unknownField.body.code, "INVALID_DIARY_REQUEST");
+
+  const missingBoard = await invokeLastHandler(router, "/pick", "get", { userId: "owner", query: { boardId: BOARD_ID } });
+  assert.equal(missingBoard.status, 404);
+  assert.deepEqual(findOne.mock.calls[0].arguments[0], { userId: "owner", boardId: BOARD_ID });
+  assert.equal(distinct.mock.callCount(), 1);
+});
+
+test("profile diary calendars follow profile privacy before reading listens", async (t) => {
+  let profile = { userId: "listener", isPrivate: true };
+  t.mock.method(UserProfile, "exists", async () => ({ _id: new mongoose.Types.ObjectId() }));
+  t.mock.method(UserProfile, "findOne", () => populatedQuery(profile));
+  const aggregate = t.mock.method(Listen, "aggregate", async () => []);
+  const router = loadRoute(t, profileRoutePath);
+
+  const hidden = await invokeLastHandler(router, "/:userId/diary/calendar", "get", { params: { userId: "listener" }, query: { month: "2026-10" } });
+  assert.equal(hidden.status, 403);
+  assert.equal(hidden.body.isPrivate, true);
+  assert.equal(aggregate.mock.callCount(), 0);
+
+  profile = { userId: "owner", isPrivate: true };
+  const own = await invokeLastHandler(router, "/:userId/diary/calendar", "get", { params: { userId: "owner" }, query: { month: "2026-10" } });
+  assert.equal(own.status, 200);
+  assert.deepEqual(own.body, { month: "2026-10", total: 0, limit: 400, truncated: false, days: [] });
+  assert.equal(aggregate.mock.calls[0].arguments[0][0].$match.userId, "owner");
+
+  profile = { userId: "listener", isPrivate: false };
+  const invalidMonth = await invokeLastHandler(router, "/:userId/diary/calendar", "get", { params: { userId: "listener" }, query: { month: "October" } });
+  assert.equal(invalidMonth.status, 400);
+  assert.equal(invalidMonth.body.code, "INVALID_DIARY_REQUEST");
 });

@@ -306,3 +306,94 @@ test("profile review activity uses the public review ID for both activity identi
   assert.equal(Object.hasOwn(activity, "_id"), false);
   assert.equal(JSON.stringify(activity).includes(String(internalReviewId)), false);
 });
+
+test("review permalinks resolve a public UUID and hide reviews whose album no longer resolves", async (t) => {
+  const album = catalogAlbum();
+  const internalReviewId = new mongoose.Types.ObjectId();
+  const review = {
+    _id: internalReviewId,
+    reviewId: REVIEW_ID,
+    userId: "owner",
+    albumCatalogId: album._id,
+    rating: 4.5,
+    reviewText: "Worth sharing",
+    date: new Date("2026-10-01T12:00:00.000Z"),
+  };
+  let filter;
+  let catalogRows = [album];
+  const findOne = t.mock.method(Review, "findOne", async (value) => { filter = value; return value.reviewId === REVIEW_ID ? review : null; });
+  t.mock.method(AlbumCatalog, "find", async () => catalogRows);
+  t.mock.method(Like, "find", async () => []);
+  const router = loadRoute(t, reviewRoutePath);
+
+  const found = await invokeLastHandler(router, "/review/:reviewId", "get", { params: { reviewId: REVIEW_ID.toUpperCase() } });
+  assert.equal(found.status, 200);
+  assert.deepEqual(filter, { reviewId: REVIEW_ID });
+  assert.equal(found.body.reviewId, REVIEW_ID);
+  assert.equal(found.body.album.albumId, album.albumId);
+  assert.equal(JSON.stringify(found.body).includes(String(internalReviewId)), false);
+  assert.equal(JSON.stringify(found.body).includes(String(album._id)), false);
+
+  const unknown = await invokeLastHandler(router, "/review/:reviewId", "get", { params: { reviewId: "33333333-3333-4333-8333-333333333333" } });
+  assert.equal(unknown.status, 404);
+  assert.equal(unknown.body.code, "REVIEW_NOT_FOUND");
+
+  catalogRows = [];
+  const dangling = await invokeLastHandler(router, "/review/:reviewId", "get", { params: { reviewId: REVIEW_ID } });
+  assert.equal(dangling.status, 404);
+  assert.equal(dangling.body.code, "REVIEW_NOT_FOUND");
+
+  const callsBeforeMalformed = findOne.mock.callCount();
+  for (const reviewId of [String(internalReviewId), "not-a-review"]) {
+    const malformed = await invokeLastHandler(router, "/review/:reviewId", "get", { params: { reviewId } });
+    assert.equal(malformed.status, 400);
+    assert.equal(malformed.body.code, "INVALID_REVIEW_ID");
+  }
+  assert.equal(findOne.mock.callCount(), callsBeforeMalformed);
+});
+
+test("rating-sorted review pages query in rating order and continue from the last rating", async (t) => {
+  const album = catalogAlbum();
+  const reviews = [5, 4.5, 4].map((rating, index) => ({
+    _id: new mongoose.Types.ObjectId(),
+    reviewId: `${index + 4}${index + 4}${index + 4}${index + 4}${index + 4}${index + 4}${index + 4}${index + 4}-1111-4111-8111-111111111111`,
+    userId: "author",
+    albumCatalogId: album._id,
+    rating,
+    reviewText: `Rated ${rating}`,
+    date: new Date(`2026-10-0${index + 1}T12:00:00.000Z`),
+  }));
+  const calls = [];
+  t.mock.method(Review, "find", (filter) => {
+    const call = { filter };
+    calls.push(call);
+    const query = {
+      sort(value) { call.sort = value; return query; },
+      limit(value) { call.limit = value; return Promise.resolve(reviews.slice(0, value)); },
+    };
+    return query;
+  });
+  t.mock.method(AlbumCatalog, "find", async () => [album]);
+  t.mock.method(Like, "find", async () => []);
+  const router = loadRoute(t, reviewRoutePath);
+
+  const first = await invokeLastHandler(router, "/review/user/:userId", "get", { params: { userId: "author" }, query: { sort: "highest", limit: "2" } });
+  assert.equal(first.status, 200);
+  assert.deepEqual(calls[0].filter, { userId: "author" });
+  assert.deepEqual(calls[0].sort, { rating: -1, date: -1, _id: -1 });
+  assert.equal(calls[0].limit, 3);
+  assert.deepEqual(first.body.reviews.map((review) => review.rating), [5, 4.5]);
+  assert.ok(first.body.nextCursor);
+
+  await invokeLastHandler(router, "/review/user/:userId", "get", { params: { userId: "author" }, query: { sort: "highest", limit: "2", cursor: first.body.nextCursor } });
+  assert.deepEqual(calls[1].filter.$or[0], { rating: { $lt: 4.5 } });
+  assert.equal(calls[1].filter.userId, "author");
+
+  const wrongSort = await invokeLastHandler(router, "/review/user/:userId", "get", { params: { userId: "author" }, query: { sort: "lowest", cursor: first.body.nextCursor } });
+  assert.equal(wrongSort.status, 400);
+  assert.equal(wrongSort.body.code, "INVALID_REVIEW_CURSOR");
+  assert.equal(calls.length, 2);
+
+  await invokeLastHandler(router, "/review/user/:userId", "get", { params: { userId: "author" }, query: { sort: "lowest" } });
+  assert.deepEqual(calls[2].sort, { rating: 1, date: -1, _id: -1 });
+});

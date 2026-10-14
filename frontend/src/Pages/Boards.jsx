@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@clerk/react";
 import AsyncState from "../Components/Loading/AsyncState";
 import BoardPreview from "../Components/BoardPreview";
+import PickAlbum from "../Components/PickAlbum";
 
 export function Boards() {
   const { getToken, isSignedIn } = useAuth();
@@ -127,6 +128,7 @@ export function Boards() {
       </div>
 
       {actionError && <p className="boards-error">{actionError}</p>}
+      {sortedBoards.some((board) => board.explicitSaveCount > 0) && <PickAlbum />}
 
       <AsyncState
         isLoading={isLoading}
@@ -143,6 +145,7 @@ export function Boards() {
             <Link className="board-card" key={board.boardId} to={`/boards/${board.boardId}`}>
               <BoardPreview albums={board.previewAlbums || []} />
               <h2>{board.title}</h2>
+              {board.description && <p className="board-card-description">{board.description}</p>}
               <p>
                 {board.itemCount} album{board.itemCount === 1 ? "" : "s"} · {board.listenCount || 0} listen{board.listenCount === 1 ? "" : "s"}
                 {board.isDefault ? " · Default" : ""}

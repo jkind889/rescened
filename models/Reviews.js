@@ -45,6 +45,12 @@ reviewSchema.statics.isDeletedAuthor = function isDeletedAuthor(userId) { return
 reviewSchema.index({ albumCatalogId: 1, date: -1, _id: -1 });
 reviewSchema.index({ userId: 1, date: -1, _id: -1 });
 reviewSchema.index({ date: -1, _id: -1 });
+// Highest/lowest review pages. Both sorts break ties newest first, so each
+// direction needs its own index; one index read backwards cannot serve both.
+reviewSchema.index({ albumCatalogId: 1, rating: -1, date: -1, _id: -1 });
+reviewSchema.index({ albumCatalogId: 1, rating: 1, date: -1, _id: -1 });
+reviewSchema.index({ userId: 1, rating: -1, date: -1, _id: -1 });
+reviewSchema.index({ userId: 1, rating: 1, date: -1, _id: -1 });
 // "Has this user reviewed this album" lookups, e.g. the unreviewed-listens queue.
 reviewSchema.index({ userId: 1, albumCatalogId: 1 });
 reviewSchema.index(

@@ -16,6 +16,9 @@ const {
   readPopularReviewPage,
   nextCursorFor,
   parseReviewFeedQuery,
+  RATING_SORTS,
+  ratingCursorFilter,
+  ratingSortStage,
   recentCursorFilter,
 } = require("./utils/reviewPagination");
 const { deleteOwnedReview, assertReviewId, persistedReviewId } = require("./utils/reviewInteractions");
@@ -141,6 +144,10 @@ async function sendReviewPage(req, res, { match, scope, viewerId }) {
     const page = await readPopularReviewPage(match, feed);
     rows = page.rows;
     feed.snapshotTime = page.snapshotTime;
+  } else if (RATING_SORTS.has(feed.sort)) {
+    rows = await Review.find({ ...match, ...ratingCursorFilter(feed.cursor, feed.sort) })
+      .sort(ratingSortStage(feed.sort))
+      .limit(feed.limit + 1);
   } else {
     rows = await Review.find({ ...match, ...recentCursorFilter(feed.cursor) })
       .sort({ date: -1, _id: -1 })
@@ -197,6 +204,18 @@ router.get("/review/album/:albumId", async (req, res) => {
     const album = await findAlbumByPublicId(req.params.albumId);
     await sendReviewPage(req, res, { match: { albumCatalogId: album._id }, scope: `album:${album.albumId}`, viewerId: viewer(req) });
   } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch reviews", ...(error.code ? { code: error.code } : {}) }); }
+});
+
+// One review by its public ID, for shareable review links.
+router.get("/review/:reviewId", async (req, res) => {
+  try {
+    const reviewId = assertReviewId(req.params.reviewId);
+    const review = await Review.findOne({ reviewId });
+    if (!review) return res.status(404).json({ error: "Review not found", code: "REVIEW_NOT_FOUND" });
+    const [serialized] = await serializeReviews([review], viewer(req));
+    if (!serialized?.album) return res.status(404).json({ error: "Review not found", code: "REVIEW_NOT_FOUND" });
+    res.json(serialized);
+  } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch review", ...(error.code ? { code: error.code } : {}) }); }
 });
 
 router.get("/popular", async (req, res) => {

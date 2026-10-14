@@ -61,25 +61,26 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `INVALID_SUBMISSION` | `400` | A suggestion or correction payload, value, URL, date, count, or persisted submission fails validation. |
 | `INVALID_MODERATION_REQUEST` | `400` | A moderation body, filter, limit, public ID, reason, or `applyFields` selection is invalid. |
 | `INVALID_BOARD_ID` | `400` | A board mutation supplied a client-owned `boardId` or Mongo `_id`; board IDs are server-generated UUID-v4 values. |
-| `INVALID_REVIEW_ID` | `400` | A review mutation received a malformed or client-supplied public UUID-v4 `reviewId`; Mongo ObjectIds are rejected. |
+| `INVALID_BOARD_DESCRIPTION` | `400` | A board create or update supplied a description that is not text or is longer than 280 characters. |
+| `INVALID_REVIEW_ID` | `400` | A review lookup or mutation received a malformed or client-supplied public UUID-v4 `reviewId`; Mongo ObjectIds are rejected. |
 | `INVALID_REVIEW_CURSOR` | `400` | A review-list pagination cursor could not be decrypted, does not match its list/sort or supported version, or refers to an expired popular-ranking snapshot. Reload the list from its first page. |
-| `INVALID_REVIEW_SORT` | `400` | A review list requested a sort other than `recent` or `popular`. |
+| `INVALID_REVIEW_SORT` | `400` | A review list requested a sort other than `recent`, `popular`, `highest`, or `lowest`. |
 | `INVALID_IDEMPOTENCY_KEY` | `400` | A review or diary creation request omitted or supplied a malformed UUID-v4 `Idempotency-Key`. |
-| `INVALID_DIARY_REQUEST` | `400` | A diary/board mutation contains unsupported fields, or a diary filter, limit, or board list is invalid. |
+| `INVALID_DIARY_REQUEST` | `400` | A diary/board mutation contains unsupported fields, a board update supplies neither a title nor a description, or a diary filter, limit, calendar month (`YYYY-MM`), or board list is invalid. |
 | `INVALID_LISTEN_ID` | `400` | A listen identifier is not a public UUID-v4. |
 | `INVALID_ALBUM_ID` | `400` | A diary album identifier is not a public UUID-v4. |
 | `INVALID_LISTEN_DATE` | `400` | A calendar date is invalid, a listen is in the future in the supplied timezone, or a date range is reversed. |
 | `INVALID_TIME_ZONE` | `400` | Creation or date correction omitted or supplied an invalid IANA timezone. |
 | `INVALID_DIARY_CURSOR` | `400` | A diary cursor is malformed, cannot be authenticated, or belongs to a different user/filter scope. |
 | `LISTEN_NOT_FOUND` | `404` | The requested listen does not exist or is not owned by the caller. Deletion instead returns a successful no-op to conceal ownership. |
-| `BOARD_NOT_FOUND` | `404` | A transactional board operation or diary filter targets a missing or unowned board. |
+| `BOARD_NOT_FOUND` | `404` | A transactional board operation, diary filter, or album pick targets a missing or unowned board. |
 | `ALBUM_NOT_FOUND` | `404` | A diary request references a catalog album that does not exist. |
 | `DEFAULT_BOARD_REQUIRED` | `400` | The default saved-albums board cannot be deleted. |
 | `IDEMPOTENCY_CONFLICT` | `409` | A diary creation key was already used with different canonical input. |
 | `LISTEN_DELETED` | `409` | A creation retry refers to a listen that was subsequently deleted; the retained receipt prevents resurrection. |
 | `DIARY_REQUEST_FAILED` | `500` | An unexpected diary route failure; internal database details are not exposed. |
 | `INVALID_PINNED_REVIEW` | `400` | A requested pinned review is malformed or is not owned by the profile being updated. |
-| `REVIEW_NOT_FOUND` | `404` | A review-like request targeted a review that no longer exists. |
+| `REVIEW_NOT_FOUND` | `404` | A review lookup or review-like request targeted a review that no longer exists. |
 | `SUGGESTION_NOT_FOUND` | `404` | A moderator-visible submission does not exist. Contributor detail and mutation routes currently preserve a code-less `404` to conceal ownership. |
 | `CATALOG_TARGET_NOT_FOUND` | `404` | A new correction references a public catalog album that does not exist. |
 | `CATALOG_ALBUM_NOT_FOUND` | `409` | An approval command supplies an `albumId` that does not resolve to a usable catalog album. |

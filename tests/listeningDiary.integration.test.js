@@ -177,6 +177,8 @@ integration("one cover summarizes board-specific listens and preserves explicit 
   let detail = await request("GET", `/boards/${board.boardId}`);
   assert.equal(detail.body.itemCount, 2);
   assert.equal(detail.body.listenCount, 2);
+  // Only the undated album was saved on purpose; the other is on the board through listens.
+  assert.equal(detail.body.explicitSaveCount, 1);
   const card = detail.body.albums.find((item) => item.albumId === album.albumId);
   assert.equal(card.listenCount, 2);
   assert.equal(card.latestListenedOn, "2020-01-03");

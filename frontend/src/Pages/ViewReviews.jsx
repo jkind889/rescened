@@ -4,6 +4,7 @@ import { useAuth } from "@clerk/react";
 import { useParams } from "react-router-dom";
 import ReviewList from "../Components/ReviewList";
 import { getApiErrorMessage } from "../utils/apiErrors";
+import { REVIEW_SORTS, REVIEW_SORT_OPTIONS } from "../utils/reviewSorts";
 
 function appendUniqueReviews(current, incoming) {
     const ids = new Set(current.map((review) => review.reviewId));
@@ -143,12 +144,11 @@ export function ViewReviews() {
         <main className="reviews-page">
             <section className="reviews-section">
                 <div className="reviews-section-header">
-                    <div><p className="reviews-kicker">Review shelf</p><h1>{reviewSort === "popular" ? "Most Liked Reviews" : "Latest Reviews"}</h1></div>
+                    <div><p className="reviews-kicker">Review shelf</p><h1>{REVIEW_SORTS[reviewSort].heading}</h1></div>
                     <div className="reviews-sort-control">
                         <label htmlFor="review-sort">Order</label>
                         <select id="review-sort" value={reviewSort} onChange={(event) => setReviewSort(event.target.value)} disabled={isLoading}>
-                            <option value="recent">Latest first</option>
-                            <option value="popular">Most liked</option>
+                            {REVIEW_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                         </select>
                     </div>
                 </div>

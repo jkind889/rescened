@@ -10436,3 +10436,275 @@ label.moderation-candidate-choice {
     padding-left: 0;
   }
 }
+
+/* Share links, board descriptions, album picker, and review pages. */
+.share-button,
+.review-share-button,
+.board-share-button,
+.profile-share-button,
+.pick-album-button,
+.board-description-form button {
+  min-height: 34px;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--app-line);
+  border-radius: 0;
+  background: var(--app-bg);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 0.8rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.share-button:hover,
+.review-share-button:hover,
+.board-share-button:hover,
+.profile-share-button:hover,
+.pick-album-button:hover:not(:disabled),
+.board-description-form button:hover:not(:disabled) {
+  border-color: var(--app-accent);
+  color: var(--app-text);
+}
+
+.board-share-button {
+  min-height: 44px;
+}
+
+.pick-album-button:disabled,
+.board-description-form button:disabled {
+  color: var(--app-muted);
+  cursor: default;
+}
+
+.profile-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.board-card .board-card-description,
+.board-detail-header .board-description {
+  color: var(--app-soft);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.board-card .board-card-description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 0.85rem;
+}
+
+.board-description-form {
+  display: grid;
+  gap: 0.4rem;
+  max-width: 640px;
+}
+
+.board-description-form textarea {
+  width: 100%;
+  min-height: 3.2rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--app-line);
+  border-radius: 0;
+  background: var(--app-surface);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 0.9rem;
+  resize: vertical;
+}
+
+.board-description-form textarea:focus {
+  border-color: var(--app-accent);
+  outline: none;
+}
+
+.board-description-form > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.board-description-form small {
+  color: var(--app-muted);
+  font-size: 0.75rem;
+}
+
+.pick-album {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 1.25rem;
+}
+
+.pick-album-result {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.4rem 0.8rem 0.4rem 0.4rem;
+  border: 1px solid var(--app-line);
+  background: var(--app-surface);
+  color: var(--app-text);
+  text-decoration: none;
+}
+
+.pick-album-result:hover {
+  border-color: var(--app-accent);
+}
+
+.pick-album-result img,
+.pick-album-fallback {
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  object-fit: cover;
+  background: var(--app-surface-strong);
+}
+
+.pick-album-fallback {
+  display: grid;
+  place-items: center;
+  color: var(--app-muted);
+  font-size: 0.6rem;
+}
+
+.pick-album-result > span {
+  display: grid;
+  min-width: 0;
+  gap: 0.1rem;
+}
+
+.pick-album-result small,
+.pick-album-result em {
+  color: var(--app-muted);
+  font-size: 0.75rem;
+  font-style: normal;
+}
+
+.pick-album-result strong {
+  overflow-wrap: anywhere;
+}
+
+.pick-album-message {
+  margin: 0;
+  color: var(--app-muted);
+  font-size: 0.85rem;
+}
+
+.album-social-user .album-social-rating {
+  margin-left: auto;
+  color: var(--app-soft);
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.album-social-summary {
+  margin: 0;
+  color: var(--app-muted);
+  font-size: 0.8rem;
+}
+
+.album-rating-bucket-viewer .album-rating-bar {
+  background: var(--app-accent);
+}
+
+.album-rating-bucket-viewer .album-rating-label {
+  color: var(--app-accent);
+}
+
+.album-ratings-panel .album-rating-viewer-note {
+  margin: 0.5rem 0 0;
+  color: var(--app-muted);
+  font-size: 0.8rem;
+}
+
+.review-permalink-page {
+  width: min(100%, 860px);
+  margin: 0 auto;
+  padding: 2rem 0 3rem;
+}
+
+.review-permalink {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) 1fr;
+  gap: 1.75rem;
+  align-items: start;
+}
+
+.review-permalink-cover img,
+.review-permalink-cover span {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border: 1px solid var(--app-line);
+  background: var(--app-surface);
+  color: var(--app-muted);
+}
+
+.review-permalink-body {
+  display: grid;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.review-permalink-body h1 {
+  margin: 0;
+  font-size: clamp(1.6rem, 4vw, 2.4rem);
+  line-height: 1.05;
+}
+
+.review-permalink-body h1 a,
+.review-permalink-kicker a {
+  color: var(--app-text);
+  text-decoration: none;
+}
+
+.review-permalink-body h1 a:hover,
+.review-permalink-kicker a:hover {
+  color: var(--app-accent);
+}
+
+.review-permalink-kicker,
+.review-permalink-artist,
+.review-permalink-meta {
+  margin: 0;
+  color: var(--app-muted);
+  font-size: 0.85rem;
+}
+
+.review-permalink-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.review-permalink-meta span {
+  color: var(--app-text);
+}
+
+.review-permalink-copy {
+  margin: 0.5rem 0;
+  color: var(--app-text);
+  font-size: 1.05rem;
+  line-height: 1.6;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .review-permalink {
+    grid-template-columns: 1fr;
+  }
+
+  .review-permalink-cover {
+    width: min(60%, 220px);
+  }
+}

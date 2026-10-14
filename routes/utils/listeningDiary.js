@@ -193,6 +193,42 @@ async function listListens(userId, query = {}, fixed = {}) {
   };
 }
 
+const CALENDAR_MONTH = /^(\d{4})-(0[1-9]|1[0-2])$/;
+const MAX_CALENDAR_LISTENS = 400;
+
+// One month of listens grouped by calendar day for the diary calendar view.
+// Albums carry only display fields; the full listen is a diary request away.
+async function listenCalendar(userId, query = {}) {
+  fields(query, ["month"]);
+  const month = typeof query.month === "string" ? query.month : "";
+  if (!CALENDAR_MONTH.test(month) || month.startsWith("0000")) {
+    throw fail(400, "INVALID_DIARY_REQUEST", "month must be a YYYY-MM calendar month");
+  }
+  const rows = await Listen.aggregate([
+    { $match: { userId, listenedOn: { $gte: `${month}-01`, $lte: `${month}-31` } } },
+    { $sort: { listenedOn: 1, createdAt: 1, _id: 1 } },
+    // Drop listens whose album no longer resolves before limiting, so they
+    // never use up the month's quota. Lookups are by _id and a month is small.
+    { $lookup: { from: "albumcatalogs", localField: "albumCatalogId", foreignField: "_id", as: "album" } },
+    { $unwind: "$album" },
+    { $match: { "album.albumId": { $type: "string" } } },
+    { $limit: MAX_CALENDAR_LISTENS + 1 },
+  ]);
+  const truncated = rows.length > MAX_CALENDAR_LISTENS;
+  const days = new Map();
+  for (const row of rows.slice(0, MAX_CALENDAR_LISTENS)) {
+    const album = normalizeCatalogAlbum(row.album);
+    if (!album?.albumId) continue;
+    if (!days.has(row.listenedOn)) days.set(row.listenedOn, []);
+    days.get(row.listenedOn).push({
+      listenId: row.listenId, listenedOn: row.listenedOn, source: row.source || "manual",
+      album: { albumId: album.albumId, title: album.title, artistDisplayName: album.artistDisplayName, cover: album.cover },
+    });
+  }
+  const dayList = [...days].map(([date, listens]) => ({ date, listens }));
+  return { month, total: dayList.reduce((sum, day) => sum + day.listens.length, 0), limit: MAX_CALENDAR_LISTENS, truncated, days: dayList };
+}
+
 const UNREVIEWED_WINDOW_DAYS = 30;
 
 // Albums the user logged in the last 30 days but never reviewed, most recently
@@ -233,4 +269,4 @@ async function listUnreviewedAlbums(userId, query = {}) {
   };
 }
 
-module.exports = { createAutomaticListen, listUnreviewedAlbums, createListen, fenceAlbumDiary, updateListen, deleteListen, listListens, serializeListen };
+module.exports = { createAutomaticListen, listUnreviewedAlbums, listenCalendar, createListen, fenceAlbumDiary, updateListen, deleteListen, listListens, serializeListen };

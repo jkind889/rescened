@@ -5,6 +5,34 @@ import { useAuth } from "@clerk/react";
 import BoardListens from "../Components/BoardListens";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import AsyncState from "../Components/Loading/AsyncState";
+import PickAlbum from "../Components/PickAlbum";
+import ShareButton from "../Components/ShareButton";
+
+const MAX_DESCRIPTION_LENGTH = 280;
+
+function byText(first, second) {
+  return String(first || "").localeCompare(String(second || ""), undefined, { sensitivity: "base" });
+}
+
+function byYear(first, second, direction) {
+  // Albums without a year go last in either direction.
+  const a = Number(first.releaseYear) || null;
+  const b = Number(second.releaseYear) || null;
+  if (a === b) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return direction * (a - b);
+}
+
+const ALBUM_SORTS = {
+  recent: { label: "Recently added", compare: (a, b) => new Date(b.savedAt) - new Date(a.savedAt) },
+  oldest: { label: "First added", compare: (a, b) => new Date(a.savedAt) - new Date(b.savedAt) },
+  newest_release: { label: "Release year, newest", compare: (a, b) => byYear(a, b, -1) },
+  oldest_release: { label: "Release year, oldest", compare: (a, b) => byYear(a, b, 1) },
+  artist: { label: "Artist A–Z", compare: (a, b) => byText(a.artistDisplayName, b.artistDisplayName) || byText(a.title, b.title) },
+  title: { label: "Title A–Z", compare: (a, b) => byText(a.title, b.title) },
+  listens: { label: "Most listened", compare: (a, b) => (b.listenCount || 0) - (a.listenCount || 0) },
+};
 
 function getArtistName(album) {
   return album.artistDisplayName || "Artist unknown";
@@ -30,6 +58,9 @@ export function BoardDetail() {
   const [savingAlbumId, setSavingAlbumId] = useState("");
   const [removingAlbumId, setRemovingAlbumId] = useState("");
   const [albumFilter, setAlbumFilter] = useState("all");
+  const [albumSort, setAlbumSort] = useState("recent");
+  const [description, setDescription] = useState("");
+  const [isSavingDescription, setIsSavingDescription] = useState(false);
   const [isSavingTitle, setIsSavingTitle] = useState(false);
 
   const fetchBoard = useCallback(async function fetchBoard(refresh = false) {
@@ -67,6 +98,7 @@ export function BoardDetail() {
       if (controller.signal.aborted || scopeRef.current !== scope) return;
       setBoard(data);
       setTitle(data.title || "");
+      setDescription(data.description || "");
       setLoadError("");
     } catch (boardError) {
       if (controller.signal.aborted || scopeRef.current !== scope) return;
@@ -89,17 +121,42 @@ export function BoardDetail() {
   const filteredAlbums = useMemo(() => {
     const albums = (board?.albums || []).filter((album) => albumFilter === "all" || (albumFilter === "listened" ? album.listenCount > 0 : album.explicitlySaved));
     const normalizedQuery = query.trim().toLowerCase();
+    const matching = normalizedQuery
+      ? albums.filter((album) => [
+        album.title,
+        album.artistDisplayName,
+        album.releaseYear,
+      ].join(" ").toLowerCase().includes(normalizedQuery))
+      : albums;
+    // Ties fall back to the board's own order (most recently added first).
+    const compare = ALBUM_SORTS[albumSort]?.compare || ALBUM_SORTS.recent.compare;
+    return [...matching].sort((a, b) => compare(a, b) || ALBUM_SORTS.recent.compare(a, b));
+  }, [albumFilter, albumSort, board, query]);
 
-    if (!normalizedQuery) {
-      return albums;
+  async function saveDescription(event) {
+    event.preventDefault();
+    const nextDescription = description.trim();
+    if (!board || nextDescription === (board.description || "") || isSavingDescription) return;
+    try {
+      setIsSavingDescription(true);
+      setActionError("");
+      const token = await getToken();
+      const response = await fetch(`${API_BASE_URL}/boards/${board.boardId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ description: nextDescription }),
+      });
+      if (!response.ok) throw new Error(await getApiErrorMessage(response, "Could not save the description."));
+      const updatedBoard = await response.json();
+      if (scopeRef.current !== scope) return;
+      setBoard((currentBoard) => ({ ...currentBoard, description: updatedBoard.description || "" }));
+      setDescription(updatedBoard.description || "");
+    } catch (descriptionError) {
+      setActionError(descriptionError.message || "Could not save the description.");
+    } finally {
+      setIsSavingDescription(false);
     }
-
-    return albums.filter((album) => [
-      album.title,
-      album.artistDisplayName,
-      album.releaseYear,
-    ].join(" ").toLowerCase().includes(normalizedQuery));
-  }, [albumFilter, board, query]);
+  }
 
   async function renameBoard(event) {
     event.preventDefault();
@@ -284,6 +341,26 @@ export function BoardDetail() {
             </button>
           </form>
         )}
+        {isPublicBoard ? (
+          board.description && <p className="board-description">{board.description}</p>
+        ) : (
+          <form className="board-description-form" onSubmit={saveDescription}>
+            <textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              maxLength={MAX_DESCRIPTION_LENGTH}
+              rows={2}
+              placeholder="Add a description"
+              aria-label="Board description"
+            />
+            <div>
+              <small>{description.length}/{MAX_DESCRIPTION_LENGTH}</small>
+              <button type="submit" disabled={description.trim() === (board.description || "") || isSavingDescription}>
+                {isSavingDescription ? "Saving…" : "Save description"}
+              </button>
+            </div>
+          </form>
+        )}
         <p>
           {board.isDefault ? "Default board" : "Board"} · {board.itemCount} album{board.itemCount === 1 ? "" : "s"} · {board.listenCount || 0} listen{board.listenCount === 1 ? "" : "s"}
         </p>
@@ -298,6 +375,9 @@ export function BoardDetail() {
             <option value="all">All albums</option>
             <option value="saved">Saved albums</option>
             <option value="listened">With listens</option>
+          </select>
+          <select aria-label="Sort board albums" value={albumSort} onChange={(event) => setAlbumSort(event.target.value)}>
+            {Object.entries(ALBUM_SORTS).map(([value, sort]) => <option key={value} value={value}>{sort.label}</option>)}
           </select>
           <div className="profile-view-toggle" aria-label="Board view">
             <button
@@ -315,6 +395,12 @@ export function BoardDetail() {
               List
             </button>
           </div>
+          <ShareButton
+            className="board-share-button"
+            path={`/profile/${encodeURIComponent(board.userId || userId)}/boards/${board.boardId}`}
+            title={`${board.title} on Rescened`}
+            hint={isPublicBoard ? "" : "Others can open this link while your profile is public."}
+          />
           {!isPublicBoard && !board.isDefault && (
             <button className="board-danger-button" type="button" onClick={deleteBoard}>
               Delete
@@ -323,6 +409,7 @@ export function BoardDetail() {
         </div>
       </div>
 
+      {!isPublicBoard && board.explicitSaveCount > 0 && <PickAlbum key={board.boardId} boardId={board.boardId} />}
       {!isPublicBoard && <p className="board-listening-help">Removing an album clears its saves and listening dates from this board. Your diary entries stay intact.</p>}
       {actionError && <p role="alert" className="boards-error">{actionError}</p>}
 

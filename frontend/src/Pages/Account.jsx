@@ -13,13 +13,17 @@ import ProfileReviewCard from "../Components/ProfileReviewCard";
 import AsyncState from "../Components/Loading/AsyncState";
 import BoardPreview from "../Components/BoardPreview";
 import LastfmConnectionPanel from "../Components/LastfmConnectionPanel.jsx";
+import ShareButton from "../Components/ShareButton";
+import DiaryCalendar from "../features/diary/DiaryCalendar";
 import { getApiErrorMessage } from "../utils/apiErrors";
+import { REVIEW_SORTS, REVIEW_SORT_OPTIONS } from "../utils/reviewSorts";
 
 const tabs = [
   { id: "overview", label: "Overview" },
   { id: "saved", label: "Saved Albums" },
   { id: "reviews", label: "Reviews" },
   { id: "activity", label: "Activity" },
+  { id: "diary", label: "Diary" },
   { id: "boards", label: "Boards" },
   { id: "network", label: "Network" },
   { id: "lastfm", label: "Last.fm" },
@@ -1038,6 +1042,7 @@ export function Account() {
                 <Link className="board-card" key={board.boardId} to={boardPath}>
                   <BoardPreview albums={board.previewAlbums || []} />
                   <h2>{board.title}</h2>
+                  {board.description && <p className="board-card-description">{board.description}</p>}
                   <p>
                     {board.itemCount} album{board.itemCount === 1 ? "" : "s"} · {board.listenCount || 0} listen{board.listenCount === 1 ? "" : "s"}
                     {board.isDefault ? " · Default" : ""}
@@ -1120,10 +1125,9 @@ export function Account() {
       <div className="profile-review-tab">
         <section className="profile-panel">
           <div className="profile-section-header">
-            <h2>{reviewSort === "popular" ? "Most Liked Reviews" : "Latest Reviews"}</h2>
-            <select value={reviewSort} onChange={(event) => changeReviewSort(event.target.value)} disabled={isLoadingMoreReviews}>
-              <option value="recent">Latest first</option>
-              <option value="popular">Most liked</option>
+            <h2>{REVIEW_SORTS[reviewSort].heading}</h2>
+            <select aria-label="Review order" value={reviewSort} onChange={(event) => changeReviewSort(event.target.value)} disabled={isLoadingMoreReviews}>
+              {REVIEW_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </div>
           <div className="profile-review-list">
@@ -1176,6 +1180,10 @@ export function Account() {
 
     if (activeTab === "activity") {
       return renderActivity();
+    }
+
+    if (activeTab === "diary") {
+      return <DiaryCalendar key={profileUserId} userId={isPublicProfile ? profileUserId : ""} />;
     }
 
     if (activeTab === "boards") {
@@ -1307,9 +1315,15 @@ export function Account() {
                   </>
                 )}
               </div>
-              {canManageProfile && (
+              {(canManageProfile || !isPrivateProfile) && profileUserId && (
                 <div className="profile-hero-actions">
-                  <Link className="profile-edit-link" to="/account/edit">Edit Profile</Link>
+                  {canManageProfile && <Link className="profile-edit-link" to="/account/edit">Edit Profile</Link>}
+                  <ShareButton
+                    className="profile-share-button"
+                    path={`/profile/${encodeURIComponent(profileUserId)}`}
+                    title={`${displayName} on Rescened`}
+                    label="Share profile"
+                  />
                 </div>
               )}
             </header>
