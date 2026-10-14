@@ -81,6 +81,7 @@ const getDefaultAlbumSocial = () => ({
     ratingDistribution: getEmptyRatingDistribution(),
     viewerRating: null,
     followedAverageRating: null,
+    topTrack: null,
     followedReviewers: [],
     followedAlbumLikers: [],
 });
@@ -242,6 +243,7 @@ export function AlbumDetail()
                         ratingDistribution: normalizeRatingDistribution(data.ratingDistribution),
                         viewerRating: finiteOrNull(data.viewerRating),
                         followedAverageRating: finiteOrNull(data.followedAverageRating),
+                        topTrack: data.topTrack?.trackId ? data.topTrack : null,
                         followedReviewers: Array.isArray(data.followedReviewers) ? data.followedReviewers : [],
                         followedAlbumLikers: Array.isArray(data.followedAlbumLikers) ? data.followedAlbumLikers : [],
                     });
@@ -611,6 +613,10 @@ export function AlbumDetail()
         ? formatRuntime(sortedTracks.reduce((total, track) => total + Number(track.durationMs), 0))
         : "";
     const viewerRating = finiteOrNull(albumSocial.viewerRating);
+    // Only named once at least three people have ranked the album and #1 is not tied.
+    const fanFavorite = albumSocial.topTrack && sortedTracks.some((track) => track.trackId === albumSocial.topTrack.trackId)
+        ? albumSocial.topTrack
+        : null;
     const previewTracks = sortedTracks.slice(0, 14);
     const hasMoreTracks = sortedTracks.length > 14;
     const selectedReviews = reviews;
@@ -945,6 +951,13 @@ export function AlbumDetail()
                             <strong>{averageRating || "--"}</strong>
                         </div>
                         {viewerRating !== null && <p className="album-rating-viewer-note">Your rating: ★ {viewerRating}</p>}
+                        {fanFavorite && (
+                            <p className="album-fan-favorite-note">
+                                Fan favorite:{" "}
+                                <button type="button" onClick={() => setActiveTab("ranking")}>{fanFavorite.title || "Untitled Track"}</button>
+                                <small> · {fanFavorite.rankingCount} rankings</small>
+                            </p>
+                        )}
                     </div>
 
                     {hasAlbumSocialConnections && (
@@ -1053,7 +1066,10 @@ export function AlbumDetail()
                                                 return (
                                                     <li key={track.trackId || `${discNumber}-${trackNumber}-${track.title}`}>
                                                         <span className="album-track-number">{trackLabel}</span>
-                                                        <span className="album-track-title">{track.title || "Untitled Track"}</span>
+                                                        <span className="album-track-title">
+                                                            {track.title || "Untitled Track"}
+                                                            {fanFavorite?.trackId === track.trackId && <span className="album-fan-favorite-badge" title={`Ranked #1 across ${fanFavorite.rankingCount} rankings`}>Fan favorite</span>}
+                                                        </span>
                                                         <span className="album-track-duration">{formatTrackDuration(track.durationMs)}</span>
                                                     </li>
                                                 );

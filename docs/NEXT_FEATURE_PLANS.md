@@ -1,6 +1,6 @@
 # Next feature plans: track rankings, listening stats, community genres
 
-Status: proposal, October 2026. None of the three plans below is implemented. Each plan lists the decisions that need an answer before work starts.
+Status, October 2026: plan 1 is implemented on branch `track-ranking-followups` (see [TRACK_RANKINGS.md](TRACK_RANKINGS.md) for the shipped contract). Plans 2 and 3 are proposals. Each lists the decisions that need an answer before work starts.
 
 The three plans are ordered by dependency rather than size. Genres (plan 3) make the stats page (plan 2) richer, but neither blocks the other. Track rankings (plan 1) are independent.
 
@@ -37,11 +37,13 @@ So "community track ranking" from the earlier idea list is done. This plan cover
 
 `npm test` covers the pure scoring additions (agreement, deltas, confidence threshold) as unit tests. Circle-scope aggregation and privacy filtering get a case in `tests/trackRankings.integration.test.js` (`npm run test:integration`). The frontend changes need lint and build. Update [TRACK_RANKINGS.md](TRACK_RANKINGS.md) for every new response field.
 
-### Decisions needed
+### Decisions (answered 2026-10-14)
 
-1. The "settled" threshold: 3 or 5 distinct rankers?
-2. Score shrinkage or the "Early" label only?
-3. Should rankings appear in activity feeds (slice 6), or stay on album pages and profiles?
+1. Standings are "settled" at **3** distinct rankers.
+2. **Early label only.** Scores are not shrunk, so the documented `score` meaning is unchanged.
+3. Rankings **appear in activity feeds** (profile activity and the network feed), and also get their own Rankings tab on profiles.
+
+All six slices are built. The Rankings section became its own profile tab rather than part of Activity.
 
 ---
 

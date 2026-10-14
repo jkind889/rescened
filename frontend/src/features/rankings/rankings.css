@@ -1,0 +1,97 @@
+.profile-rankings {
+  display: grid;
+  gap: 1rem;
+}
+
+.profile-rankings-status {
+  color: var(--app-muted);
+}
+
+.profile-rankings-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.profile-rankings-list > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: center;
+  padding: 0.75rem;
+  border: 1px solid var(--app-line);
+  background: var(--app-surface);
+}
+
+.profile-rankings-album {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  color: var(--app-text);
+  text-decoration: none;
+}
+
+.profile-rankings-album:hover strong {
+  color: var(--app-accent);
+}
+
+.profile-rankings-album img,
+.profile-rankings-fallback {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  background: var(--app-surface-strong);
+}
+
+.profile-rankings-fallback {
+  display: grid;
+  place-items: center;
+  color: var(--app-muted);
+  font-size: 0.6rem;
+}
+
+.profile-rankings-album > span {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.profile-rankings-album strong {
+  overflow-wrap: anywhere;
+}
+
+.profile-rankings-album em,
+.profile-rankings-album small {
+  color: var(--app-muted);
+  font-size: 0.8rem;
+  font-style: normal;
+}
+
+.profile-rankings-tracks {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
+}
+
+.profile-rankings-tracks li {
+  overflow-wrap: anywhere;
+}
+
+.profile-rankings-tracks span {
+  display: inline-block;
+  min-width: 1.5rem;
+  color: var(--app-muted);
+}
+
+@media (max-width: 640px) {
+  .profile-rankings-list > li {
+    grid-template-columns: 1fr;
+  }
+}

@@ -7,6 +7,7 @@ const Like = require("../models/Like");
 const Review = require("../models/Reviews");
 const { findAlbumByPublicId, normalizeCatalogAlbum } = require("./utils/albumCatalog");
 const { buildCatalogSearchQuery } = require("./utils/catalogSearch");
+const { albumTopTrack } = require("./utils/trackRankings");
 
 const router = express.Router();
 const PAGE_LIMIT = 24;
@@ -63,10 +64,11 @@ function averageOf(ratings) {
 }
 
 async function socialContext(album, viewerId) {
-  const [savedCount, summary, viewerReview] = await Promise.all([
+  const [savedCount, summary, viewerReview, topTrack] = await Promise.all([
     savedUserCount(album._id),
     ratingSummary(album._id),
     viewerId ? Review.findOne({ albumCatalogId: album._id, userId: viewerId }).sort({ date: -1, _id: -1 }) : null,
+    albumTopTrack(album),
   ]);
   let followedReviewers = [];
   let followedAlbumLikers = [];
@@ -89,7 +91,7 @@ async function socialContext(album, viewerId) {
     }
   }
   return {
-    savedCount, ...summary,
+    savedCount, ...summary, topTrack,
     viewerRating: viewerReview ? plain(viewerReview).rating : null,
     followedAverageRating: averageOf(followedReviewers.map((reviewer) => Number(reviewer.rating)).filter(Number.isFinite)),
     followedReviewers, followedAlbumLikers,

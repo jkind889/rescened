@@ -94,6 +94,8 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | --- | --- | --- |
 | `INVALID_TRACK_RANKING` | `400` | The body is not exactly `{ rankedTrackIds }`, or the list is empty, too long, contains duplicates or non-strings, or names a track that is not on the album's current tracklist. |
 | `TRACKLIST_UNAVAILABLE` | `409` | The album has no mapped tracklist yet, so it cannot be ranked. |
+| `INVALID_TRACK_RANKING_REQUEST` | `400` | A standings read used a `scope` other than `community` or `circle`, or a profile ranking list used an unsupported field or an invalid `limit`. |
+| `INVALID_TRACK_RANKING_CURSOR` | `400` | A profile ranking-list cursor is malformed or names an album that no longer exists. |
 
 ### Submission and moderation conflicts
 

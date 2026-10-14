@@ -10708,3 +10708,117 @@ label.moderation-candidate-choice {
     width: min(60%, 220px);
   }
 }
+
+/* Track ranking scope, early label, your-take comparison, and fan favorite. */
+.track-ranking-scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.track-ranking-scope button {
+  min-height: 30px;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--app-line);
+  border-radius: 0;
+  background: var(--app-bg);
+  color: var(--app-muted);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.track-ranking-scope button:hover,
+.track-ranking-scope button[aria-pressed="true"] {
+  border-color: var(--app-accent);
+  color: var(--app-text);
+}
+
+.track-ranking-early {
+  display: inline-block;
+  margin-left: 0.45rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--app-line-strong);
+  color: var(--app-soft);
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.track-ranking-comparison {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--app-line);
+  background: var(--app-surface);
+  color: var(--app-soft);
+  font-size: 0.8rem;
+}
+
+.track-ranking-comparison p {
+  margin: 0;
+}
+
+.track-ranking-comparison strong {
+  color: var(--app-text);
+}
+
+.track-ranking-delta {
+  flex: 0 0 auto;
+  min-width: 2.5rem;
+  color: var(--app-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.album-ratings-panel .album-fan-favorite-note {
+  margin: 0.35rem 0 0;
+  color: var(--app-muted);
+  font-size: 0.8rem;
+}
+
+.album-fan-favorite-note button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--app-text);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.album-fan-favorite-note button:hover {
+  color: var(--app-accent);
+}
+
+.album-fan-favorite-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--app-accent);
+  color: var(--app-accent);
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.profile-activity-ranking {
+  display: grid;
+  gap: 0.15rem;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--app-soft);
+  font-size: 0.8rem;
+}
+
+.profile-activity-ranking span {
+  display: inline-block;
+  min-width: 1.4rem;
+  color: var(--app-muted);
+}

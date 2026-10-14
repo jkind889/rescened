@@ -16,6 +16,7 @@ const { transaction, claimBoard } = require("./utils/boardMutations");
 const { listListens, listenCalendar } = require("./utils/listeningDiary");
 const { getListenActivity } = require("./utils/listenActivity");
 const { suggestPeople } = require("./utils/peopleSuggestions");
+const { getRankingActivity, listUserRankings } = require("./utils/trackRankings");
 
 const router = express.Router();
 const MAX_FAVORITES = 5;
@@ -125,10 +126,10 @@ async function followable(userId) { if (Review.isDeletedAuthor(userId)) return f
 async function profileAccess(target, viewerId) { if (!(await followable(target))) return { status: 404, body: { error: "User not found" } }; const profile = await ensureProfile(target); if (profile.isPrivate && target !== viewerId) return { status: 403, body: PRIVATE_ERROR, profile }; return { status: 200, profile }; }
 async function activity(userId, includePrivate = false, viewerId = "") {
   const profileAuthors = await authors([userId]); const actor = profileAuthors.get(userId) || author(userId);
-  const [reviews, saved, listens] = await Promise.all([Review.find({ userId }).populate("albumCatalogId").sort({ date: -1 }).limit(MAX_ACTIVITY), getExplicitSavedAlbums(userId), getListenActivity([userId], MAX_ACTIVITY)]);
+  const [reviews, saved, listens, rankings] = await Promise.all([Review.find({ userId }).populate("albumCatalogId").sort({ date: -1 }).limit(MAX_ACTIVITY), getExplicitSavedAlbums(userId), getListenActivity([userId], MAX_ACTIVITY), getRankingActivity([userId], MAX_ACTIVITY)]);
   const reviewActivities = reviews.map((review) => { const source = plain(review); const reviewId = persistedReviewId(source); const album = source.albumCatalogId ? normalizeCatalogAlbum(source.albumCatalogId) : null; return { id: reviewId, reviewId, type: "review", actor, userId, createdAt: source.date, album, rating: source.rating, reviewText: source.reviewText }; });
   const savedActivities = saved.map((album) => ({ id: `saved-${userId}-${album.albumId}`, type: "saved_album", actor, userId, createdAt: album.savedAt, album }));
-  return [...reviewActivities, ...listens.map((listen) => ({ ...listen, actor })), ...(includePrivate ? savedActivities : [])].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, MAX_ACTIVITY);
+  return [...reviewActivities, ...listens.map((listen) => ({ ...listen, actor })), ...rankings.map((ranking) => ({ ...ranking, actor })), ...(includePrivate ? savedActivities : [])].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, MAX_ACTIVITY);
 }
 
 router.get("/me", auth, async (req, res) => { try { const profile = await ensureProfile(req.userId); res.json({ ...(await formatProfile(profile)), ...(await socialStats(req.userId, req.userId)) }); } catch { res.status(500).json({ error: "Failed to fetch profile" }); } });
@@ -208,6 +209,15 @@ router.get("/:userId/diary/calendar", async (req, res) => {
     res.json(await listenCalendar(req.params.userId, req.query));
   } catch (error) {
     res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch diary", ...(error.status && error.code ? { code: error.code } : {}) });
+  }
+});
+router.get("/:userId/rankings", async (req, res) => {
+  try {
+    const access = await profileAccess(req.params.userId, viewer(req));
+    if (access.status !== 200) return res.status(access.status).json(access.body);
+    res.json(await listUserRankings(req.params.userId, req.query));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch rankings", ...(error.status && error.code ? { code: error.code } : {}) });
   }
 });
 router.get("/:userId/boards/:boardId", async (req, res) => { try { const access = await profileAccess(req.params.userId, viewer(req)); if (access.status !== 200) return res.status(access.status).json(access.body); const requestedBoardId = String(req.params.boardId || "").trim().toLowerCase(); const board = requestedBoardId === "default" ? await Board.findOne({ userId: req.params.userId, isDefault: true }) : await Board.findOne({ boardId: publicBoardId(requestedBoardId), userId: req.params.userId }); if (!board) return res.status(404).json({ error: "Board not found" }); res.json(await formatBoard(board)); } catch { res.status(500).json({ error: "Failed to fetch board" }); } });

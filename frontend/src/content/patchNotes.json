@@ -1,5 +1,20 @@
 [
   {
+    "id": "track-ranking-takes-and-favorites",
+    "date": "2026-10-14",
+    "title": "Your take on track rankings",
+    "summary": "See how your track ranking compares with everyone else’s, rank with the people you follow, and find each album’s fan favorite.",
+    "changes": [
+      "After you rank an album, the community view shows how much you agree with other listeners and your hottest take: the track you rate most differently.",
+      "Arrows next to each track show whether you rank it higher or lower than everyone else.",
+      "Switch the community view to People you follow to see standings from just your circle. Private profiles aren’t counted there.",
+      "Standings based on fewer than three rankings are marked Early, since the order can still change a lot.",
+      "Once enough people agree, the top track gets a Fan favorite badge on the album page.",
+      "A new Rankings tab on profiles lists every album someone has ranked, with their top three tracks.",
+      "Ranking an album now shows up in profile activity and in your network feed."
+    ]
+  },
+  {
     "id": "diary-calendar-sharing-and-sorting",
     "date": "2026-10-13",
     "title": "A diary calendar, shareable reviews, and smarter boards",
