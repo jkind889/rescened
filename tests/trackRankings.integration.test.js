@@ -9,6 +9,7 @@ const AlbumCatalog = require("../models/AlbumCatalog");
 const TrackRanking = require("../models/TrackRanking");
 const Follow = require("../models/Follow");
 const UserProfile = require("../models/UserProfile");
+const { listUserRankings } = require("../routes/utils/trackRankings");
 
 const enabled = process.env.RUN_MONGO_INTEGRATION === "true";
 let replSet;
@@ -217,4 +218,34 @@ integration("circle standings count the viewer and public followed profiles only
 
   assert.equal((await request("GET", `/track-rankings/album/${album.albumId}?scope=circle`)).status, 401);
   assert.equal((await request("GET", `/track-rankings/album/${album.albumId}?scope=everyone`, "viewer")).status, 400);
+});
+
+integration("a comparison with fewer than three other rankers is withheld", async () => {
+  await save("viewer", ["a", "b", "c", "d"]);
+  await save("only-other", ["d", "c", "b", "a"]);
+  const withheld = await request("GET", `/track-rankings/album/${album.albumId}`, "viewer");
+  assert.deepEqual(withheld.body.viewerComparison, { rankingCount: 1, confidence: "early", agreement: null, hottestTake: null, tracks: [] });
+});
+
+integration("profile ranking pages skip stale rankings before the limit and survive a deleted cursor album", async () => {
+  const second = await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Second", artistDisplayName: "Artist", catalogSource: "manual", tracks });
+  const deleted = await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Deleted", artistDisplayName: "Artist", catalogSource: "manual", tracks });
+  const at = (minutes) => new Date(Date.UTC(2026, 9, 1, 0, minutes));
+  // Newest first: a ranking whose tracks are all gone, one of a deleted album, then two live ones.
+  await TrackRanking.collection.insertMany([
+    { userId: "owner", albumCatalogId: bare._id, rankedTrackIds: ["gone"], createdAt: at(4), updatedAt: at(4) },
+    { userId: "owner", albumCatalogId: deleted._id, rankedTrackIds: ["a"], createdAt: at(3), updatedAt: at(3) },
+    { userId: "owner", albumCatalogId: second._id, rankedTrackIds: ["b", "a"], createdAt: at(2), updatedAt: at(2) },
+    { userId: "owner", albumCatalogId: album._id, rankedTrackIds: ["c"], createdAt: at(1), updatedAt: at(1) },
+  ]);
+  await AlbumCatalog.deleteOne({ _id: deleted._id });
+
+  const first = await listUserRankings("owner", { limit: "1" });
+  assert.deepEqual(first.rankings.map((entry) => entry.album.albumId), [second.albumId], "stale rows do not consume the page");
+  assert.ok(first.nextCursor);
+
+  await AlbumCatalog.deleteOne({ _id: second._id });
+  const next = await listUserRankings("owner", { limit: "1", cursor: first.nextCursor });
+  assert.deepEqual(next.rankings.map((entry) => entry.album.albumId), [album.albumId], "a deleted cursor album pages by time");
+  assert.equal(next.nextCursor, null);
 });

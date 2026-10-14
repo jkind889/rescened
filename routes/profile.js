@@ -18,6 +18,7 @@ const { getListenActivity } = require("./utils/listenActivity");
 const { suggestPeople } = require("./utils/peopleSuggestions");
 const { getRankingActivity, listUserRankings } = require("./utils/trackRankings");
 const { listeningStats } = require("./utils/listeningStats");
+const { profileStatsRateLimit } = require("./utils/rateLimit");
 
 const router = express.Router();
 const MAX_FAVORITES = 5;
@@ -138,7 +139,7 @@ router.get("/me/saved", auth, async (req, res) => { try { res.json(await getSave
 function sendStatsError(res, error) {
   res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch stats", ...(error.status && error.code ? { code: error.code } : {}) });
 }
-router.get("/me/stats", auth, async (req, res) => {
+router.get("/me/stats", auth, profileStatsRateLimit, async (req, res) => {
   try { res.json(await listeningStats(req.userId, req.query)); }
   catch (error) { sendStatsError(res, error); }
 });
@@ -219,7 +220,7 @@ router.get("/:userId/diary/calendar", async (req, res) => {
     res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch diary", ...(error.status && error.code ? { code: error.code } : {}) });
   }
 });
-router.get("/:userId/stats", async (req, res) => {
+router.get("/:userId/stats", profileStatsRateLimit, async (req, res) => {
   try {
     const access = await profileAccess(req.params.userId, viewer(req));
     if (access.status !== 200) return res.status(access.status).json(access.body);

@@ -149,12 +149,23 @@ export function TrackRanking({ albumId, tracks, getTrackLabel, formatDuration })
         if (activeScope !== "community" || !comparison) return null;
         const hottest = comparison.hottestTake;
         const hottestTitle = hottest ? tracksById.get(hottest.trackId)?.title || "Untitled Track" : "";
+        // Below three other rankers the server withholds the comparison so it
+        // never shows one specific person's ordering.
+        if (comparison.confidence === "early") {
+            return (
+                <div className="track-ranking-comparison">
+                    <p>
+                        <strong>Your take</strong>{" "}
+                        Your comparison appears once 3 other listeners have ranked this album ({comparison.rankingCount} so far).
+                    </p>
+                </div>
+            );
+        }
         return (
             <div className="track-ranking-comparison">
                 <p>
                     <strong>Your take</strong>{" "}
                     compared with {comparison.rankingCount} other listener{comparison.rankingCount === 1 ? "" : "s"}
-                    {comparison.confidence === "early" && <span className="track-ranking-early">Early</span>}
                 </p>
                 {comparison.agreement !== null && <p>You agree with them {comparison.agreement}% of the way.</p>}
                 {hottest && (
@@ -189,7 +200,9 @@ export function TrackRanking({ albumId, tracks, getTrackLabel, formatDuration })
 
         const rankedCount = standings.rankingCount;
         const isEarly = standings.confidence === "early";
+        // A null delta means no one else ranked the track, so there is nothing to compare.
         const viewerDeltas = new Map((activeScope === "community" ? standings.viewerComparison?.tracks || [] : [])
+            .filter((track) => Number.isFinite(track.delta))
             .map((track) => [track.trackId, track.delta]));
         const rows = standings.tracks
             .filter((entry) => tracksById.has(entry.trackId))

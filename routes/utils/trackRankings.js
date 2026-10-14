@@ -167,19 +167,25 @@ function spearman(first, second) {
 
 // Compares the viewer's ranked tracks with standings from everyone else.
 // delta is communityPosition − viewerPosition: positive when the viewer puts a
-// track higher than other listeners do. agreement maps Spearman's rho over the
-// viewer's ranked tracks to 0–100 and needs at least three of them.
+// track higher than other listeners do. Tracks no other listener ranked share a
+// tied position that nobody chose, so their delta is null and they are never
+// the hottest take. agreement maps Spearman's rho over the viewer's ranked
+// tracks to 0–100 and needs at least three of them.
 function compareWithCommunity(rankedTrackIds, standings) {
   if (!standings.rankingCount || !rankedTrackIds.length) return null;
   const positions = communityPositions(standings.tracks);
+  const rankedByOthers = new Set(standings.tracks.filter((entry) => entry.rankedBy > 0).map((entry) => entry.trackId));
   const tracks = rankedTrackIds
     .filter((trackId) => positions.has(trackId))
     .map((trackId, index) => {
       const communityPosition = positions.get(trackId);
-      return { trackId, viewerPosition: index + 1, communityPosition, delta: communityPosition - (index + 1) };
+      const delta = rankedByOthers.has(trackId) ? communityPosition - (index + 1) : null;
+      return { trackId, viewerPosition: index + 1, communityPosition, delta };
     });
   const rho = tracks.length >= 3 ? spearman(tracks.map((track) => track.viewerPosition), tracks.map((track) => track.communityPosition)) : null;
-  const hottest = tracks.reduce((best, track) => (Math.abs(track.delta) > Math.abs(best?.delta || 0) ? track : best), null);
+  const hottest = tracks
+    .filter((track) => track.delta !== null)
+    .reduce((best, track) => (Math.abs(track.delta) > Math.abs(best?.delta || 0) ? track : best), null);
   return {
     rankingCount: standings.rankingCount,
     confidence: standings.confidence,
@@ -197,6 +203,13 @@ function parseScope(value) {
   return value;
 }
 
+// With fewer other rankers than the settled threshold, a comparison would show
+// one or two specific people's orderings, possibly from private profiles. It is
+// withheld until enough others have ranked; only the count is reported.
+function withheldComparison(rankingCount) {
+  return { rankingCount, confidence: "early", agreement: null, hottestTake: null, tracks: [] };
+}
+
 // Standings for an album plus the viewer's own ranking. The community scope also
 // compares the viewer's ranking against everyone else's; the circle scope counts
 // only the viewer and the public profiles they follow.
@@ -211,7 +224,10 @@ async function albumRankings(album, viewerId, scope = "community") {
   const viewerRanking = serializeViewerRanking(ranking, album);
   let viewerComparison = null;
   if (scope === "community" && viewerRanking?.rankedTrackIds.length) {
-    viewerComparison = compareWithCommunity(viewerRanking.rankedTrackIds, await communityStandings(album, { userId: { $ne: viewerId } }));
+    const others = await communityStandings(album, { userId: { $ne: viewerId } });
+    viewerComparison = others.rankingCount >= SETTLED_RANKING_COUNT
+      ? compareWithCommunity(viewerRanking.rankedTrackIds, others)
+      : others.rankingCount ? withheldComparison(others.rankingCount) : null;
   }
   return { albumId: album.albumId, scope, ...standings, viewerRanking, viewerComparison };
 }
@@ -255,8 +271,17 @@ function rankingRowsPipeline(match, limit) {
     { $match: match },
     { $sort: { updatedAt: -1, albumCatalogId: -1 } },
     { $lookup: { from: AlbumCatalog.collection.name, localField: "albumCatalogId", foreignField: "_id", as: "album" } },
-    // Deleted catalog albums must neither produce broken links nor consume slots.
+    // Deleted catalog albums and rankings with no current tracks left must
+    // neither produce broken entries nor consume slots, so both drop out before
+    // the limit.
     { $unwind: "$album" },
+    {
+      $match: {
+        $expr: {
+          $gt: [{ $size: { $setIntersection: [{ $ifNull: ["$rankedTrackIds", []] }, { $ifNull: ["$album.tracks.trackId", []] }] } }, 0],
+        },
+      },
+    },
     { $limit: limit },
     { $project: { _id: 0, userId: 1, albumCatalogId: 1, rankedTrackIds: 1, updatedAt: 1, album: 1 } },
   ];
@@ -267,7 +292,9 @@ function encodeRankingCursor(row) {
 }
 
 // The cursor names the last album by its public albumId; Mongo IDs never leave
-// the server.
+// the server. If that album has since been deleted, the cursor still pages by
+// updatedAt alone (albumCatalogId null), which can skip only rankings changed in
+// the same millisecond.
 async function decodeRankingCursor(value) {
   const invalidCursor = () => rankingError(400, "INVALID_TRACK_RANKING_CURSOR", "Ranking cursor is invalid");
   let payload;
@@ -280,8 +307,7 @@ async function decodeRankingCursor(value) {
     throw invalidCursor();
   }
   const album = await AlbumCatalog.findOne({ albumId: payload.a.toLowerCase() }).select("_id").lean();
-  if (!album) throw invalidCursor();
-  return { updatedAt, albumCatalogId: album._id };
+  return { updatedAt, albumCatalogId: album?._id || null };
 }
 
 // One user's rankings, most recently changed first, each with its top tracks.
@@ -295,10 +321,14 @@ async function listUserRankings(userId, query = {}) {
   const match = { userId };
   if (query.cursor !== undefined) {
     const cursor = await decodeRankingCursor(query.cursor);
-    match.$or = [
-      { updatedAt: { $lt: cursor.updatedAt } },
-      { updatedAt: cursor.updatedAt, albumCatalogId: { $lt: cursor.albumCatalogId } },
-    ];
+    if (cursor.albumCatalogId) {
+      match.$or = [
+        { updatedAt: { $lt: cursor.updatedAt } },
+        { updatedAt: cursor.updatedAt, albumCatalogId: { $lt: cursor.albumCatalogId } },
+      ];
+    } else {
+      match.updatedAt = { $lt: cursor.updatedAt };
+    }
   }
   const rows = await TrackRanking.aggregate(rankingRowsPipeline(match, limit + 1));
   const page = rows.slice(0, limit);

@@ -16,7 +16,21 @@ Query fields (anything else returns `400 INVALID_STATS_REQUEST`):
 | `period` | `2y` (rolling: the same calendar day two years ago through today), or a calendar year that falls entirely inside that window. | `2y` |
 | `automatic` | `include` or `exclude` Last.fm-detected listens. | `include` |
 
-The history window is `STATS_WINDOW_YEARS` (2). Changing that constant moves the rolling period and the years offered. Years outside the window are rejected rather than clipped. "Today" is the server's UTC date.
+The history window is `STATS_WINDOW_YEARS` (2). Changing that constant moves the rolling period and the years offered. Years outside the window are rejected rather than clipped.
+
+### Day boundaries
+
+Listens and reviews use different clocks, so their period edges do not line up exactly:
+
+- **"Today" is the server's UTC date.** A listener ahead of UTC (for example, in Asia or Australia) who logs a listen dated their local today will not see it in the current period until UTC reaches that date, at most about 14 hours later.
+- **Listens** match on `listenedOn`, the listener's own calendar date.
+- **Reviews** match on their UTC timestamp (see [Reviews](#how-each-figure-is-computed) below). A review written late on Dec 31 in a timezone behind UTC counts toward the next year.
+
+Fixing either would need a stored timezone for every user; today only Last.fm connections have one.
+
+### Rate limit
+
+Both endpoints share the `profileStats` bucket: 60 requests per 10 minutes, keyed by signed-in user or by IP for anonymous viewers. `/profile/me/stats` authenticates first, so an anonymous `401` does not consume a bucket. An exhausted bucket returns `429 RATE_LIMITED` with `Retry-After`.
 
 ## Response
 

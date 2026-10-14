@@ -63,7 +63,8 @@ test("comparison reports deltas, agreement, and the hottest take", () => {
   const standings = {
     rankingCount: 4,
     confidence: "settled",
-    tracks: [{ trackId: "a", score: 0.9 }, { trackId: "b", score: 0.6 }, { trackId: "c", score: 0.3 }, { trackId: "d", score: 0.1 }],
+    tracks: [{ trackId: "a", score: 0.9 }, { trackId: "b", score: 0.6 }, { trackId: "c", score: 0.3 }, { trackId: "d", score: 0.1 }]
+      .map((entry) => ({ ...entry, rankedBy: 4 })),
   };
   const comparison = compareWithCommunity(["d", "a", "b", "c"], standings);
   assert.deepEqual(comparison.tracks.map((track) => [track.trackId, track.viewerPosition, track.communityPosition, track.delta]), [
@@ -79,6 +80,24 @@ test("comparison reports deltas, agreement, and the hottest take", () => {
 
   assert.equal(compareWithCommunity(["a", "b"], standings).agreement, null, "fewer than three tracks gives no agreement");
   assert.equal(compareWithCommunity(["a"], { rankingCount: 0, tracks: [] }), null);
+});
+
+test("tracks no one else ranked have no delta and are never the hottest take", () => {
+  // The other listener ranked only a and b; c–f share the tied position 3 that nobody chose.
+  const standings = {
+    rankingCount: 3,
+    confidence: "settled",
+    tracks: [
+      { trackId: "a", score: 1, rankedBy: 3 }, { trackId: "b", score: 0.8, rankedBy: 3 },
+      ...["c", "d", "e", "f"].map((trackId) => ({ trackId, score: 0.3, rankedBy: 0 })),
+    ],
+  };
+  const agreeing = compareWithCommunity(["a", "b", "c", "d", "e", "f"], standings);
+  assert.deepEqual(agreeing.tracks.map((track) => track.delta), [0, 0, null, null, null, null]);
+  assert.equal(agreeing.hottestTake, null, "matching every explicitly ranked track leaves no hot take");
+
+  const swapped = compareWithCommunity(["b", "a", "f"], standings);
+  assert.deepEqual(swapped.hottestTake, { trackId: "b", viewerPosition: 1, communityPosition: 2, delta: 1 });
 });
 
 test("scope accepts community or circle only", () => {
@@ -101,12 +120,30 @@ test("standings are early below the settled threshold and compare against everyo
   const result = await albumRankings(target, "viewer");
   assert.equal(result.scope, "community");
   assert.equal(result.confidence, "early");
-  assert.equal(result.viewerComparison.confidence, "early");
+  assert.deepEqual(result.viewerComparison, {
+    rankingCount: SETTLED_RANKING_COUNT - 1, confidence: "early", agreement: null, hottestTake: null, tracks: [],
+  }, "too few other rankers withholds every per-track detail");
   assert.deepEqual(matches[0], { albumCatalogId: target._id });
   assert.deepEqual(matches[1], { userId: { $ne: "viewer" }, albumCatalogId: target._id });
 
   const anonymous = await albumRankings(target, "");
   assert.equal(anonymous.viewerComparison, null);
+});
+
+test("a comparison needs the settled number of other rankers", async (t) => {
+  const target = album();
+  let others = 0;
+  t.mock.method(TrackRanking, "aggregate", async (pipeline) => (pipeline[0].$match.userId ? facet(others, { a: others * 1, b: others * 0.5 }) : facet(others + 1, { a: 1, b: 1 })));
+  t.mock.method(TrackRanking, "findOne", () => ({ lean: async () => ({ rankedTrackIds: ["b", "a", "c"], updatedAt: new Date() }) }));
+
+  assert.equal((await albumRankings(target, "viewer")).viewerComparison, null, "nothing to compare with no other rankers");
+  others = 1;
+  assert.deepEqual((await albumRankings(target, "viewer")).viewerComparison.tracks, []);
+  others = SETTLED_RANKING_COUNT;
+  const settled = (await albumRankings(target, "viewer")).viewerComparison;
+  assert.equal(settled.confidence, "settled");
+  assert.equal(settled.rankingCount, SETTLED_RANKING_COUNT);
+  assert.deepEqual(settled.tracks.map((track) => [track.trackId, track.delta]), [["b", 1], ["a", -1], ["c", null]]);
 });
 
 test("circle standings need a viewer and leave out private followed profiles", async (t) => {
@@ -157,12 +194,22 @@ test("profile ranking lists validate input before querying and page by public al
   assert.deepEqual(JSON.parse(Buffer.from(page.nextCursor, "base64url").toString()), { u: updatedAt.toISOString(), a: ALBUM_ID });
   assert.equal(JSON.stringify(page).includes(String(target._id)), false);
 
-  t.mock.method(AlbumCatalog, "findOne", () => ({ select: () => ({ lean: async () => ({ _id: target._id }) }) }));
+  const pipeline = aggregate.mock.calls.at(-1).arguments[0];
+  const limitIndex = pipeline.findIndex((stage) => stage.$limit);
+  const tracksMatchIndex = pipeline.findIndex((stage) => stage.$match?.$expr);
+  assert.ok(tracksMatchIndex > 0 && tracksMatchIndex < limitIndex, "rankings with no current tracks drop out before the limit");
+
+  const findOne = t.mock.method(AlbumCatalog, "findOne", () => ({ select: () => ({ lean: async () => ({ _id: target._id }) }) }));
   await listUserRankings("owner", { cursor: page.nextCursor });
   assert.deepEqual(aggregate.mock.calls.at(-1).arguments[0][0].$match.$or, [
     { updatedAt: { $lt: updatedAt } },
     { updatedAt, albumCatalogId: { $lt: target._id } },
   ]);
+
+  // The cursor's album was deleted after the page loaded: keep paging by time.
+  findOne.mock.mockImplementation(() => ({ select: () => ({ lean: async () => null }) }));
+  await listUserRankings("owner", { cursor: page.nextCursor });
+  assert.deepEqual(aggregate.mock.calls.at(-1).arguments[0][0].$match, { userId: "owner", updatedAt: { $lt: updatedAt } });
 });
 
 test("ranking activity skips rankings with no current tracks and exposes no Mongo IDs", async (t) => {

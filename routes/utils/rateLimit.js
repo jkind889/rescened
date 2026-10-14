@@ -61,6 +61,12 @@ const RATE_LIMITS = {
     duration: 10 * 60,
     message: "Too many track ranking updates. Please try again soon.",
   },
+  profileStats: {
+    keyPrefix: "rescened:profile-stats",
+    points: 60,
+    duration: 10 * 60,
+    message: "Too many stats requests. Please try again soon.",
+  },
   submissionCreate: {
     keyPrefix: "rescened:submission-create",
     points: 6,
@@ -213,6 +219,7 @@ const diaryMutationLimiter = createRateLimiter(RATE_LIMITS.diaryMutation);
 const reviewMutationLimiter = createRateLimiter(RATE_LIMITS.reviewMutation);
 const likeMutationLimiter = createRateLimiter(RATE_LIMITS.likeMutation);
 const trackRankingMutationLimiter = createRateLimiter(RATE_LIMITS.trackRankingMutation);
+const profileStatsLimiter = createRateLimiter(RATE_LIMITS.profileStats);
 const submissionCreateLimiter = createRateLimiter(RATE_LIMITS.submissionCreate);
 const submissionMutationLimiter = createRateLimiter(RATE_LIMITS.submissionMutation);
 const moderationMutationLimiter = createRateLimiter(RATE_LIMITS.moderationMutation);
@@ -249,6 +256,12 @@ module.exports = {
   likeMutationRateLimit: createRateLimitMiddleware(likeMutationLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,
     message: RATE_LIMITS.likeMutation.message,
+  }),
+  // Stats run several aggregations per request and are readable without
+  // signing in, so they get their own bucket keyed by user, or IP when anonymous.
+  profileStatsRateLimit: createRateLimitMiddleware(profileStatsLimiter, {
+    keyGenerator: getUserOrIpRateLimitKey,
+    message: RATE_LIMITS.profileStats.message,
   }),
   reviewCreateRateLimit: createRateLimitMiddleware(reviewCreateLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,

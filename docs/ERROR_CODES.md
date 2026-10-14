@@ -144,6 +144,8 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Review create | `POST /reviews/review` | authenticated user | 6 attempts per 10 minutes |
 | Review mutation | `PATCH` and `DELETE /reviews/review/user/:id` | authenticated user | 30 attempts per 10 minutes |
 | Like mutation | `PUT /likes/album/:albumId`, `PUT /likes/review/:reviewId` | authenticated user | 120 attempts per 10 minutes |
+| Track ranking mutation | `PUT` and `DELETE /track-rankings/album/:albumId` | authenticated user | 60 attempts per 10 minutes |
+| Profile stats | `GET /profile/me/stats`, `GET /profile/:userId/stats` | signed-in user, or IP when anonymous | 60 requests per 10 minutes |
 | Suggestion create | `POST /suggestions`, `POST /suggestions/corrections` | authenticated user | 6 attempts per 10 minutes |
 | Suggestion mutation | `POST /suggestions/:submissionId/revise`, `POST /suggestions/:submissionId/withdraw` | authenticated user | 20 attempts per 10 minutes |
 | Moderation mutation | Request-changes, reject, duplicate, and approve commands | authenticated moderator | 120 attempts per 10 minutes |

@@ -6,6 +6,7 @@ const rateLimitPath = require.resolve("../routes/utils/rateLimit");
 const routePaths = {
   boards: require.resolve("../routes/boards"),
   likes: require.resolve("../routes/likes"),
+  profile: require.resolve("../routes/profile"),
   reviews: require.resolve("../routes/reviews"),
   search: require.resolve("../routes/search"),
   trackRankings: require.resolve("../routes/trackRankings"),
@@ -62,6 +63,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
   const calls = {
     albumSave: 0,
     likeMutation: 0,
+    profileStats: 0,
     reviewCreate: 0,
     reviewMutation: 0,
     search: 0,
@@ -85,6 +87,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
     albumSaveRateLimit: blocker("albumSave", 51),
     externalSearchRateLimit: (req, res, next) => next(),
     likeMutationRateLimit: blocker("likeMutation", 52),
+    profileStatsRateLimit: blocker("profileStats", 57),
     reviewCreateRateLimit: blocker("reviewCreate", 53),
     reviewMutationRateLimit: blocker("reviewMutation", 54),
     searchRateLimit: blocker("search", 55),
@@ -115,6 +118,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
     routers: {
       boards: require("../routes/boards"),
       likes: require("../routes/likes"),
+      profile: require("../routes/profile"),
       reviews: require("../routes/reviews"),
       search: require("../routes/search"),
       trackRankings: require("../routes/trackRankings"),
@@ -176,6 +180,8 @@ test("routes register the intended limiter after authentication where required",
     [routers.boards, "post", "/:boardId/albums", 1, limiters.albumSaveRateLimit],
     [routers.trackRankings, "put", "/album/:albumId", 1, limiters.trackRankingMutationRateLimit],
     [routers.trackRankings, "delete", "/album/:albumId", 1, limiters.trackRankingMutationRateLimit],
+    [routers.profile, "get", "/me/stats", 1, limiters.profileStatsRateLimit],
+    [routers.profile, "get", "/:userId/stats", 0, limiters.profileStatsRateLimit],
   ];
 
   for (const [router, method, path, limiterIndex, expectedLimiter] of cases) {
@@ -196,6 +202,8 @@ test("route-specific limiters stop work and preserve 429 response metadata", asy
     [routers.boards, "post", "/:boardId/albums", { body: {}, headers: {}, params: { boardId: "board" } }, "albumSave", 51],
     [routers.trackRankings, "put", "/album/:albumId", { body: {}, headers: {}, params: { albumId: "album" } }, "trackRankingMutation", 56],
     [routers.trackRankings, "delete", "/album/:albumId", { headers: {}, params: { albumId: "album" } }, "trackRankingMutation", 56],
+    [routers.profile, "get", "/me/stats", { query: {}, headers: {} }, "profileStats", 57],
+    [routers.profile, "get", "/:userId/stats", { query: {}, headers: {}, params: { userId: "user_public" } }, "profileStats", 57],
   ];
 
   for (const [router, method, path, req, limiterName, retryAfterSeconds] of cases) {
@@ -220,6 +228,7 @@ test("authentication rejects mutations before consuming their route-specific lim
     [installed.routers.boards, "post", "/:boardId/albums", { body: {}, headers: {}, params: { boardId: "board" } }],
     [installed.routers.trackRankings, "put", "/album/:albumId", { body: {}, headers: {}, params: { albumId: "album" } }],
     [installed.routers.trackRankings, "delete", "/album/:albumId", { headers: {}, params: { albumId: "album" } }],
+    [installed.routers.profile, "get", "/me/stats", { query: {}, headers: {} }],
   ];
 
   for (const [router, method, path, req] of cases) {
@@ -229,6 +238,7 @@ test("authentication rejects mutations before consuming their route-specific lim
   assert.deepEqual(installed.calls, {
     albumSave: 0,
     likeMutation: 0,
+    profileStats: 0,
     reviewCreate: 0,
     reviewMutation: 0,
     search: 0,
