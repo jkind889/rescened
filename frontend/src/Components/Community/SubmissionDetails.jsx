@@ -1,4 +1,6 @@
 import { Link } from "react-router-dom";
+import { describeGenreApplication } from "../../features/community/genres.js";
+import "./GenreSuggestion.css";
 import {
   formatCommunityAction,
   formatCommunityDate,
@@ -18,6 +20,40 @@ const SOURCE_LABELS = {
 
 function values(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function genreNames(genres) {
+  return values(genres).map((genre) => genre?.name).filter(Boolean).join(", ");
+}
+
+// A genre suggestion's proposed operations, as stored ({ add, remove, primary, note }).
+function GenreChangesBlock({ changes, baseGenres, compact = false }) {
+  const add = values(changes?.add);
+  const remove = values(changes?.remove);
+  const primary = changes?.primary;
+  const primaryName = primary?.genre?.name
+    || (Number.isInteger(primary?.addIndex) ? (add[primary.addIndex]?.genre?.name || add[primary.addIndex]?.newGenre?.name) : "");
+
+  return (
+    <div className={`genre-changes${compact ? " genre-changes-compact" : ""}`}>
+      <p className="genre-form-muted">When suggested: {genreNames(baseGenres) || "no genres"}</p>
+      <ul className="genre-change-list">
+        {add.map((entry, index) => (
+          <li className="genre-change-add" key={`add-${index}`}>
+            {entry.genre ? entry.genre.name : (
+              <>
+                {entry.newGenre?.name} <span className="genre-badge">New genre</span>
+                {entry.newGenre?.parent ? <> under {entry.newGenre.parent.name}</> : null}
+              </>
+            )}
+          </li>
+        ))}
+        {remove.map((genre) => <li className="genre-change-remove" key={`remove-${genre.genreId}`}>{genre.name}</li>)}
+        {primaryName ? <li>Primary genre: {primaryName}</li> : null}
+      </ul>
+      {changes?.note ? <p className="suggestion-detail-note">Note: {changes.note}</p> : null}
+    </div>
+  );
 }
 
 function supplied(value) {
@@ -343,13 +379,19 @@ function RevisionHistory({ revisions, headingLevel = 3 }) {
               <span className="suggestion-revision-date">{formatCommunityDate(revision.submittedAt)}</span>
             </summary>
             <div className="suggestion-revision-body">
-              <MetadataBlock metadata={revision.proposedMetadata} compact headingLevel={nestedHeadingLevel} />
-              <EvidenceBlock
-                supportingSources={revision.supportingSources}
-                externalReferences={revision.externalReferences}
-                compact
-                headingLevel={nestedHeadingLevel}
-              />
+              {revision.submissionType === "genre_suggestion" ? (
+                <GenreChangesBlock changes={revision.genreChanges} baseGenres={revision.baseGenres} compact />
+              ) : (
+                <>
+                  <MetadataBlock metadata={revision.proposedMetadata} compact headingLevel={nestedHeadingLevel} />
+                  <EvidenceBlock
+                    supportingSources={revision.supportingSources}
+                    externalReferences={revision.externalReferences}
+                    compact
+                    headingLevel={nestedHeadingLevel}
+                  />
+                </>
+              )}
               {revision.candidateAlbumId ? (
                 <p className="suggestion-revision-candidate">
                   This revision matched <Link to={`/album/${revision.candidateAlbumId}`}>a catalog album</Link>.
@@ -396,6 +438,7 @@ function ModerationTimeline({ history, showContributor, headingLevel = 3 }) {
               </div>
               <p className="suggestion-timeline-actor">{actor}</p>
               {event.reason ? <p className="suggestion-timeline-reason">{event.reason}</p> : null}
+              {event.genreApplication ? <p className="suggestion-timeline-reason">{describeGenreApplication(event.genreApplication)}</p> : null}
             </li>
           );
         })}
@@ -410,10 +453,12 @@ export function SubmissionDetails({
   actions = null,
   headingLevel = 2,
   duplicateCandidates = null,
+  genreReview = null,
 }) {
   if (!submission) {
     return null;
   }
+  const isGenreSuggestion = submission.submissionType === "genre_suggestion";
 
   const level = Number.isInteger(headingLevel) && headingLevel >= 1 && headingLevel <= 6
     ? headingLevel
@@ -433,6 +478,7 @@ export function SubmissionDetails({
               {formatCommunityStatus(submission.status)}
             </span>
             <span className="suggestion-detail-revision">Revision {submission.currentRevision || 1}</span>
+            {isGenreSuggestion ? <span className="suggestion-detail-revision">Genre suggestion</span> : null}
             {submission.hasPossibleDuplicate ? (
               <span className="suggestion-detail-duplicate-flag">Possible duplicate</span>
             ) : null}
@@ -459,25 +505,46 @@ export function SubmissionDetails({
 
       <CorrectionDiffBlock submission={submission} headingLevel={sectionHeadingLevel} />
 
-      <section className="suggestion-detail-section">
-        <div className="suggestion-detail-section-heading">
-          <p className="suggestion-detail-kicker">Current revision</p>
-          <SectionHeadingTag className="suggestion-detail-section-title">Release metadata</SectionHeadingTag>
-        </div>
-        <MetadataBlock metadata={metadata} headingLevel={nestedHeadingLevel} />
-      </section>
+      {isGenreSuggestion ? (
+        <section className="suggestion-detail-section">
+          <div className="suggestion-detail-section-heading">
+            <p className="suggestion-detail-kicker">Current revision</p>
+            <SectionHeadingTag className="suggestion-detail-section-title">Proposed genre changes</SectionHeadingTag>
+          </div>
+          {genreReview ? (
+            <p className="suggestion-detail-note">
+              Genres now: {genreNames(genreReview.currentGenres) || "none"}
+              {genreReview.stale ? " (changed since this was suggested)" : ""}
+            </p>
+          ) : null}
+          <GenreChangesBlock changes={submission.genreChanges} baseGenres={submission.baseGenres} />
+          {submission.targetAlbumId ? (
+            <p className="suggestion-detail-note"><Link to={`/album/${submission.targetAlbumId}`}>Open the album</Link></p>
+          ) : null}
+        </section>
+      ) : (
+        <>
+          <section className="suggestion-detail-section">
+            <div className="suggestion-detail-section-heading">
+              <p className="suggestion-detail-kicker">Current revision</p>
+              <SectionHeadingTag className="suggestion-detail-section-title">Release metadata</SectionHeadingTag>
+            </div>
+            <MetadataBlock metadata={metadata} headingLevel={nestedHeadingLevel} />
+          </section>
 
-      <section className="suggestion-detail-section">
-        <div className="suggestion-detail-section-heading">
-          <p className="suggestion-detail-kicker">Verification</p>
-          <SectionHeadingTag className="suggestion-detail-section-title">Evidence</SectionHeadingTag>
-        </div>
-        <EvidenceBlock
-          supportingSources={submission.supportingSources}
-          externalReferences={submission.externalReferences}
-          headingLevel={nestedHeadingLevel}
-        />
-      </section>
+          <section className="suggestion-detail-section">
+            <div className="suggestion-detail-section-heading">
+              <p className="suggestion-detail-kicker">Verification</p>
+              <SectionHeadingTag className="suggestion-detail-section-title">Evidence</SectionHeadingTag>
+            </div>
+            <EvidenceBlock
+              supportingSources={submission.supportingSources}
+              externalReferences={submission.externalReferences}
+              headingLevel={nestedHeadingLevel}
+            />
+          </section>
+        </>
+      )}
 
       {submission.candidateAlbumId || submission.approvedAlbumId || submission.duplicateAlbumId ? (
         <section className="suggestion-detail-section suggestion-linked-records">

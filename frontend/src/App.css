@@ -3278,7 +3278,8 @@ html:has(.search-results-page) .search-submit {
 .album-genre-badge-primary {
   border-color: var(--app-accent);
   background: var(--app-accent);
-  color: var(--app-text);
+  /* The page background reads clearly on the accent in both themes. */
+  color: var(--app-bg);
 }
 
 .album-genre-badge-secondary {

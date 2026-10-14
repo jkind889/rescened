@@ -131,6 +131,11 @@ integration("genre search matches names, word starts, and aliases", async () => 
   for (const genre of alias.body.results) assert.equal("_id" in genre, false);
 
   assert.deepEqual((await request("/genres/search?q=")).body.results, []);
+
+  const topLevel = await request("/genres");
+  assert.equal(topLevel.body.results.length, 20);
+  assert.deepEqual(topLevel.body.results[0], { genreId: topLevel.body.results[0].genreId, slug: "african-music", name: "African music" });
+  assert.equal(topLevel.body.results.some((genre) => genre.slug === "jazz-rap"), false);
 });
 
 integration("genre detail resolves aliases and hides retired genres", async () => {

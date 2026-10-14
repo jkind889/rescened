@@ -7,6 +7,7 @@ import AlbumReviewFeed from "./AlbumReviewFeed";
 import LikeButton from "./LikeButton";
 import TrackRanking from "./TrackRanking";
 import ShareButton from "./ShareButton";
+import "./Community/GenreSuggestion.css";
 import AsyncState from "./Loading/AsyncState";
 import { SignInButton, useAuth } from "@clerk/react";
 import { getApiErrorMessage } from "../utils/apiErrors";
@@ -132,6 +133,9 @@ export function AlbumDetail()
     const [deleteErrors, setDeleteErrors] = useState({});
     const { getToken, isSignedIn, userId } = useAuth();
     const canUseAuthenticatedActions = Boolean(isSignedIn && userId);
+    // Album detail includes a genres array only while the server has genres on.
+    const genresEnabled = Array.isArray(album?.genres);
+    const [openGenreSuggestion, setOpenGenreSuggestion] = useState(null);
     const activeAlbumIdRef = useRef(albumId);
 
     // Consume the one-time open-review request so a refresh or back navigation
@@ -321,6 +325,30 @@ export function AlbumDetail()
         };
     }, [canUseAuthenticatedActions, albumId, getToken]);
         
+
+    // The viewer's own pending genre suggestion for this album, if any.
+    useEffect(() => {
+        if (!canUseAuthenticatedActions || !genresEnabled || !albumId) {
+            setOpenGenreSuggestion(null);
+            return undefined;
+        }
+        const controller = new AbortController();
+        (async () => {
+            try {
+                const token = await getToken();
+                const res = await fetch(`${API_BASE_URL}/suggestions/genres/open?albumId=${encodeURIComponent(albumId)}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                    signal: controller.signal,
+                });
+                if (!res.ok) throw new Error("open genre suggestion unavailable");
+                const data = await res.json();
+                setOpenGenreSuggestion(data.suggestion || null);
+            } catch (error) {
+                if (error?.name !== "AbortError") setOpenGenreSuggestion(null);
+            }
+        })();
+        return () => controller.abort();
+    }, [canUseAuthenticatedActions, genresEnabled, albumId, getToken]);
 
     useEffect(() => {
         let shouldIgnore = false;
@@ -905,6 +933,13 @@ export function AlbumDetail()
                                 Suggest a correction
                             </Link>
                         ) : renderSignInAction("Suggest a correction")}
+                        {genresEnabled && (canUseAuthenticatedActions ? (
+                            openGenreSuggestion ? null : (
+                                <Link className="album-side-action" to={`/suggestions/genres/${album.albumId}`}>
+                                    Suggest genres
+                                </Link>
+                            )
+                        ) : renderSignInAction("Suggest genres"))}
                         <ShareButton className="album-side-action" path={`/album/${album.albumId}`} title={`${album.title} on Rescened`} label="Share album" />
                         {listenMessage && <p className="board-save-message" role="status">{listenMessage}</p>}
                         {boardSaveMessage && <p className="board-save-message" role="status">{boardSaveMessage}</p>}
@@ -985,6 +1020,13 @@ export function AlbumDetail()
                                     </li>
                                 ))}
                             </ul>
+                        )}
+                        {openGenreSuggestion && (
+                            <p className="album-genre-pending">
+                                {openGenreSuggestion.status === "needs_changes"
+                                    ? <>A moderator asked for changes to your genre suggestion. <Link to={`/suggestions/${openGenreSuggestion.submissionId}/revise`}>Revise it</Link></>
+                                    : <>Your genre suggestion is waiting for review. <Link to={`/suggestions/${openGenreSuggestion.submissionId}`}>View it</Link></>}
+                            </p>
                         )}
                     </div>
 

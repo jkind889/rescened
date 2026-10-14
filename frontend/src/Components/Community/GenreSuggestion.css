@@ -1,0 +1,275 @@
+.genre-form {
+  display: grid;
+  gap: 1.5rem;
+  padding: 1.35rem;
+}
+
+.genre-form-section {
+  display: grid;
+  gap: .65rem;
+}
+
+.genre-form-title {
+  align-items: baseline;
+  display: flex;
+  font-size: .95rem;
+  gap: .6rem;
+  margin: 0;
+}
+
+.genre-form-muted {
+  color: var(--app-muted);
+  font-size: .85rem;
+  margin: 0;
+}
+
+.genre-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.genre-chip {
+  align-items: center;
+  border: 1px solid var(--app-line-strong);
+  display: inline-flex;
+  font-size: .8rem;
+  gap: .5rem;
+  padding: .35rem .6rem;
+}
+
+.genre-chip small {
+  color: var(--app-muted);
+}
+
+.genre-chip-primary {
+  border-color: var(--app-accent);
+}
+
+.genre-chip-added,
+.genre-chip-created {
+  border-style: dashed;
+}
+
+.genre-chip-removed span {
+  color: var(--app-muted);
+  text-decoration: line-through;
+}
+
+.genre-chip-button {
+  background: none;
+  border: 0;
+  color: var(--app-soft);
+  cursor: pointer;
+  font: inherit;
+  font-size: .75rem;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.genre-search-input,
+.genre-map-search input,
+.genre-decision-create input,
+.genre-decision-create select,
+.genre-addition-parent select {
+  background: var(--app-surface-strong);
+  border: 1px solid var(--app-line-strong);
+  color: var(--app-text);
+  font: inherit;
+  min-height: 40px;
+  padding: .45rem .6rem;
+  width: 100%;
+}
+
+.genre-result-list,
+.genre-addition-list,
+.genre-candidate-list {
+  display: grid;
+  gap: .35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.genre-result {
+  align-items: center;
+  border-bottom: 1px solid var(--app-line);
+  display: flex;
+  gap: .75rem;
+  justify-content: space-between;
+  padding: .35rem 0;
+}
+
+.genre-result small {
+  color: var(--app-muted);
+}
+
+.genre-result-new span {
+  color: var(--app-soft);
+}
+
+.genre-addition {
+  border: 1px solid var(--app-line);
+  display: grid;
+  gap: .5rem;
+  padding: .6rem .75rem;
+}
+
+.genre-addition-heading {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .6rem;
+}
+
+.genre-addition-heading button {
+  margin-left: auto;
+}
+
+.genre-addition-parent {
+  display: grid;
+  font-size: .8rem;
+  gap: .3rem;
+}
+
+.genre-addition-parent span {
+  color: var(--app-muted);
+}
+
+.genre-badge {
+  border: 1px solid var(--app-accent);
+  color: var(--app-soft);
+  font-size: .7rem;
+  padding: .1rem .4rem;
+}
+
+.genre-count {
+  color: var(--app-muted);
+  font-size: .8rem;
+  font-weight: normal;
+}
+
+.genre-count-over {
+  color: var(--app-danger);
+}
+
+.genre-primary-list {
+  border: 0;
+  display: grid;
+  gap: .35rem;
+  margin: 0;
+  padding: 0;
+}
+
+.genre-primary-list legend {
+  color: var(--app-muted);
+  font-size: .8rem;
+  margin-bottom: .35rem;
+}
+
+.genre-primary-option,
+.genre-decision-row,
+.genre-decision-modes label,
+.genre-candidate-list label {
+  align-items: center;
+  display: flex;
+  gap: .5rem;
+}
+
+.genre-primary-option small,
+.genre-candidate-list small {
+  color: var(--app-muted);
+}
+
+.genre-decision-body {
+  display: grid;
+  gap: 1rem;
+}
+
+.genre-decision-group {
+  border: 1px solid var(--app-line);
+  display: grid;
+  gap: .75rem;
+  margin: 0;
+  padding: .75rem;
+}
+
+.genre-decision-new {
+  border-top: 1px solid var(--app-line);
+  display: grid;
+  gap: .5rem;
+  padding-top: .6rem;
+}
+
+.genre-decision-new:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.genre-decision-new p {
+  margin: 0;
+}
+
+.genre-decision-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem 1rem;
+}
+
+.genre-decision-create {
+  display: grid;
+  gap: .5rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.genre-decision-create label {
+  display: grid;
+  font-size: .8rem;
+  gap: .3rem;
+}
+
+.genre-decision-map,
+.genre-map-search {
+  display: grid;
+  gap: .5rem;
+}
+
+.genre-stale-note {
+  border-left: 3px solid var(--app-accent);
+  color: var(--app-soft);
+  font-size: .85rem;
+  margin: 0;
+  padding: .4rem .7rem;
+}
+
+.genre-decision-preview {
+  display: grid;
+  gap: .5rem;
+}
+
+.genre-change-list {
+  display: grid;
+  gap: .35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.genre-change-add::before {
+  color: var(--app-success);
+  content: "+ ";
+}
+
+.genre-change-remove::before {
+  color: var(--app-danger);
+  content: "− ";
+}
+
+.album-genre-pending {
+  color: var(--app-muted);
+  font-size: .8rem;
+  margin: .6rem 0 0;
+}

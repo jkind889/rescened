@@ -7,8 +7,9 @@ Built so far:
 - **Slice 1:** the vocabulary model, the seed import, the read endpoints, and the album chips.
 - **Slice 2:** contributor genre suggestions through the API. See [Genre suggestions](#genre-suggestions).
 - **Slice 3:** moderator approval through the API, which is the only way an album's genres change. See [Moderator approval](#moderator-approval).
+- **Slice 4:** the contributor and moderator UI. See [Frontend](#frontend).
 
-The suggestion and review UI, vocabulary commands, browsing, and the search filter are not built yet.
+Vocabulary commands, browsing, and the search filter are not built yet.
 
 ## Feature flag
 
@@ -100,6 +101,7 @@ All of these are public, read-only, and return `503 GENRES_DISABLED` while the f
 
 | Method | Path | Behavior |
 | --- | --- | --- |
+| `GET` | `/genres` | Active top-level genres by name, as `{ results }`. These are the parent choices for a new genre. |
 | `GET` | `/genres/search?q=` | Up to 10 active genres whose name or alias starts with the query, or has a word that starts with it. Ranking: exact name, exact alias, name prefix, then word match, alphabetical within each group. A result found through an alias carries `matchedAlias`. An empty query returns `[]`. Uses the IP `search` rate limit. |
 | `GET` | `/genres/:slug` | `{ genre, canonical, aliases, parent, children, albumCount }`. Resolves current slugs and alias slugs; `canonical: false` means the client should switch to `genre.slug`. Retired or unknown genres return `404 GENRE_NOT_FOUND`. `albumCount` counts albums tagged with this genre directly, not its children. |
 | `GET` | `/albums/album/:albumId` | Adds `genres: [{ genreId, slug, name }]` in stored order (primary first), with retired genres omitted. |
@@ -240,7 +242,28 @@ Correction approval now writes provenance as dotted `fieldProvenance.<field>` pa
 
 ## Frontend
 
-The album page renders `album.genres` as chips under the title line, with the primary genre highlighted. The chips aren't links yet: `/genre/:slug` arrives with the browse page in slice 6.
+The frontend treats an `album.genres` array on album detail as the signal that genres are enabled. When the field is absent, no genre UI appears. Shared logic (previews, payloads, and decision bodies) is in `frontend/src/features/community/genres.js`, and the styles are in `Components/Community/GenreSuggestion.css`.
+
+- **Album page:**
+  - Genres show as chips under the title line, with the primary genre filled. The chips aren't links yet: `/genre/:slug` arrives with the browse page in slice 6.
+  - Signed-in users get a "Suggest genres" action; signed-out users get the sign-in prompt.
+  - If the viewer has an open genre suggestion for the album (`GET /suggestions/genres/open`), the action is hidden. A note links to the suggestion, or to "Revise it" when a moderator asked for changes.
+- **Suggestion form:** `/suggestions/genres/:albumId`, and `/suggestions/:submissionId/revise` for a genre suggestion, both use `GenreSuggestionForm`. A contributor can:
+  - mark current genres for removal
+  - search and add existing genres (an alias match shows "also called …")
+  - propose up to 2 new names, each with an optional broader genre from `GET /genres`
+  - pick the primary genre from an "after approval, N of 5" preview
+  - add a note
+
+  Revising starts from the stored suggestion, checked against the album's genres now. After sending, the confirmation names any proposed name that turned out to be an existing genre.
+- **Suggestion details:** these show the proposed genre changes and each revision's changes in place of release metadata and evidence. Approval events show a one-line summary of what was applied.
+- **Moderation:**
+  - The queue has a "Genre suggestions" filter.
+  - Genre suggestions use `GenreModeratorDecision`: approve, request changes, or reject (no duplicate marking).
+  - Approving shows a checkbox per proposed addition, removal, and primary change.
+  - Each new name can be created (spelling and parent editable), mapped onto a candidate from `genreReview` or a searched genre (optionally keeping the proposed spelling as an alias), or skipped.
+  - A note appears when the album's genres changed after the suggestion, and a preview shows the resulting genres.
+  - A new name defaults to mapping when a candidate is an exact or close-spelling match, and to creating otherwise.
 
 ## Tests
 

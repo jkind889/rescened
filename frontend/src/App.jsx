@@ -73,6 +73,10 @@ export function App() {
               <ProtectedRoute>
                 <SuggestionEditor mode="correction" />
               </ProtectedRoute>} />
+            <Route path="/suggestions/genres/:albumId" element={
+              <ProtectedRoute>
+                <SuggestionEditor mode="genres" />
+              </ProtectedRoute>} />
             <Route path="/suggestions/:submissionId/revise" element={
               <ProtectedRoute>
                 <SuggestionEditor mode="revise" />

@@ -3,6 +3,7 @@ import { useAuth } from "@clerk/react";
 import { useNavigate, useParams } from "react-router-dom";
 import SubmissionDetails from "../Components/Community/SubmissionDetails.jsx";
 import ModeratorDecision from "../Components/Community/ModeratorDecision.jsx";
+import GenreModeratorDecision from "../Components/Community/GenreModeratorDecision.jsx";
 import BaselineReviewPanel from "../Components/Community/BaselineReviewPanel.jsx";
 import { API_BASE_URL } from "../config/api.js";
 import {
@@ -88,6 +89,12 @@ function queueArtist(suggestion) {
 }
 
 function commandSuccess(action, response) {
+  if (action === "approve" && response.suggestion?.submissionType === "genre_suggestion") {
+    return {
+      message: response.idempotent ? "This genre suggestion was already approved." : "Genre suggestion approved; the album's genres are updated.",
+      albumUrl: response.albumUrl || "",
+    };
+  }
   if (action === "approve") {
     return {
       message: response.idempotent
@@ -353,6 +360,7 @@ export function ModerationSuggestions() {
             data: {
               suggestion: updatedSuggestion,
               duplicateCandidates: data.duplicateCandidates || currentDetail.data?.duplicateCandidates || {},
+              genreReview: data.genreReview || currentDetail.data?.genreReview || null,
             },
           };
         });
@@ -413,6 +421,7 @@ export function ModerationSuggestions() {
       const submissionDetail = (
         <SubmissionDetails
           duplicateCandidates={selectedDuplicateCandidates}
+          genreReview={activeDetailState.data?.genreReview || null}
           headingLevel={2}
           key="moderation-submission-detail"
           showContributor
@@ -433,7 +442,18 @@ export function ModerationSuggestions() {
           }}
         />
       ) : null;
-      const decision = (
+      const decision = selectedSuggestion.submissionType === "genre_suggestion" ? (
+        <GenreModeratorDecision
+          error={activeCommandState.error}
+          genreReview={activeDetailState.data?.genreReview || null}
+          key={`${selectedSuggestion.submissionId}:${selectedSuggestion.currentRevision}:${activeDetailState.data?.genreReview ? "review" : "loading"}`}
+          onClearFeedback={clearCommandFeedback}
+          onCommand={applyCommand}
+          pendingAction={activeCommandState.pendingAction}
+          submission={selectedSuggestion}
+          success={activeCommandState.success}
+        />
+      ) : (
         <ModeratorDecision
           duplicateCandidates={selectedDuplicateCandidates}
           error={activeCommandState.error}
@@ -604,6 +624,7 @@ export function ModerationSuggestions() {
                 <option value="">All submission types</option>
                 <option value="new_album">New albums</option>
                 <option value="catalog_correction">Catalog corrections</option>
+                <option value="genre_suggestion">Genre suggestions</option>
               </select>
             </div>
 

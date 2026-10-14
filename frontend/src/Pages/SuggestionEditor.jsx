@@ -3,6 +3,7 @@ import { useAuth } from "@clerk/react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import SuggestionForm from "../Components/Community/SuggestionForm";
 import CorrectionForm from "../Components/Community/CorrectionForm";
+import GenreSuggestionForm from "../Components/Community/GenreSuggestionForm";
 import { API_BASE_URL } from "../config/api";
 import {
   communityErrorFrom,
@@ -42,10 +43,16 @@ export function SuggestionEditor({ mode = "create" }) {
   const { getToken, userId } = useAuth();
   const isRevision = mode === "revise";
   const isCorrection = mode === "correction";
-  const externalMbid = isRevision ? "" : (searchParams.get("mbid") || "").trim();
+  const isGenreCreate = mode === "genres";
+  const externalMbid = isRevision || isGenreCreate ? "" : (searchParams.get("mbid") || "").trim();
   const [submission, setSubmission] = useState(null);
   const correctionFlow = isCorrection || (isRevision && submission?.submissionType === "catalog_correction");
-  const [loadStatus, setLoadStatus] = useState(isRevision || isCorrection || externalMbid ? "idle" : "ready");
+  const genreFlow = isGenreCreate || (isRevision && submission?.submissionType === "genre_suggestion");
+  // Genre forms work against the album's genres now; Array.isArray tells us
+  // the server has genres enabled.
+  const genreAlbum = isGenreCreate ? submission?.targetAlbum : submission?.currentAlbum;
+  const genresUnavailable = genreFlow && submission && !Array.isArray(genreAlbum?.genres);
+  const [loadStatus, setLoadStatus] = useState(isRevision || isCorrection || isGenreCreate || externalMbid ? "idle" : "ready");
   const [loadError, setLoadError] = useState(null);
   const [mutationStatus, setMutationStatus] = useState("idle");
   const [mutationError, setMutationError] = useState(null);
@@ -55,7 +62,7 @@ export function SuggestionEditor({ mode = "create" }) {
     const controller = new AbortController();
 
     async function loadEditorData() {
-      if (!isRevision && !isCorrection && !externalMbid) {
+      if (!isRevision && !isCorrection && !isGenreCreate && !externalMbid) {
         setSubmission(null);
         setLoadError(null);
         setLoadStatus("ready");
@@ -72,7 +79,7 @@ export function SuggestionEditor({ mode = "create" }) {
         return;
       }
 
-      if (isCorrection && !albumId) {
+      if ((isCorrection || isGenreCreate) && !albumId) {
         setLoadError({
           message: "No catalog album ID was provided.",
           code: "MISSING_ALBUM_ID",
@@ -88,7 +95,7 @@ export function SuggestionEditor({ mode = "create" }) {
 
       try {
         let data;
-        if (isCorrection) {
+        if (isCorrection || isGenreCreate) {
           data = await requestCommunityJson(
             `${API_BASE_URL}/albums/album/${encodeURIComponent(albumId)}`,
             { signal: controller.signal },
@@ -106,6 +113,14 @@ export function SuggestionEditor({ mode = "create" }) {
             },
             "Could not load this suggestion for revision.",
           );
+          if (data?.submissionType === "genre_suggestion" && data.targetAlbumId) {
+            const currentAlbum = await requestCommunityJson(
+              `${API_BASE_URL}/albums/album/${encodeURIComponent(data.targetAlbumId)}`,
+              { signal: controller.signal },
+              "Could not load this suggestion's album.",
+            );
+            data = { ...data, currentAlbum };
+          }
         } else {
           data = await requestCommunityJson(
             `${API_BASE_URL}/search/musicbrainz/release-group/${encodeURIComponent(externalMbid)}`,
@@ -129,7 +144,7 @@ export function SuggestionEditor({ mode = "create" }) {
         if (controller.signal.aborted) return;
         setLoadError(communityErrorFrom(
           error,
-          isCorrection ? "Could not load this catalog album." : isRevision ? "Could not load this suggestion for revision." : "Could not load this MusicBrainz release group.",
+          isCorrection || isGenreCreate ? "Could not load this catalog album." : isRevision ? "Could not load this suggestion for revision." : "Could not load this MusicBrainz release group.",
         ));
         setLoadStatus("error");
       }
@@ -137,7 +152,7 @@ export function SuggestionEditor({ mode = "create" }) {
 
     loadEditorData();
     return () => controller.abort();
-  }, [albumId, externalMbid, getToken, isCorrection, isRevision, refreshIndex, submissionId]);
+  }, [albumId, externalMbid, getToken, isCorrection, isGenreCreate, isRevision, refreshIndex, submissionId]);
 
   // Drafts are per signed-in user and per thing being edited; a revision draft
   // never carries over to a later revision.
@@ -153,7 +168,9 @@ export function SuggestionEditor({ mode = "create" }) {
 
     try {
       const token = await getToken();
-      const endpoint = isCorrection
+      const endpoint = isGenreCreate
+        ? `${API_BASE_URL}/suggestions/genres`
+        : isCorrection
         ? `${API_BASE_URL}/suggestions/corrections`
         : isRevision
         ? `${API_BASE_URL}/suggestions/${encodeURIComponent(submissionId)}/revise`
@@ -165,23 +182,27 @@ export function SuggestionEditor({ mode = "create" }) {
           headers: { Authorization: `Bearer ${token}` },
           body: JSON.stringify(payload),
         },
-        isCorrection ? "Could not submit this correction." : isRevision ? "Could not submit this revision." : "Could not create this suggestion.",
+        isGenreCreate ? "Could not send this genre suggestion." : isCorrection ? "Could not submit this correction." : isRevision ? "Could not submit this revision." : "Could not create this suggestion.",
       );
 
-      clearDraft(draftKey);
+      if (!genreFlow) clearDraft(draftKey);
       setMutationStatus("success");
+      // Proposed names that already existed were stored as those genres.
+      const reused = (data.resolvedNewGenres || []).map((match) => `“${match.name}” is the existing genre ${match.genre.name}`);
       navigate(`/suggestions/${data.submissionId}`, {
         replace: isRevision,
         state: {
           notice: isRevision
             ? "Revision submitted. The suggestion is back in the moderation queue."
-            : isCorrection ? "Correction submitted for community review." : "Suggestion submitted for community review.",
+            : genreFlow
+              ? ["Genre suggestion sent for review.", reused.length ? `${reused.join("; ")}.` : ""].filter(Boolean).join(" ")
+              : isCorrection ? "Correction submitted for community review." : "Suggestion submitted for community review.",
         },
       });
     } catch (error) {
       setMutationError(communityErrorFrom(
         error,
-        isCorrection ? "Could not submit this correction." : isRevision ? "Could not submit this revision." : "Could not create this suggestion.",
+        isGenreCreate ? "Could not send this genre suggestion." : isCorrection ? "Could not submit this correction." : isRevision ? "Could not submit this revision." : "Could not create this suggestion.",
       ));
       setMutationStatus("error");
     }
@@ -193,7 +214,7 @@ export function SuggestionEditor({ mode = "create" }) {
       .find((event) => ["request_changes", "requested_changes"].includes(event.action))
     : null;
   const revisionBlocked = isRevision && submission && submission.status !== "needs_changes";
-  const externalPrefill = !isRevision && !isCorrection && Boolean(externalMbid);
+  const externalPrefill = !isRevision && !isCorrection && !isGenreCreate && Boolean(externalMbid);
 
   return (
     <section className="community-page community-editor-page">
@@ -209,10 +230,16 @@ export function SuggestionEditor({ mode = "create" }) {
 
         <header className="community-page-header community-editor-header">
           <div className="community-page-heading-copy">
-            <p className="community-page-kicker">{correctionFlow ? "Catalog correction" : isRevision ? "Contributor revision" : "New catalog proposal"}</p>
-            <h1 className="community-page-title">{correctionFlow ? "Suggest a catalog correction" : isRevision ? "Revise an album suggestion" : "Suggest an album"}</h1>
+            <p className="community-page-kicker">{genreFlow ? "Genre suggestion" : correctionFlow ? "Catalog correction" : isRevision ? "Contributor revision" : "New catalog proposal"}</p>
+            <h1 className="community-page-title">
+              {genreFlow
+                ? `${isRevision ? "Revise genres for" : "Suggest genres for"} ${genreAlbum?.title || "this album"}`
+                : correctionFlow ? "Suggest a catalog correction" : isRevision ? "Revise an album suggestion" : "Suggest an album"}
+            </h1>
             <p className="community-page-description">
-              {correctionFlow
+              {genreFlow
+                ? "Add or remove genres and pick the primary one. A moderator reviews every change, including new genre names."
+                : correctionFlow
                 ? "Propose a precise, evidence-backed patch to one existing Rescened album."
                 : isRevision
                 ? "Update the complete record—not only the requested fields—then return it to the queue."
@@ -227,7 +254,7 @@ export function SuggestionEditor({ mode = "create" }) {
           <div className="community-loading" role="status" aria-live="polite">
             <span className="community-loading-index">Loading</span>
             <p className="community-loading-message">
-              {isCorrection ? "Preparing the catalog album…" : externalPrefill ? "Preparing MusicBrainz release group…" : "Preparing the latest revision…"}
+              {isCorrection || isGenreCreate ? "Preparing the catalog album…" : externalPrefill ? "Preparing MusicBrainz release group…" : "Preparing the latest revision…"}
             </p>
           </div>
         ) : null}
@@ -262,7 +289,28 @@ export function SuggestionEditor({ mode = "create" }) {
           </aside>
         ) : null}
 
-        {loadStatus === "ready" && !revisionBlocked ? (correctionFlow ? (
+        {genresUnavailable ? (
+          <section className="suggestion-editor-blocked">
+            <p className="suggestion-editor-blocked-index">Genres unavailable</p>
+            <h2 className="suggestion-editor-blocked-title">Genre suggestions aren't turned on.</h2>
+          </section>
+        ) : null}
+
+        {loadStatus === "ready" && !revisionBlocked && genreFlow && !genresUnavailable ? (
+          <GenreSuggestionForm
+            key={`${submission?.submissionId || albumId}-${submission?.currentRevision || 0}`}
+            album={genreAlbum}
+            currentGenres={genreAlbum.genres}
+            initialChanges={isRevision ? submission.genreChanges : null}
+            onSubmit={submitSuggestion}
+            submitLabel={isRevision ? "Submit revised genres" : "Send for review"}
+            submittingLabel={isRevision ? "Submitting revision…" : "Sending suggestion…"}
+            isSubmitting={mutationStatus === "loading"}
+            error={mutationError}
+          />
+        ) : null}
+
+        {loadStatus === "ready" && !revisionBlocked && !genreFlow ? (correctionFlow ? (
           <CorrectionForm
             key={`${submission?.submissionId || albumId || "correction"}-${submission?.currentRevision || 1}-${draftKey}`}
             initialValue={submission}
