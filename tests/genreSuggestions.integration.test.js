@@ -200,13 +200,15 @@ integration("request changes, revise, reject, and withdraw manage the open slot"
   assert.equal((await suggest("gina", album, { add: [{ genreId: genres.jazz.genreId }] })).status, 201);
 });
 
-integration("approval and duplicate marking are refused until genre approval exists", async () => {
+integration("approval needs genre decisions and duplicate marking is refused", async () => {
   const album = await newAlbum();
   const created = await suggest("hana", album, { add: [{ genreId: genres.jazz.genreId }] });
   const id = created.body.submissionId;
   const approve = await call("POST", `/moderation/album-suggestions/${id}/approve`, MODERATOR, { reason: "" });
-  assert.equal(approve.status, 503);
-  assert.equal(approve.body.code, "GENRE_APPROVAL_UNAVAILABLE");
+  assert.equal(approve.status, 400);
+  assert.match(approve.body.error, /genreDecisions is required/);
+  const withAlbum = await call("POST", `/moderation/album-suggestions/${id}/approve`, MODERATOR, { albumId: album.albumId, genreDecisions: { add: [{ decision: "apply" }] } });
+  assert.equal(withAlbum.status, 400);
   const duplicate = await call("POST", `/moderation/album-suggestions/${id}/mark-duplicate`, MODERATOR, { duplicateOfSubmissionId: crypto.randomUUID() });
   assert.equal(duplicate.status, 400);
   const stored = await AlbumSubmission.findOne({ submissionId: id }).lean();

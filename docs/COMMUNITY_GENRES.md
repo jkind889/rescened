@@ -6,8 +6,9 @@ Built so far:
 
 - **Slice 1:** the vocabulary model, the seed import, the read endpoints, and the album chips.
 - **Slice 2:** contributor genre suggestions through the API. See [Genre suggestions](#genre-suggestions).
+- **Slice 3:** moderator approval through the API, which is the only way an album's genres change. See [Moderator approval](#moderator-approval).
 
-Moderator approval, the suggestion and review UI, vocabulary commands, browsing, and the search filter are not built yet. Moderators can request changes on or reject a genre suggestion, but approving one returns `503 GENRE_APPROVAL_UNAVAILABLE`, so nothing changes an album's genres yet.
+The suggestion and review UI, vocabulary commands, browsing, and the search filter are not built yet.
 
 ## Feature flag
 
@@ -145,7 +146,7 @@ Unknown fields are rejected. The suggestion must change something.
 - **Existing names are reused.** A `newGenre` whose name matches an active genre's name or alias, under the [name rules](#name-rules), is stored as a reference to that genre. The response lists each such rewrite in `resolvedNewGenres` (`{ name, matchedBy: "name" | "alias", genre }`), so the UI can say "Using existing genre *Hip hop*". A match on a retired genre returns `GENRE_RETIRED`.
 - **At most 2 genuinely new names per suggestion,** counted after that rewrite. A user can have at most 10 new names across all their open genre suggestions (`409 GENRE_PROPOSAL_LIMIT`). A revision doesn't count against its own earlier names.
 - **The album can end with at most 5 genres** (`409 GENRE_LIMIT_EXCEEDED`). A suggestion can swap genres by removing some while adding others.
-- **One open suggestion per user per album** (`409 GENRE_SUGGESTION_EXISTS`). The submission stores `openGenreSuggestionKey` (`<userId>:<album _id>`) under a unique sparse index while the suggestion is pending or needs changes. Withdrawal, rejection, and (later) approval unset it, so two simultaneous creates can't both succeed.
+- **One open suggestion per user per album** (`409 GENRE_SUGGESTION_EXISTS`). The submission stores `openGenreSuggestionKey` (`<userId>:<album _id>`) under a unique sparse index while the suggestion is pending or needs changes. Withdrawal, rejection, and approval unset it, so two simultaneous creates can't both succeed.
 
 ### Stored value
 
@@ -158,11 +159,93 @@ The stored lists are named `additions` and `removals`, because Mongoose reserves
 
 Responses add `baseGenres` and `genreChanges: { add, remove, primary, note }`, built from those genre snapshots, which keep the names as they were at submission. They never include Mongo IDs, the album's `genresRevision`, or `openGenreSuggestionKey`.
 
+## Moderator approval
+
+Moderators approve through the existing `POST /moderation/album-suggestions/:submissionId/approve`, which needs `COMMUNITY_MODERATION_ENABLED`, a Clerk session, and membership in `MODERATOR_USER_IDS`. For a genre suggestion, the body takes only `genreDecisions` and an optional `reason`. A blank reason records "Genre suggestion approved." Sending `albumId`, `confirmPossibleDuplicate`, or `applyFields` returns `400`, and other submission types reject `genreDecisions`. The approval itself is in `lib/genres/approval.js`.
+
+### Decisions
+
+```json
+{
+  "genreDecisions": {
+    "add": [
+      { "decision": "apply" },
+      { "decision": "apply", "resolution": { "action": "create", "name": "Lo-fi hip hop", "parentGenreId": "33333333-3333-4333-8333-333333333333" } },
+      { "decision": "apply", "resolution": { "action": "map", "genreId": "66666666-6666-4666-8666-666666666666", "addAlias": true } }
+    ],
+    "remove": [{ "decision": "skip" }],
+    "primary": "apply"
+  },
+  "reason": "Optional"
+}
+```
+
+- **One decision per operation.** `add` and `remove` have exactly one entry for each proposed addition and removal, in order, each `apply` or `skip`. `primary` (`apply` or `skip`) is required when the suggestion sets a primary genre, and not allowed otherwise. A primary that points at a skipped addition can't be applied. At least one operation must be applied; otherwise reject or request changes.
+- **A new genre name needs a resolution to apply:**
+  - `create` adds it to the vocabulary. `name` corrects the spelling, and `parentGenreId` changes the parent (or `null` for top-level); omitted fields keep what the contributor proposed.
+  - `map` uses an existing active genre instead. With `addAlias: true`, it records the proposed spelling as an alias of that genre.
+- **No moderator-authored changes.** A moderator can only accept, skip, or resolve what was proposed, the same limit corrections have. Additions of existing genres take no resolution.
+
+### What approval does
+
+One transaction (standalone MongoDB returns `503 APPROVAL_UNAVAILABLE`):
+
+1. **Re-read and check.** It re-reads the suggestion (pending, same revision) and the album, and re-checks the decisions against the stored suggestion.
+2. **Apply removals, then additions, then the primary.** Removals go first so a swap fits under the cap.
+   - Operations apply to the album's current genres, not the contributor's baseline. An accepted addition that's already present, or a removal that's already gone, is recorded as `noop` instead of failing.
+   - A `create` inserts the `Genre` (`origin.source: "community"`, with the `submissionId`) and a `create` event.
+   - A `map` with `addAlias` pushes the alias and appends an `alias_add` event.
+   - Created or mapped names that collide with any genre's name, alias, or slug (active or retired) return `409 GENRE_NAME_CONFLICT` with that genre in `details`.
+   - Adding a genre retired since the suggestion was made returns `409 GENRE_RETIRED`; mapping onto one that no longer exists returns `409 GENRE_NOT_FOUND`.
+   - A result over 5 genres returns `409 GENRE_LIMIT_EXCEEDED`; skip some additions and approve again.
+3. **Write the album, if the list changed.** The write is conditional on `genresRevision`; a missing field counts as `0`, so it matches `{ $in: [null, 0] }`. It sets `genres`, increments `genresRevision`, and sets `fieldProvenance.genres` (`source: "community"`, `submissionId`, `revision`, `approvedByUserId`, `approvedAt`) as a dotted path. `catalogRevision` is untouched. If every accepted operation was a no-op, the album isn't written and its revision stays the same.
+4. **Close the suggestion.** It sets the suggestion to `approved` with `approvalPublicationType: "genres_updated"` and `approvedAlbumCatalogId`, unsets `openGenreSuggestionKey`, and appends one `approved` event with a `genreApplication` record.
+
+Any failure rolls back everything, including genres created earlier in the same approval.
+
+**Concurrency.** Two approvals on the same album conflict at the database. `withTransaction` retries the loser against the newly committed genres, which the operation lists are designed for, so both land. A writer outside a transaction changing `genresRevision` between the read and the write returns `409 GENRES_CHANGED`.
+
+**Retries.** An approval retried after it succeeded returns the same result with `idempotent: true` and writes nothing.
+
+The response keeps the approval shape `{ suggestion, album, albumUrl, idempotent }`, and `album` includes its resolved `genres`.
+
+### Approval record
+
+`moderationHistory[].genreApplication`, visible in owner and moderator detail only:
+
+| Field | Contents |
+| --- | --- |
+| `add` | Per addition: `decision` (`applied`, `skipped`, `noop`), the resulting `genre`, and `resolution` (`existing`, `created`, `mapped`). |
+| `remove` | Per removal: `decision` and `genre`. It is stored as `removals`. |
+| `primary` | `applied`, `skipped`, `noop`, or `null`. |
+| `createdGenres` | New genres created by this approval. |
+| `aliasesAdded` | Aliases added, as `{ genre, alias }` pairs. |
+| `resultGenres` | The album's genres afterwards. |
+| `baseGenresRevision`, `resultGenresRevision` | The album's genre revision before and after. |
+
+The public `/suggestions/approved` feed includes genre approvals, with `publicationType: "genres_updated"`, but not this record.
+
+### Review context
+
+The moderator detail response (`GET /moderation/album-suggestions/:submissionId`) adds `genreReview` for genre suggestions:
+
+- `currentGenres`: the album's genres now, with `status`.
+- `stale`: `true` when they differ from the contributor's baseline. This is informational only, because operations apply to the current state.
+- `albumMissing`: `true` if the album no longer exists.
+- `newGenreCandidates`: per addition, `null` for an existing genre, or up to 5 existing genres that look like the proposed name, for mapping. Each candidate has a `match` (`exact`, `spelling`, `contains`, or `word`). The matching is in `lib/genres/review.js`.
+
+### Corrections and genre provenance
+
+Correction approval now writes provenance as dotted `fieldProvenance.<field>` paths for the fields it changes, rather than replacing `fieldProvenance` whole. A correction approved after a genre approval therefore keeps `fieldProvenance.genres`. A legacy album whose `fieldProvenance` isn't an object still gets the whole patched object.
+
 ## Frontend
 
 The album page renders `album.genres` as chips under the title line, with the primary genre highlighted. The chips aren't links yet: `/genre/:slug` arrives with the browse page in slice 6.
 
 ## Tests
+
+- `tests/genreApproval.test.js` covers the decision rules and the candidate matching.
+- `tests/genreApproval.integration.test.js` covers the approval end to end: applying and retrying idempotently; creating and mapping with aliases; rollback on a name conflict; operations against a changed album; no-op approvals; concurrent approvals on one album; the cap, retired genres, and bad decisions; the public feed; and a correction keeping genre provenance.
 
 - `tests/genreSuggestions.test.js` covers the request shape, alias resolution, references, limits, the stored and serialized shape, and the model's type rules.
 - `tests/genreSuggestions.integration.test.js` (in `npm run test:integration`) covers the routes end to end: the open-suggestion slot under concurrent creates, flags, revise with re-baselining, reject and withdraw freeing the slot, the new-name allowance, the queue filter, and the refused approval.

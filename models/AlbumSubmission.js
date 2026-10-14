@@ -273,6 +273,45 @@ const genreChangesSchema = new mongoose.Schema(
   { _id: false, strict: "throw" },
 );
 
+const GENRE_DECISIONS = ["applied", "skipped", "noop"];
+
+// What a genre approval did to each proposed operation. "noop" means the
+// moderator accepted it but the album already matched (for example, another
+// approval added the same genre first).
+const genreApplicationSchema = new mongoose.Schema(
+  {
+    targetAlbumId: { type: String, required: true },
+    add: {
+      type: [new mongoose.Schema({
+        decision: { type: String, enum: GENRE_DECISIONS, required: true },
+        genre: { type: genreRefSchema, default: null },
+        resolution: { type: String, enum: ["existing", "created", "mapped"], default: null },
+      }, { _id: false, strict: "throw" })],
+      default: [],
+    },
+    removals: {
+      type: [new mongoose.Schema({
+        decision: { type: String, enum: GENRE_DECISIONS, required: true },
+        genre: { type: genreRefSchema, required: true },
+      }, { _id: false, strict: "throw" })],
+      default: [],
+    },
+    primary: { type: String, enum: GENRE_DECISIONS, default: null },
+    createdGenres: { type: [genreRefSchema], default: [] },
+    aliasesAdded: {
+      type: [new mongoose.Schema({
+        genre: { type: genreRefSchema, required: true },
+        alias: { type: String, required: true, maxlength: 40 },
+      }, { _id: false, strict: "throw" })],
+      default: [],
+    },
+    resultGenres: { type: [genreRefSchema], default: [] },
+    baseGenresRevision: { type: Number, required: true, min: 0 },
+    resultGenresRevision: { type: Number, required: true, min: 0 },
+  },
+  { _id: false, strict: "throw" },
+);
+
 const genreBaselineSchema = new mongoose.Schema(
   {
     genres: { type: [genreRefSchema], default: [] },
@@ -330,6 +369,7 @@ const moderationEventSchema = new mongoose.Schema(
     reason: { type: String, default: "", trim: true, maxlength: 1000 },
     createdAt: { type: Date, default: Date.now },
     application: { type: correctionApplicationSchema, default: null },
+    genreApplication: { type: genreApplicationSchema, default: null },
   },
   { _id: false, strict: "throw" },
 );
@@ -393,7 +433,7 @@ const albumSubmissionSchema = new mongoose.Schema(
       },
     },
     approvedAt: { type: Date, default: null },
-    approvalPublicationType: { type: String, enum: ["catalog_created", "catalog_linked", "catalog_corrected"], default: null },
+    approvalPublicationType: { type: String, enum: ["catalog_created", "catalog_linked", "catalog_corrected", "genres_updated"], default: null },
     currentRevision: { type: Number, required: true, min: 1, default: 1 },
     revisions: { type: [revisionSchema], default: [] },
     moderationHistory: { type: [moderationEventSchema], default: [] },

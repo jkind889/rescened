@@ -27,7 +27,7 @@ const SOURCE_TYPES = new Set([
 const ACTIVE_STATUSES = ["pending", "needs_changes"];
 const SUBMISSION_TYPES = ["new_album", "catalog_correction", "genre_suggestion"];
 const CORRECTION_FIELD_GROUPS = ["title", "artists", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"];
-const APPROVAL_PUBLICATION_TYPES = ["catalog_created", "catalog_linked", "catalog_corrected"];
+const APPROVAL_PUBLICATION_TYPES = ["catalog_created", "catalog_linked", "catalog_corrected", "genres_updated"];
 const PUBLIC_UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 50;
@@ -746,6 +746,10 @@ function serializeSubmission(value, { detail = false, moderator = false } = {}) 
         createdAt: item.createdAt,
       };
       if (item.application) serializedEvent.application = clone(item.application);
+      if (item.genreApplication) {
+        const { removals, ...rest } = clone(item.genreApplication);
+        serializedEvent.genreApplication = { ...rest, remove: removals || [] };
+      }
       return serializedEvent;
     });
   }

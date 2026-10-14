@@ -4,6 +4,7 @@ const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
 const { isModerator, serializeSubmission } = require("./utils/submissions");
 const { approveAlbumSubmission } = require("./utils/approval");
+const { genreReview } = require("../lib/genres/review");
 const {
   ModerationConflictError,
   ModerationValidationError,
@@ -169,10 +170,12 @@ function moderatorSummary(submission) {
 }
 
 async function moderatorDetail(submission) {
-  return {
+  const detail = {
     suggestion: serializeSubmission(submission, { detail: true, moderator: true }),
     duplicateCandidates: await duplicateCandidates(submission),
   };
+  if (asPlain(submission)?.submissionType === "genre_suggestion") detail.genreReview = await genreReview(submission);
+  return detail;
 }
 
 function stateQuery(submissionId, currentRevision) {

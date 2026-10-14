@@ -97,7 +97,7 @@ function normalizeCommandBody(body, action) {
     };
   }
   if (action === "approve") {
-    assertKeys(body, new Set(["albumId", "confirmPossibleDuplicate", "reason", "applyFields"]));
+    assertKeys(body, new Set(["albumId", "confirmPossibleDuplicate", "reason", "applyFields", "genreDecisions"]));
     if (body.albumId !== undefined && body.albumId !== null && body.albumId !== "") {
       body.albumId = publicUuid(body.albumId, "albumId");
     }
@@ -117,6 +117,8 @@ function normalizeCommandBody(body, action) {
       confirmPossibleDuplicate: body.confirmPossibleDuplicate === true,
       confirmPossibleDuplicateProvided: Object.prototype.hasOwnProperty.call(body, "confirmPossibleDuplicate"),
       applyFields: body.applyFields,
+      // Checked against the stored suggestion by the genre approval itself.
+      genreDecisions: body.genreDecisions,
       reason: optionalReason(body.reason),
     };
   }

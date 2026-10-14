@@ -115,7 +115,10 @@ The `/genres` routes are public reads. See [community genres](COMMUNITY_GENRES.m
 | `GENRE_SUGGESTION_EXISTS` | `409` | The user already has a pending or needs-changes genre suggestion for this album. `details[0].submissionId` names it when known. |
 | `GENRE_LIMIT_EXCEEDED` | `409` | The suggestion would leave the album with more than 5 genres. |
 | `GENRE_PROPOSAL_LIMIT` | `409` | The user would have more than 10 proposed new genre names across their open genre suggestions. |
-| `GENRE_APPROVAL_UNAVAILABLE` | `503` | A moderator tried to approve a genre suggestion before genre approval is built. Request changes or reject instead. |
+| `GENRE_NAME_CONFLICT` | `409` | Approval would create a genre, or add an alias, whose name or slug another genre already uses. `details[0]` names that genre. Nothing was written. |
+| `GENRES_CHANGED` | `409` | The album's `genresRevision` changed between the approval's read and write. Retry the approval. |
+
+At approval, `GENRE_RETIRED` and `GENRE_NOT_FOUND` are `409`: an added genre was retired, or a mapped genre no longer exists, after the suggestion was made. `GENRE_LIMIT_EXCEEDED` (`409`) also applies at approval when the accepted operations would leave more than 5 genres. Approval failures roll back every write, including genres created in the same approval.
 
 Invalid genre suggestion bodies use `INVALID_SUBMISSION`, and missing albums use `CATALOG_TARGET_NOT_FOUND`, as for corrections. Marking a genre suggestion as a duplicate returns `400 INVALID_MODERATION_REQUEST`.
 
@@ -530,7 +533,7 @@ These are not error codes, but they frequently appear beside them in API respons
 | --- | --- |
 | Submission status | `pending`, `needs_changes`, `approved`, `rejected`, `duplicate`, `withdrawn` |
 | Submission type | `new_album`, `catalog_correction`, `genre_suggestion` |
-| Approval publication type | `catalog_created`, `catalog_linked`, `catalog_corrected` |
+| Approval publication type | `catalog_created`, `catalog_linked`, `catalog_corrected`, `genres_updated` |
 | Catalog-fetch report | `running`, `complete`, `incomplete`, `failed` |
 | Cover resolver | `resolved`, `unresolved` |
 | Cover backfill row | `resolved`, `updated`, `unresolved`, `conflict`, `failed` |

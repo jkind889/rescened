@@ -3,6 +3,7 @@ const { getAuth } = require("@clerk/express");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
 const {
+  APPROVAL_PUBLICATION_TYPES,
   approvedCursorFilter,
   SubmissionValidationError,
   cursorFilter,
@@ -245,7 +246,7 @@ router.get("/approved", async (req, res) => {
       status: "approved",
       approvedAlbumCatalogId: { $ne: null },
       approvedAt: { $ne: null },
-      approvalPublicationType: { $in: ["catalog_created", "catalog_linked", "catalog_corrected"] },
+      approvalPublicationType: { $in: APPROVAL_PUBLICATION_TYPES },
     };
     const query = { ...approvedFilter, ...approvedCursorFilter(cursor) };
     if (searchText) {
