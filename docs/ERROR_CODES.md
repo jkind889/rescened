@@ -111,6 +111,13 @@ The `/genres` routes are public reads. See [community genres](COMMUNITY_GENRES.m
 | --- | --- | --- |
 | `GENRES_DISABLED` | `503` | `GENRES_ENABLED` is off. |
 | `GENRE_NOT_FOUND` | `404` | No active genre has that slug or alias slug. Retired genres return this too. |
+| `GENRE_RETIRED` | `400` | A genre suggestion adds, promotes, or uses as a parent a retired genre, or proposes a name matching one. Removing a retired genre from an album is allowed. |
+| `GENRE_SUGGESTION_EXISTS` | `409` | The user already has a pending or needs-changes genre suggestion for this album. `details[0].submissionId` names it when known. |
+| `GENRE_LIMIT_EXCEEDED` | `409` | The suggestion would leave the album with more than 5 genres. |
+| `GENRE_PROPOSAL_LIMIT` | `409` | The user would have more than 10 proposed new genre names across their open genre suggestions. |
+| `GENRE_APPROVAL_UNAVAILABLE` | `503` | A moderator tried to approve a genre suggestion before genre approval is built. Request changes or reject instead. |
+
+Invalid genre suggestion bodies use `INVALID_SUBMISSION`, and missing albums use `CATALOG_TARGET_NOT_FOUND`, as for corrections. Marking a genre suggestion as a duplicate returns `400 INVALID_MODERATION_REQUEST`.
 
 ### Submission and moderation conflicts
 
@@ -157,6 +164,7 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Profile stats | `GET /profile/me/stats`, `GET /profile/:userId/stats` | signed-in user, or IP when anonymous | 60 requests per 10 minutes |
 | Suggestion create | `POST /suggestions`, `POST /suggestions/corrections` | authenticated user | 6 attempts per 10 minutes |
 | Suggestion mutation | `POST /suggestions/:submissionId/revise`, `POST /suggestions/:submissionId/withdraw` | authenticated user | 20 attempts per 10 minutes |
+| Genre suggestion | `POST /suggestions/genres` | authenticated user | 20 attempts per hour |
 | Moderation mutation | Request-changes, reject, duplicate, and approve commands | authenticated moderator | 120 attempts per 10 minutes |
 
 The current implementation uses in-process memory. Counters reset on restart and are not shared between workers or instances. `TRUST_PROXY_HOPS` must match the real proxy chain so IP keys are neither collapsed onto the proxy nor client-spoofable. Unexpected limiter infrastructure errors currently log and fail open; ordinary exhausted buckets fail closed with `429 RATE_LIMITED`.
@@ -521,7 +529,7 @@ These are not error codes, but they frequently appear beside them in API respons
 | Workflow | Values |
 | --- | --- |
 | Submission status | `pending`, `needs_changes`, `approved`, `rejected`, `duplicate`, `withdrawn` |
-| Submission type | `new_album`, `catalog_correction` |
+| Submission type | `new_album`, `catalog_correction`, `genre_suggestion` |
 | Approval publication type | `catalog_created`, `catalog_linked`, `catalog_corrected` |
 | Catalog-fetch report | `running`, `complete`, `incomplete`, `failed` |
 | Cover resolver | `resolved`, `unresolved` |

@@ -23,9 +23,18 @@ const {
   snapshotForSubmission,
 } = require("./utils/submissions");
 const {
+  genreSuggestionRateLimit,
   submissionCreateRateLimit,
   submissionMutationRateLimit,
 } = require("./utils/rateLimit");
+const { isGenresEnabled } = require("./utils/serverConfig");
+const {
+  assertNewGenreAllowance,
+  genreSuggestionFields,
+  genreSuggestionSnapshot,
+  normalizeGenreSuggestion,
+  openGenreSuggestionKey,
+} = require("../lib/genres/suggestions");
 const { buildSearchPattern } = require("./utils/catalogSearch");
 
 const router = express.Router();
@@ -65,6 +74,23 @@ function sendRouteError(res, error, fallback) {
     return res.status(error.status).json({ error: error.message, code: error.code });
   }
   return res.status(500).json({ error: fallback });
+}
+
+function genresEnabled(req, res, next) {
+  if (!isGenresEnabled()) return res.status(503).json({ error: "Genres are currently disabled", code: "GENRES_DISABLED" });
+  return next();
+}
+
+function isOpenGenreKeyConflict(error) {
+  return error?.code === 11000 && Object.keys(error.keyPattern || error.keyValue || {}).includes("openGenreSuggestionKey");
+}
+
+function genreSuggestionExists(res, submissionId) {
+  return res.status(409).json({
+    error: "You already have an open genre suggestion for this album. Withdraw it, or revise it if a moderator asked for changes.",
+    code: "GENRE_SUGGESTION_EXISTS",
+    ...(submissionId ? { details: [{ submissionId }] } : {}),
+  });
 }
 
 async function findSubmission(query) {
@@ -152,6 +178,51 @@ router.post("/corrections", auth, submissionsEnabled, submissionCreateRateLimit,
     return res.status(201).json(serializeSubmission({ ...plain(submission), targetAlbumCatalogId: album }, { detail: true }));
   } catch (error) {
     return sendRouteError(res, error, "Failed to create catalog correction");
+  }
+});
+
+// One open genre suggestion per user per album: the stored
+// openGenreSuggestionKey is unique while the suggestion is pending or needs
+// changes, so a concurrent second create fails on the index as well.
+router.post("/genres", auth, submissionsEnabled, genresEnabled, genreSuggestionRateLimit, async (req, res) => {
+  try {
+    const requestedAlbumId = typeof req.body?.albumId === "string" ? req.body.albumId.trim().toLowerCase() : "";
+    const album = requestedAlbumId ? await queryResult(AlbumCatalog.findOne({ albumId: requestedAlbumId })) : null;
+    if (!album) return res.status(404).json({ error: "Target catalog album not found", code: "CATALOG_TARGET_NOT_FOUND" });
+    const key = openGenreSuggestionKey(req.userId, album);
+    const open = await queryResult(AlbumSubmission.findOne({ openGenreSuggestionKey: key }).select("submissionId"));
+    if (open) return genreSuggestionExists(res, open.submissionId);
+    const payload = await normalizeGenreSuggestion(req.body, album);
+    await assertNewGenreAllowance(req.userId, payload);
+    const submittedAt = new Date();
+    const submission = await AlbumSubmission.create({
+      submittedByUserId: req.userId,
+      ...genreSuggestionFields(payload, 1, "pending"),
+      openGenreSuggestionKey: key,
+      revisions: [genreSuggestionSnapshot(payload, submittedAt, 1)],
+      moderationHistory: [{ actorUserId: req.userId, action: "submitted", reason: "", createdAt: submittedAt }],
+    });
+    return res.status(201).json({
+      ...serializeSubmission({ ...plain(submission), targetAlbumCatalogId: album }, { detail: true }),
+      resolvedNewGenres: payload.resolvedNewGenres,
+    });
+  } catch (error) {
+    if (isOpenGenreKeyConflict(error)) return genreSuggestionExists(res);
+    return sendRouteError(res, error, "Failed to create genre suggestion");
+  }
+});
+
+// The viewer's own open genre suggestion for an album, if any, so the album
+// page can show "Suggestion pending" without listing everything they made.
+router.get("/genres/open", auth, genresEnabled, async (req, res) => {
+  try {
+    const albumId = typeof req.query?.albumId === "string" ? req.query.albumId.trim().toLowerCase() : "";
+    const album = albumId ? await queryResult(AlbumCatalog.findOne({ albumId })) : null;
+    if (!album) return res.status(404).json({ error: "Target catalog album not found", code: "CATALOG_TARGET_NOT_FOUND" });
+    const open = await findSubmission({ openGenreSuggestionKey: openGenreSuggestionKey(req.userId, album) });
+    return res.json({ suggestion: open ? serializeSubmission(open, { detail: true }) : null });
+  } catch (error) {
+    return sendRouteError(res, error, "Failed to fetch genre suggestion");
   }
 });
 
@@ -267,7 +338,22 @@ router.post("/:submissionId/revise", auth, submissionsEnabled, submissionMutatio
     const revision = current.currentRevision + 1;
     const submittedAt = new Date();
     let update;
-    if ((current.submissionType || "new_album") === "catalog_correction") {
+    if (current.submissionType === "genre_suggestion") {
+      if (!isGenresEnabled()) return res.status(503).json({ error: "Genres are currently disabled", code: "GENRES_DISABLED" });
+      const targetId = plain(current.targetAlbumCatalogId)?._id || current.targetAlbumCatalogId;
+      const target = await queryResult(AlbumCatalog.findOne({ _id: targetId }));
+      if (!target) return res.status(409).json({ error: "The suggestion's album is no longer available", code: "CATALOG_TARGET_MISSING" });
+      const body = { ...(req.body || {}), albumId: req.body?.albumId || plain(target).albumId };
+      const payload = await normalizeGenreSuggestion(body, target);
+      await assertNewGenreAllowance(req.userId, payload, { excludeSubmissionId: current._id });
+      update = {
+        $set: genreSuggestionFields(payload, revision, "pending"),
+        $push: {
+          revisions: genreSuggestionSnapshot(payload, submittedAt, revision),
+          moderationHistory: { actorUserId: req.userId, action: "revised", reason: "", createdAt: submittedAt },
+        },
+      };
+    } else if ((current.submissionType || "new_album") === "catalog_correction") {
       const targetId = plain(current.targetAlbumCatalogId)?._id || current.targetAlbumCatalogId;
       const target = await queryResult(AlbumCatalog.findOne({ _id: targetId }));
       if (!target) return res.status(409).json({ error: "The correction target album is no longer available", code: "CATALOG_TARGET_MISSING" });
@@ -298,7 +384,7 @@ router.post("/:submissionId/revise", auth, submissionsEnabled, submissionMutatio
       { returnDocument: "after", runValidators: true },
     );
     if (!updated) return res.status(409).json({ error: "Suggestion changed while it was being revised", code: "REVISION_CONFLICT" });
-    const responseSubmission = (current.submissionType || "new_album") === "catalog_correction"
+    const responseSubmission = ["catalog_correction", "genre_suggestion"].includes(current.submissionType)
       ? await findSubmission({ submissionId: req.params.submissionId })
       : updated;
     return res.json(serializeSubmission(responseSubmission || updated, { detail: true }));
@@ -318,6 +404,7 @@ router.post("/:submissionId/withdraw", auth, submissionsEnabled, submissionMutat
       { submissionId: req.params.submissionId, submittedByUserId: req.userId, status: { $in: ["pending", "needs_changes"] } },
       {
         $set: { status: "withdrawn" },
+        $unset: { openGenreSuggestionKey: "" },
         $push: { moderationHistory: { actorUserId: req.userId, action: "withdrawn", reason: "", createdAt: new Date() } },
       },
       { returnDocument: "after", runValidators: true },

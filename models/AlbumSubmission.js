@@ -29,7 +29,8 @@ const MODERATION_ACTIONS = [
   "rejected",
   "marked_duplicate",
 ];
-const SUBMISSION_TYPES = ["new_album", "catalog_correction"];
+const SUBMISSION_TYPES = ["new_album", "catalog_correction", "genre_suggestion"];
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CORRECTION_FIELDS = ["title", "artists", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"];
 
 function isHttpsUrl(value) {
@@ -218,6 +219,68 @@ const correctionApplicationSchema = new mongoose.Schema(
   { _id: false, strict: "throw" },
 );
 
+// Genre suggestions store public genre snapshots (genreId, slug, name at
+// submission time) so the record reads the same after a later rename.
+const genreRefSchema = new mongoose.Schema(
+  {
+    genreId: { type: String, required: true, lowercase: true, match: UUID_V4 },
+    slug: { type: String, required: true, maxlength: 80 },
+    name: { type: String, required: true, maxlength: 40 },
+  },
+  { _id: false, strict: "throw" },
+);
+
+const proposedGenreSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true, trim: true, maxlength: 40 },
+    normalizedName: { type: String, required: true, maxlength: 40 },
+    slug: { type: String, required: true, maxlength: 80 },
+    parent: { type: genreRefSchema, default: null },
+  },
+  { _id: false, strict: "throw" },
+);
+
+const genreAdditionSchema = new mongoose.Schema(
+  {
+    genre: { type: genreRefSchema, default: null },
+    newGenre: { type: proposedGenreSchema, default: null },
+  },
+  { _id: false, strict: "throw" },
+);
+
+const genreChangesSchema = new mongoose.Schema(
+  {
+    additions: {
+      type: [genreAdditionSchema],
+      default: [],
+      validate: { validator: (value) => value.length <= 5, message: "At most five genres may be added." },
+    },
+    removals: {
+      type: [genreRefSchema],
+      default: [],
+      validate: { validator: (value) => value.length <= 5, message: "At most five genres may be removed." },
+    },
+    // Either an existing genre or the index of an addition (which may be new).
+    primary: {
+      type: new mongoose.Schema({
+        genre: { type: genreRefSchema, default: null },
+        addIndex: { type: Number, min: 0, max: 4, default: null },
+      }, { _id: false, strict: "throw" }),
+      default: null,
+    },
+    note: { type: String, default: "", trim: true, maxlength: 500 },
+  },
+  { _id: false, strict: "throw" },
+);
+
+const genreBaselineSchema = new mongoose.Schema(
+  {
+    genres: { type: [genreRefSchema], default: [] },
+    genresRevision: { type: Number, required: true, min: 0 },
+  },
+  { _id: false, strict: "throw" },
+);
+
 const duplicateSignalSchema = new mongoose.Schema(
   {
     matchType: { type: String, enum: ["external_reference", "barcode", "catalog_number", "fingerprint"], required: true },
@@ -238,7 +301,7 @@ const revisionSchema = new mongoose.Schema(
     supportingSources: {
       type: [supportingSourceSchema],
       required: true,
-      validate: { validator: (value) => value.length >= 1 && value.length <= 10, message: "One to ten sources are required." },
+      validate: { validator: (value) => value.length <= 10, message: "At most ten sources are allowed." },
     },
     externalReferences: { type: [externalReferenceSchema], default: [] },
     normalizedFingerprint: { type: String, required: true, maxlength: 64 },
@@ -254,6 +317,8 @@ const revisionSchema = new mongoose.Schema(
     baseValues: { type: mongoose.Schema.Types.Mixed, default: null },
     baseProvenance: { type: mongoose.Schema.Types.Mixed, default: null },
     proposedChanges: { type: correctionChangesSchema, default: null },
+    genreBaseline: { type: genreBaselineSchema, default: null },
+    genreChanges: { type: genreChangesSchema, default: null },
   },
   { _id: false, strict: "throw" },
 );
@@ -286,7 +351,7 @@ const albumSubmissionSchema = new mongoose.Schema(
     supportingSources: {
       type: [supportingSourceSchema],
       required: true,
-      validate: { validator: (value) => value.length >= 1 && value.length <= 10, message: "One to ten sources are required." },
+      validate: { validator: (value) => value.length <= 10, message: "At most ten sources are allowed." },
     },
     externalReferences: { type: [externalReferenceSchema], default: [] },
     candidateAlbumCatalogId: { type: mongoose.Schema.Types.ObjectId, ref: "AlbumCatalog", default: null },
@@ -302,6 +367,12 @@ const albumSubmissionSchema = new mongoose.Schema(
     baseValues: { type: mongoose.Schema.Types.Mixed, default: null },
     baseProvenance: { type: mongoose.Schema.Types.Mixed, default: null },
     proposedChanges: { type: correctionChangesSchema, default: null },
+    genreBaseline: { type: genreBaselineSchema, default: null },
+    genreChanges: { type: genreChangesSchema, default: null },
+    // "<submittedByUserId>:<target album _id>" while a genre suggestion is
+    // pending or needs changes; unset when it closes. The unique sparse index
+    // allows one open genre suggestion per user per album.
+    openGenreSuggestionKey: { type: String, default: undefined, maxlength: 200 },
     status: { type: String, enum: SUBMISSION_STATUSES, default: "pending", required: true },
     approvedAlbumCatalogId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -333,6 +404,14 @@ const albumSubmissionSchema = new mongoose.Schema(
 albumSubmissionSchema.pre("validate", function validateSubmissionInvariants() {
   if (this.submissionType === "new_album" && !this.proposedMetadata) {
     this.invalidate("proposedMetadata", "New album submissions must include proposed metadata.");
+  }
+  if (this.submissionType !== "genre_suggestion" && !(this.supportingSources?.length >= 1)) {
+    this.invalidate("supportingSources", "One to ten sources are required.");
+  }
+  if (this.submissionType === "genre_suggestion") {
+    if (!this.targetAlbumCatalogId) this.invalidate("targetAlbumCatalogId", "Genre suggestions must target an album.");
+    if (!this.genreChanges) this.invalidate("genreChanges", "Genre suggestions must include genre changes.");
+    if (!this.genreBaseline) this.invalidate("genreBaseline", "Genre suggestions must include a genre baseline.");
   }
   if (this.submissionType === "catalog_correction") {
     if (!this.targetAlbumCatalogId) this.invalidate("targetAlbumCatalogId", "Catalog corrections must target an album.");
@@ -400,6 +479,7 @@ albumSubmissionSchema.pre(["findOneAndUpdate", "updateOne"], function validateSu
 });
 
 albumSubmissionSchema.index({ submittedByUserId: 1, createdAt: -1, _id: -1 });
+albumSubmissionSchema.index({ openGenreSuggestionKey: 1 }, { unique: true, sparse: true });
 albumSubmissionSchema.index({ status: 1, updatedAt: -1, _id: -1 });
 albumSubmissionSchema.index({ status: 1, approvedAt: -1, _id: -1 });
 albumSubmissionSchema.index({ normalizedFingerprint: 1, status: 1 });

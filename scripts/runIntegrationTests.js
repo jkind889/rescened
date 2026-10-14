@@ -23,6 +23,7 @@ const files = [
   "tests/trackRankings.integration.test.js",
   "tests/listeningStats.integration.test.js",
   "tests/genres.integration.test.js",
+  "tests/genreSuggestions.integration.test.js",
 ];
 const result = spawnSync(process.execPath, ["--test", ...files], {
   stdio: "inherit",

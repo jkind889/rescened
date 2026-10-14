@@ -79,6 +79,14 @@ const RATE_LIMITS = {
     duration: 10 * 60,
     message: "Too many suggestion updates. Please try again soon.",
   },
+  // Genre suggestions are small and frequent, so they get their own bucket
+  // rather than sharing the six-per-ten-minutes album suggestion limit.
+  genreSuggestion: {
+    keyPrefix: "rescened:genre-suggestion",
+    points: 20,
+    duration: 60 * 60,
+    message: "Too many genre suggestions. Please try again later.",
+  },
   moderationMutation: {
     keyPrefix: "rescened:moderation-mutation",
     points: 120,
@@ -223,6 +231,7 @@ const profileStatsLimiter = createRateLimiter(RATE_LIMITS.profileStats);
 const submissionCreateLimiter = createRateLimiter(RATE_LIMITS.submissionCreate);
 const submissionMutationLimiter = createRateLimiter(RATE_LIMITS.submissionMutation);
 const moderationMutationLimiter = createRateLimiter(RATE_LIMITS.moderationMutation);
+const genreSuggestionLimiter = createRateLimiter(RATE_LIMITS.genreSuggestion);
 
 module.exports = {
   RATE_LIMIT_ERROR_CODE,
@@ -282,6 +291,10 @@ module.exports = {
   submissionMutationRateLimit: createRateLimitMiddleware(submissionMutationLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,
     message: RATE_LIMITS.submissionMutation.message,
+  }),
+  genreSuggestionRateLimit: createRateLimitMiddleware(genreSuggestionLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.genreSuggestion.message,
   }),
   moderationMutationRateLimit: createRateLimitMiddleware(moderationMutationLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,

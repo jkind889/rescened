@@ -590,6 +590,14 @@ async function approveAlbumSubmission({
     throw new ModerationConflictError("Suggestion not found", "SUGGESTION_NOT_FOUND");
   }
   const preliminary = plain(preliminarySubmission);
+  // Genre suggestion approval (per-operation decisions in one transaction)
+  // is not built yet. Refuse it rather than fall through to new-album logic.
+  if (preliminary.submissionType === "genre_suggestion") {
+    const error = new Error("Genre suggestion approval is not available yet; request changes or reject instead");
+    error.status = 503;
+    error.code = "GENRE_APPROVAL_UNAVAILABLE";
+    throw error;
+  }
   if (preliminary.status === "approved") {
     const approvedAlbum = await findCatalogByInternalId(preliminary.approvedAlbumCatalogId);
     if (!approvedAlbum) throw new ModerationConflictError("Approved suggestion has no usable catalog album", "APPROVAL_INCONSISTENT");

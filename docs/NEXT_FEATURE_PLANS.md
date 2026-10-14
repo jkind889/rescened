@@ -1,6 +1,6 @@
 # Next feature plans: track rankings, listening stats, community genres
 
-Status, October 2026: plan 1 is implemented on branch `track-ranking-followups` (see [TRACK_RANKINGS.md](TRACK_RANKINGS.md)), and plan 2 on `listening-stats` (see [LISTENING_STATS.md](LISTENING_STATS.md)). Plan 3 is designed with all decisions answered, and slice 1 (vocabulary, seed, reads, album chips) is built on `community-genres` (see [COMMUNITY_GENRES.md](COMMUNITY_GENRES.md)).
+Status, October 2026: plan 1 is implemented on branch `track-ranking-followups` (see [TRACK_RANKINGS.md](TRACK_RANKINGS.md)), and plan 2 on `listening-stats` (see [LISTENING_STATS.md](LISTENING_STATS.md)). Plan 3 is designed with all decisions answered, and slices 1 (vocabulary, seed, reads, album chips) and 2 (contributor suggestions through the API) are built on `community-genres` (see [COMMUNITY_GENRES.md](COMMUNITY_GENRES.md)).
 
 The three plans are ordered by dependency rather than size. Genres (plan 3) make the stats page (plan 2) richer, but neither blocks the other. Track rankings (plan 1) are independent.
 
@@ -260,7 +260,7 @@ AlbumCatalog (new fields)
 ### Rollout
 
 1. **Model and reads.** Add `Genre`, `GenreEvent`, the new album fields, the seed CLI with a dry run, and the read endpoints and album chips behind `GENRES_ENABLED`. Seed `rescened_dev`. *Built, except seeding `rescened_dev`, which waits for a reviewed dry run and authorization.*
-2. **Suggestions.** Add the `genre_suggestion` type: validation, normalization, alias matching, limits, rate limit, and the revise and withdraw paths. Run `npm test`.
+2. **Suggestions.** *Built. Differences from this plan: a pending suggestion can't be revised (as for other submissions), so the 409 tells the user to withdraw it or wait for review; the primary genre can also be set with `add[].primary`; the new-name allowance has its own code, `GENRE_PROPOSAL_LIMIT`; and the existing frontend hides the new-album Revise link for genre suggestions until slice 4.* Originally: Add the `genre_suggestion` type: validation, normalization, alias matching, limits, rate limit, and the revise and withdraw paths. Run `npm test`.
 3. **Approval.** Add the per-operation approval transaction, new-genre resolution, and the application event. Two points to carry forward from slice 1: the conditional update must treat a missing `genresRevision` as `0` (`{ $in: [null, 0] }`), the same way corrections treat a missing `catalogRevision`; and correction approval currently `$set`s `fieldProvenance` as a whole, so switch it to per-field `fieldProvenance.<field>` paths so it can't drop genre provenance written by a concurrent genre approval. Integration tests cover concurrent approvals on one album, a name-collision rollback, idempotent retries, and standalone 503. Run `npm run test:integration`.
 4. **Frontend.** Add the suggest picker, the contributor list entries, the moderator queue filter, and the review panel. Run lint and build.
 5. **Vocabulary commands** in the app, and the merge CLI.

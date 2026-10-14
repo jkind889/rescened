@@ -131,6 +131,7 @@ function installRouteMocks({ userId = "user_a", documents = [], createCalls = []
     exports: {
       submissionCreateRateLimit: pass,
       submissionMutationRateLimit: pass,
+      genreSuggestionRateLimit: pass,
     },
   };
   delete require.cache[suggestionsPath];
@@ -293,7 +294,7 @@ test("creation rate limiting stops the database write and preserves the shared 4
     id: rateLimitPath,
     filename: rateLimitPath,
     loaded: true,
-    exports: { submissionCreateRateLimit: block, submissionMutationRateLimit: (req, res, next) => next() },
+    exports: { submissionCreateRateLimit: block, submissionMutationRateLimit: (req, res, next) => next(), genreSuggestionRateLimit: (req, res, next) => next() },
   };
   delete require.cache[suggestionsPath];
   const router = require("../routes/suggestions");

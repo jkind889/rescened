@@ -34,7 +34,9 @@ function filesIn(target) {
 
 // Album genres advance their own genresRevision instead of catalogRevision,
 // which is only safe while no other catalog writer touches them.
-const genreWriters = ["models/AlbumCatalog.js", "lib/genres/"];
+// Models only declare fields (a genre suggestion stores a genresRevision
+// baseline), so the write guard covers routes, libraries, and scripts.
+const genreWriters = ["models/", "lib/genres/"];
 const genreWritePatterns = [/\bgenresRevision\b/, /\$(set|unset|push|pull|pullAll|addToSet)\b.*\bgenres\b/, /["']fieldProvenance\.genres["']/];
 
 const violations = [];

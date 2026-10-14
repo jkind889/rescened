@@ -366,7 +366,9 @@ export function Suggestions() {
   }
 
   if (submissionId) {
-    const canRevise = submission?.status === "needs_changes";
+    // Genre suggestions get their own editor with the genre picker; until
+    // then they can be withdrawn but not revised from this page.
+    const canRevise = submission?.status === "needs_changes" && submission?.submissionType !== "genre_suggestion";
     const canWithdraw = WITHDRAWABLE_SUGGESTION_STATUSES.includes(submission?.status);
     const actions = submission ? (
       <>
