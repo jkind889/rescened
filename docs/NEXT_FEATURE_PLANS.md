@@ -1,6 +1,6 @@
 # Next feature plans: track rankings, listening stats, community genres
 
-Status, October 2026: plan 1 is implemented on branch `track-ranking-followups` (see [TRACK_RANKINGS.md](TRACK_RANKINGS.md)), and plan 2 on `listening-stats` (see [LISTENING_STATS.md](LISTENING_STATS.md)). Plan 3 is a proposal and lists the decisions that need an answer before work starts.
+Status, October 2026: plan 1 is implemented on branch `track-ranking-followups` (see [TRACK_RANKINGS.md](TRACK_RANKINGS.md)), and plan 2 on `listening-stats` (see [LISTENING_STATS.md](LISTENING_STATS.md)). Plan 3 is designed with all decisions answered, and slice 1 (vocabulary, seed, reads, album chips) is built on `community-genres` (see [COMMUNITY_GENRES.md](COMMUNITY_GENRES.md)).
 
 The three plans are ordered by dependency rather than size. Genres (plan 3) make the stats page (plan 2) richer, but neither blocks the other. Track rankings (plan 1) are independent.
 
@@ -110,67 +110,168 @@ Built as described above, except that the result is not cached and no benchmark 
 
 ### Goal
 
-Albums get a small ordered set of genres (for example, "Hip hop", "Jazz rap") from a moderated vocabulary. Genres appear on album pages, enable browsing (`/genre/:slug`) and search filtering, and feed the stats page's "top genres".
+Contributors suggest genres for any catalog album, including genres that don't exist yet, and moderators approve them in the same queue as album corrections. Approved genres appear as chips on album pages, power `/genre/:slug` browsing and a search filter, and feed a "top genres" section on the stats page.
 
-### Recommendation: a controlled vocabulary through the correction workflow
+Direction (2026-10-14): genres are **user-submitted and moderator-approved**, following the album-revision model. This replaces the earlier "operator vocabulary first, user tags later" recommendation. A vocabulary still exists, but contributors grow it through moderated suggestions instead of relying only on an operator.
 
-There are two models:
+### Recommendation: a `genre_suggestion` submission type
 
-| Model | How it works | Trade-off |
+Genre suggestions reuse the `AlbumSubmission` collection, append-only revisions, moderation events, workflow states (pending, needs changes, approved, rejected, withdrawn), owner and moderator detail views, and transactional approval. They get their own `submissionType` instead of becoming a ninth correction field group, because three correction rules don't fit them:
+
+| Correction rule | Why it doesn't fit genres | Genre suggestion rule |
 | --- | --- | --- |
-| **Controlled genres (recommended first)** | A moderator-managed `Genre` vocabulary. Albums carry up to 5 `genreIds`, changed only through the existing catalog-correction workflow. | Reuses submission, review, provenance, transaction, and audit machinery that is already built and tested. It is slower for contributors, but it is trustworthy and consistent. |
-| Free-form user tags | Any user tags any album, and counts determine the display (Last.fm style). | Needs new spam, abuse, and normalization moderation, and the data is noisy. Better as a later layer on top of the vocabulary. |
+| A field group is a full replacement value. | Many people make small additions. With full replacement, two pending suggestions would clobber each other. | An explicit operation list (`add`, `remove`), like `externalReferences.add`. |
+| Approval requires `catalogRevision` to equal the baseline. Any catalog write makes the correction stale (`409 CATALOG_CHANGED`). | A cover backfill or a title fix would stale every pending genre suggestion, and each genre approval would stale every pending correction. | Genres get their own `genresRevision` counter. Correction writers never touch `genres`, and genre writers never touch other fields, so the two sets are disjoint. |
+| Corrections can only change existing field values. | Contributors also need to propose genres that aren't in the vocabulary yet. | A suggestion may include new genre names. The moderator resolves each one when approving. |
+
+The approve endpoint already branches on `submissionType`, so this is a third branch rather than a new pipeline. The full correction editor never edits genres. Genres have their own lighter form.
+
+`genresRevision` is a deliberate, documented exception to the rule that every catalog writer increments `catalogRevision`. Document it in [PHASE_2_SUBMISSIONS.md](PHASE_2_SUBMISSIONS.md#catalog-revision-token) when this is built, and extend `npm run check:catalog-contract` so that only the genre service writes `AlbumCatalog.genres` and the importer never does.
 
 ### Data model
 
 ```text
 Genre
-  genreId      UUID v4, public, immutable
-  slug         unique, URL-facing, can change on rename (old slugs kept in aliases)
-  name         display name
-  parentId     optional broader genre (one level is enough at first)
-  aliases      alternative names and retired slugs, for search and redirects
-  status       active | retired
+  genreId          UUID v4, public, immutable
+  slug             unique, URL-facing; changes on rename (old slugs move to aliases)
+  name             display name
+  normalizedName   unique; the matching key (see Validation)
+  aliases          [{ name, normalizedName }], also searched and used to redirect old slugs
+  parentId         optional broader genre; one level only
+  status           active | retired
+  kind             genre (only value in version 1; reserved for descriptors later)
+  origin           { source: seed | community, submissionId?, createdAt }
 
-AlbumCatalog
-  genres       [ObjectId → Genre], max 5, first = primary
-  fieldProvenance.genres   community provenance on every change
+GenreEvent (append-only)
+  genreId, action (create | rename | alias_add | reparent | retire | merge)
+  actorUserId, reason, before, after, submissionId?, createdAt
+
+AlbumCatalog (new fields)
+  genres                  [ObjectId → Genre], ordered, max 5, first = primary
+  genresRevision          integer, starts at 0
+  fieldProvenance.genres  { source: "community", submissionId, approvedBy, approvedAt }
 ```
 
-- Public APIs expose `genreId` and `slug`, never Mongo `_id`, the same as the other public IDs.
-- `/genre/:slug` resolves current slugs and aliases, so a rename doesn't break shared links.
+- Public APIs expose `genreId`, `slug`, and `name`, never a Mongo `_id`.
+- Unapproved genre names are never stored as `Genre` rows. They live only inside the submission revision, so the public vocabulary contains only moderator-approved genres, and a rejected name leaves nothing behind.
+- Index `AlbumCatalog` on `{ genres: 1, … }` for browsing and the search filter. Use a partial unique index on `normalizedName` and on `slug` in `Genre`.
 
-### Workflow
+### Contributor flow
 
-1. **Seed the vocabulary.** Use an operator CLI (`npm run genres:import`) following the existing dry-run-first pattern: a checked-in, checksummed vocabulary dataset; `--dry-run` writes a report; the apply step needs explicit authorization for the named database. Start with about 150 genres written by hand rather than copying a provider taxonomy.
-2. **Contributors propose.** Add `genres` as a new correction field group (`{ genreIds: [...] }`, full replacement, 0–5 entries, active genres only). Corrections already handle baselines, stale detection through `catalogRevision`, `applyFields`, and transactional application, so genres become one more group in the field-group table in [PHASE_2_SUBMISSIONS.md](PHASE_2_SUBMISSIONS.md#mutable-field-groups).
-3. **Moderators apply.** This uses the existing correction review UI and adds a genre diff renderer. Approval writes `fieldProvenance.genres` with `source: "community"`, so the catalog importer never overwrites it.
-4. **Vocabulary changes.** Adding, renaming or retiring genres is a moderator command with an append-only audit record. It's rare, so start with the operator CLI and add a UI only if needed. Retiring a genre hides it from proposals and browsing but does not rewrite albums. A reviewed migration remaps them.
-5. **A quick genre form.** A lighter "Suggest genres" entry on the album page creates a correction containing only the `genres` group, so contributors don't need the full correction editor.
+**Endpoints** (Clerk auth, `COMMUNITY_SUBMISSIONS_ENABLED=true`, `GENRES_ENABLED=true`, and a dedicated `genreSuggestionRateLimit` applied before any write):
 
-### Read surfaces
+- `GET /genres/search?q=` lists active genres matching a name or alias, for the picker's autocomplete.
+- `POST /suggestions/genres` creates a suggestion.
+- The existing revise and withdraw routes handle the new type.
 
-- The album page shows genre chips linking to `/genre/:slug`.
-- `GET /genres/:slug/albums` returns catalog albums with that genre (optionally including child genres), sorted by community average rating with a minimum review count, or by recent activity. It is cursor-paged.
-- Search gains an optional `genre` filter on local catalog search. External discovery candidates never carry genres.
-- Stats (plan 2) gains `topGenres` once enough albums are tagged.
+**Payload:**
+
+```json
+{
+  "albumId": "11111111-1111-4111-8111-111111111111",
+  "add": [
+    { "genreId": "22222222-2222-4222-8222-222222222222" },
+    { "newGenre": { "name": "Jazz rap", "parentGenreId": "33333333-3333-4333-8333-333333333333" } }
+  ],
+  "remove": ["44444444-4444-4444-8444-444444444444"],
+  "primaryGenreId": "22222222-2222-4222-8222-222222222222",
+  "note": "Optional context for the moderator"
+}
+```
+
+**Validation:**
+
+- Reject unknown fields. Require at least one operation. Allow at most 5 additions, at most 2 new genre names, and a `note` of at most 500 characters. A genre can't appear in both `add` and `remove`.
+- Every referenced `genreId` must be active. A `remove` must name a genre the album currently has.
+- New names are normalized: NFKC, trimmed, internal whitespace collapsed, 2–40 characters from a letters, digits, space, and `&'-/+.` allowlist. The case-folded result is the matching key.
+- If a new name matches an existing active genre's name or alias, the server rewrites the operation to that `genreId` and says so in the response, so the UI can show "Using existing genre *Jazz rap*". A match on a retired genre is rejected with `GENRE_RETIRED`.
+- The stored revision keeps a baseline: the album's genre IDs and `genresRevision` at submission time.
+
+**Limits:**
+
+- A user can have one open (pending or needs-changes) genre suggestion per album. A second one returns `409 GENRE_SUGGESTION_EXISTS` with the open `submissionId`, so the UI can send the user to revise that suggestion instead.
+- Any contributor can propose new genre names, with at most 10 across all their open suggestions. Moderators gate every name, so no reputation threshold is needed.
+
+**UI:**
+
+- An album page "Suggest genres" button opens a picker that shows the current chips (removable), autocomplete for existing genres, and a "Propose new genre" option when nothing matches.
+- Pending suggestions appear in the contributor's existing suggestions list, with the same status badges and revise flow as corrections.
+- The submitter sees a "Suggestion pending" note on that album. Nobody else sees pending genres.
+
+### Moderator flow
+
+**Queue.** Add a "Genres" filter to the moderation queue. The detail view shows:
+
+- The album's current genres next to the contributor's baseline, with a stale marker when they differ. This is informational, not blocking, because operations still make sense against the current state.
+- Each operation as a `+` or `−` diff.
+- For each new name: the closest existing genres (by normalized name, alias, and edit distance), with a parent picker and an editable spelling.
+
+**Approval body.** Each operation gets a decision, mirroring how corrections use `applyFields`:
+
+```json
+{
+  "operations": [
+    { "index": 0, "decision": "apply" },
+    { "index": 1, "decision": "apply", "newGenre": { "action": "create", "name": "Jazz rap", "parentGenreId": "33333333-3333-4333-8333-333333333333" } },
+    { "index": 2, "decision": "skip" }
+  ],
+  "primaryGenreId": "22222222-2222-4222-8222-222222222222",
+  "reason": "Optional; a standard note is recorded when blank"
+}
+```
+
+- Each operation receives exactly one decision, so the decisions form a complete partition. At least one operation must be applied. Otherwise the moderator rejects or requests changes, both of which still require a note.
+- A moderator may approve their own genre suggestion. The approval event records both the submitter and the approver, so self-approvals stay auditable.
+- A new-genre operation resolves as `create` (optionally correcting the spelling and parent), `map` (to an existing `genreId`, optionally recording the proposed spelling as an alias), or `skip`.
+
+**Transaction** (one Mongo transaction, standalone Mongo returns `503 APPROVAL_UNAVAILABLE` with no fallback):
+
+1. Re-read the pending suggestion, its current revision, and the target album.
+2. Insert the `Genre` rows marked `create`, with `GenreEvent` records. A slug or name collision returns `409 GENRE_NAME_CONFLICT` and rolls everything back.
+3. Apply the operations to the current genres. An addition already present, or a removal already absent, is recorded as a no-op rather than an error. A result over 5 returns `409 GENRE_LIMIT_EXCEEDED`, and the moderator skips some operations.
+4. Update the album conditionally on `{ _id, albumId, genresRevision }`, increment `genresRevision`, and set `fieldProvenance.genres`. A concurrent genre approval fails the guard and returns `409 GENRES_CHANGED`. Re-opening the item shows the new current state.
+5. Transition the submission and append one `approved` event with an `application` object: applied and skipped indexes, no-ops, created and mapped `genreId`s, and the base and result `genresRevision`. A retry is idempotent and appends nothing.
+
+**Volume.** Genre suggestions will be the highest-volume item in the queue. They are the natural first user of the deferred bulk-approval work, where each item keeps its own transaction and reports its own conflicts. Until then, the detail view gets a one-click "Approve all as proposed" when every new name has an exact or alias match.
+
+### Vocabulary maintenance
+
+- **In the app** (moderator commands, `COMMUNITY_MODERATION_ENABLED`, a transaction plus a `GenreEvent`): rename (the old slug becomes an alias), add an alias, reparent, and retire. Retiring hides a genre from the picker, browsing, and album chips, but doesn't rewrite albums.
+- **Operator CLI, dry-run first:** `npm run genres:import` seeds the starting vocabulary (about 100 broad genres and common subgenres, written by hand) from a checked-in, checksummed dataset. `npm run genres:merge` remaps every album from genre A to genre B, because it rewrites many albums and should produce a reviewable report before the apply. Both follow the existing rule that each apply needs explicit authorization for the named database.
+
+### Read surfaces (`GENRES_ENABLED`)
+
+- Album detail gains `genres: [{ genreId, slug, name }]`, resolved from `Genre` at read time, without retired genres. Album cards in boards, feeds, and search can add the primary genre later; it is resolved from the catalog, not snapshotted.
+- `GET /genres/:slug` returns the name, parent, children, and album count. It resolves aliases and old slugs, so renamed links still work.
+- `GET /genres/:slug/albums` is cursor-paged and sorted by community average (with a minimum review count) or by recent activity. It includes child genres by default ("Hip hop" lists "Jazz rap" albums), and `includeChildren=false` limits it to the genre itself. The browse page has a matching toggle.
+- Local catalog search gains a `genre` filter. External discovery candidates never carry genres.
+- Stats (plan 2) gains `topGenres`, weighted by the user's listens and reviews.
+- The "Recently approved" page shows genre approvals as "Genres updated on *Album*" through the existing public feed serializer. The application object stays private to owners and moderators.
+
+### Error codes (add to [ERROR_CODES.md](ERROR_CODES.md))
+
+`GENRES_DISABLED` (503), `GENRE_NOT_FOUND` (404), `GENRE_RETIRED` (400), `GENRE_SUGGESTION_EXISTS` (409), `GENRE_LIMIT_EXCEEDED` (409), `GENRE_NAME_CONFLICT` (409), and `GENRES_CHANGED` (409). Invalid payloads reuse `INVALID_SUBMISSION`, and wrong-state actions reuse `INVALID_SUBMISSION_STATE`.
 
 ### Licensing and provider boundary
 
-- Version 1 does not import genres from MusicBrainz. MusicBrainz's core data is CC0, but tags and genres are user-contributed supplementary data under a different license. Confirm the exact terms before any import, and keep any future import behind the catalog importer's provenance rules.
+- Version 1 doesn't import genres from MusicBrainz. Its core data is CC0, but tags and genres are user-contributed supplementary data under different terms. Confirm the license before any import, and keep any future import behind the catalog importer's provenance rules. It still could not overwrite community-owned genres.
 - No new external API is needed.
 
 ### Rollout
 
-1. Genre model, vocabulary CLI, seeded dev data. The read-only album chips stay hidden behind a `GENRES_ENABLED` flag.
-2. The `genres` correction field group: validation, baseline, application, provenance, and tests (`npm test` plus `npm run test:integration`, since approval is transactional).
-3. Moderator diff UI and the quick-suggest form.
-4. Browse page and the search filter (`npm run check:catalog-contract`; extend the contract scan to the new routes if it doesn't cover them).
-5. Turn on the flag in production after the dev database has a meaningful tagged set.
+1. **Model and reads.** Add `Genre`, `GenreEvent`, the new album fields, the seed CLI with a dry run, and the read endpoints and album chips behind `GENRES_ENABLED`. Seed `rescened_dev`. *Built, except seeding `rescened_dev`, which waits for a reviewed dry run and authorization.*
+2. **Suggestions.** Add the `genre_suggestion` type: validation, normalization, alias matching, limits, rate limit, and the revise and withdraw paths. Run `npm test`.
+3. **Approval.** Add the per-operation approval transaction, new-genre resolution, and the application event. Two points to carry forward from slice 1: the conditional update must treat a missing `genresRevision` as `0` (`{ $in: [null, 0] }`), the same way corrections treat a missing `catalogRevision`; and correction approval currently `$set`s `fieldProvenance` as a whole, so switch it to per-field `fieldProvenance.<field>` paths so it can't drop genre provenance written by a concurrent genre approval. Integration tests cover concurrent approvals on one album, a name-collision rollback, idempotent retries, and standalone 503. Run `npm run test:integration`.
+4. **Frontend.** Add the suggest picker, the contributor list entries, the moderator queue filter, and the review panel. Run lint and build.
+5. **Vocabulary commands** in the app, and the merge CLI.
+6. **Discovery.** Add the browse page, the search filter, and `topGenres`. Run `npm run check:catalog-contract`, extended to the genre routes and the `genres` write guard.
+7. **Production.** Dogfood on dev, seed production after a reviewed dry run, then turn on `GENRES_ENABLED`.
 
-### Decisions needed
+### Decisions (answered 2026-10-14)
 
-1. Controlled vocabulary first, with user tags later, or user tags only?
-2. Max genres per album: 3 or 5?
-3. Should child genres count when browsing a parent ("Hip hop" includes "Jazz rap")?
-4. Who maintains the vocabulary: moderators in the app, or only the operator CLI at first?
+1. **Genres only** in version 1. `Genre.kind` is reserved so mood and texture descriptors ("melancholic", "late-night") can reuse the same pipeline later without mixing into genre browsing.
+2. **Seed about 100 genres** by hand through the dry-run-first import, so the picker is useful on day one and new-name proposals are the exception.
+3. **At most 5 genres per album**, with the first as the primary genre.
+4. **Child genres count when browsing a parent** by default, with a toggle to exclude them.
+5. **Moderators may approve their own genre suggestions.** The audit trail records it.
+6. **Any contributor may propose new genre names**, within the 10-open-names cap.

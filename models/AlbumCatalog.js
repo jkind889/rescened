@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { MAX_ALBUM_GENRES } = require("../lib/genres/vocabulary");
 
 const artistCreditSchema = new mongoose.Schema(
   {
@@ -69,12 +70,26 @@ const albumCatalogSchema = new mongoose.Schema(
     // public album representations and advances on every maintained catalog
     // mutation.
     catalogRevision: catalogRevisionSchema,
+    // Community genres, ordered with the primary genre first. Only the genre
+    // service writes these. They advance genresRevision rather than
+    // catalogRevision, because no other catalog writer touches them.
+    genres: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Genre" }],
+      default: undefined,
+      validate: {
+        validator: (value) => !value || (value.length <= MAX_ALBUM_GENRES && new Set(value.map(String)).size === value.length),
+        message: `An album can have at most ${MAX_ALBUM_GENRES} distinct genres`,
+      },
+    },
+    // Internal genre concurrency token; a missing field counts as 0.
+    genresRevision: { type: Number, min: 0, default: undefined },
   },
   { timestamps: true },
 );
 
 albumCatalogSchema.index({ title: "text", artistDisplayName: "text", "artistCredits.name": "text" });
 albumCatalogSchema.index({ artistDisplayName: 1, title: 1 });
+albumCatalogSchema.index({ genres: 1 }, { sparse: true });
 albumCatalogSchema.index(
   { "externalReferences.provider": 1, "externalReferences.entityType": 1, "externalReferences.externalId": 1 },
   { unique: true, sparse: true },

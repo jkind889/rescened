@@ -57,6 +57,7 @@ app.use("/boards", boardRoutes)
 app.use("/diary", require("./routes/diary"));
 app.use("/likes", likeRoutes)
 app.use("/track-rankings", require("./routes/trackRankings"));
+app.use("/genres", require("./routes/genres"));
 app.use("/notifications", notificationRoutes)
 app.use("/suggestions", suggestionRoutes)
 app.use("/moderation/album-suggestions", moderationRoutes)
@@ -82,6 +83,11 @@ async function startServer({
       await Promise.all(Object.values(require("./models/AlbumBaseline")).map((Model) => Model.init()));
     }
   },
+  initializeGenres = async () => {
+    if (require("./routes/utils/serverConfig").isGenresEnabled()) {
+      await Promise.all(Object.values(require("./models/Genre")).map((Model) => Model.init()));
+    }
+  },
   listen = app.listen.bind(app),
   mongoUri = process.env.MONGO_URI,
   port = parsePort(),
@@ -90,6 +96,7 @@ async function startServer({
   await initializeDiary();
   await initializeListening();
   await initializeBaselines();
+  await initializeGenres();
   console.log("MongoDB Connected");
   return listen(port, () => {
     console.log(`server running on port ${port}`);

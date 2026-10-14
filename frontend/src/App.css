@@ -3273,7 +3273,6 @@ html:has(.search-results-page) .search-submit {
   font-size: 0.7rem;
   line-height: 1;
   letter-spacing: 0.04em;
-  text-transform: capitalize;
 }
 
 .album-genre-badge-primary {

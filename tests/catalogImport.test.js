@@ -224,6 +224,24 @@ test("refresh preserves local enrichments, non-MusicBrainz references, user-owne
   assert.equal(merged.fieldProvenance.externalReferences.representativeReleaseMbid, RELEASE_MBID);
 });
 
+test("refresh never writes album genres and keeps their provenance", () => {
+  const original = buildCatalogInput(albumRow(), dataset());
+  const genreProvenance = { source: "community", submissionId: crypto.randomUUID(), approvedBy: "moderator-1" };
+  const existing = {
+    ...original,
+    albumId: crypto.randomUUID(),
+    genres: [new mongoose.Types.ObjectId()],
+    genresRevision: 3,
+    fieldProvenance: { ...original.fieldProvenance, genres: genreProvenance },
+  };
+  const merged = mergeImportedCatalog(existing, buildCatalogInput(albumRow({ title: "Refreshed" }), dataset()));
+
+  assert.deepEqual(merged.fieldProvenance.genres, genreProvenance);
+  // The refresh $sets DATA_FIELDS only, so genre values are left to the genre service.
+  assert.equal("genres" in merged, false);
+  assert.equal("genresRevision" in merged, false);
+});
+
 test("refresh keeps the representative release for a user-owned CAA cover", () => {
   const original = buildCatalogInput(albumRow(), dataset());
   const existing = {

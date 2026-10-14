@@ -103,6 +103,15 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `INVALID_TRACK_RANKING_REQUEST` | `400` | A standings read used a `scope` other than `community` or `circle`, or a profile ranking list used an unsupported field or an invalid `limit`. |
 | `INVALID_TRACK_RANKING_CURSOR` | `400` | A profile ranking-list cursor is malformed or names an album that no longer exists. |
 
+### Community genres
+
+The `/genres` routes are public reads. See [community genres](COMMUNITY_GENRES.md).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `GENRES_DISABLED` | `503` | `GENRES_ENABLED` is off. |
+| `GENRE_NOT_FOUND` | `404` | No active genre has that slug or alias slug. Retired genres return this too. |
+
 ### Submission and moderation conflicts
 
 | Code | Status | Meaning |
@@ -323,6 +332,26 @@ Row statuses are `resolved` in dry-run mode, `updated` after a successful apply,
 
 Source: [`scripts/backfillMissingAlbumCovers.js`](../scripts/backfillMissingAlbumCovers.js).
 
+## Genre seed command codes
+
+| Code | Meaning |
+| --- | --- |
+| `GENRE_SEED_FAILED` | Generic fatal seed failure. |
+| `INVALID_ARGUMENTS` | CLI flags are invalid, duplicated, or contradictory, or `--apply` lacks a 64-character `--expect-sha256`. |
+| `INVALID_GENRE_DATASET` | The envelope or a row fails validation. `details` lists each JSON pointer and problem. |
+| `GENRE_DATASET_READ_FAILED` | The dataset file cannot be read. |
+| `GENRE_DATASET_TOO_LARGE` | The dataset exceeds 512 KiB. |
+| `GENRE_DATASET_MALFORMED_JSON` | The dataset is not valid JSON. |
+| `GENRE_DATASET_CHECKSUM_MISSING` | The `<dataset>.sha256` sidecar is absent. |
+| `GENRE_DATASET_CHECKSUM_MISMATCH` | The dataset differs from its sidecar or from `--expect-sha256`. |
+| `GENRE_SEED_CONFLICT` | A row's name, slug, or alias belongs to a different existing genre. Nothing was written. |
+| `GENRE_SEED_PLAN_CHANGED` | The vocabulary changed between the dry run and the apply transaction. Nothing was written. |
+| `TRANSACTION_UNAVAILABLE` | MongoDB is not a replica set or sharded deployment. |
+| `MISSING_MONGO_URI` | `MONGO_URI` was not supplied. |
+| `GENRE_SEED_COMMITTED_REPORT_FAILED` | The apply committed, but the report could not be written. This is not a rollback. |
+
+Source: [`scripts/importGenres.js`](../scripts/importGenres.js) and [`lib/genres/seed.js`](../lib/genres/seed.js).
+
 ## Community reconciliation command codes
 
 | Code | Meaning |
@@ -498,6 +527,7 @@ These are not error codes, but they frequently appear beside them in API respons
 | Cover resolver | `resolved`, `unresolved` |
 | Cover backfill row | `resolved`, `updated`, `unresolved`, `conflict`, `failed` |
 | Import action | `inserted`, `refreshed`, `unchanged` |
+| Genre seed plan | `create`, `unchanged`, `drift`, `conflicts` |
 | Migration catalog action | `created`, `reused`, `quarantined`, `archived` |
 | Migration ledger | `running`, `completed` |
 

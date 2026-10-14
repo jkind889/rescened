@@ -777,6 +777,8 @@ Cover correction is intentionally offline. The submitted HTTPS URL is reviewed b
 
 Every supported generation-2 catalog writer must condition on the revision it read and increment it exactly once for a successful mutation. This includes community corrections, imported-record refreshes, cover backfills, and any maintained manual-edit path. Create-only publication initializes the token but does not need a prior revision. Direct database writers remain restricted and must follow the same rule.
 
+Album genres are the one exception. Only the genre service writes `genres`, `genresRevision`, and `fieldProvenance.genres`, and no other writer touches them, so genre changes advance their own `genresRevision` instead of `catalogRevision`. Correction approval must therefore never put `genres` in a patch. See [community genres](COMMUNITY_GENRES.md#ownership-and-the-revision-exception).
+
 The correction revision stores `baseCatalogRevision`, and approval guards on that exact value. This monotonic token, rather than timestamp equality, makes stale detection deterministic even when two writes occur within one clock tick. Catalog `updatedAt` remains useful display and diagnostics metadata but is not the correctness boundary.
 
 ### Moderator review and approval contract

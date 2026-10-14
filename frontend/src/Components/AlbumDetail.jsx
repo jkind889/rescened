@@ -977,6 +977,15 @@ export function AlbumDetail()
                             {album.label && <span>{album.label}</span>}
                             {sortedTracks.length > 0 && <span>{sortedTracks.length} track{sortedTracks.length === 1 ? "" : "s"}{runtimeLabel ? ` · ${runtimeLabel}` : ""}</span>}
                         </div>
+                        {album.genres?.length > 0 && (
+                            <ul className="album-genre-list" aria-label="Genres">
+                                {album.genres.map((genre, index) => (
+                                    <li key={genre.genreId} className={`album-genre-badge ${index === 0 ? "album-genre-badge-primary" : "album-genre-badge-secondary"}`}>
+                                        {genre.name}
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
                     </div>
 
                     <nav className="album-tabs" aria-label="Album sections">

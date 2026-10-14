@@ -1,0 +1,33 @@
+const express = require("express");
+const { isGenresEnabled } = require("./utils/serverConfig");
+const { searchRateLimit } = require("./utils/rateLimit");
+const { genreDetail, searchGenres } = require("../lib/genres/read");
+
+const router = express.Router();
+
+router.use((req, res, next) => {
+  if (!isGenresEnabled()) {
+    return res.status(503).json({ error: "Genres are currently disabled", code: "GENRES_DISABLED" });
+  }
+  return next();
+});
+
+router.get("/search", searchRateLimit, async (req, res) => {
+  try {
+    res.json({ results: await searchGenres(req.query.q) });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to search genres" });
+  }
+});
+
+router.get("/:slug", async (req, res) => {
+  try {
+    const detail = await genreDetail(req.params.slug);
+    if (!detail) return res.status(404).json({ error: "Genre not found", code: "GENRE_NOT_FOUND" });
+    return res.json(detail);
+  } catch (error) {
+    return res.status(500).json({ error: "Failed to fetch genre" });
+  }
+});
+
+module.exports = router;

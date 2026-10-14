@@ -8,6 +8,8 @@ const Review = require("../models/Reviews");
 const { findAlbumByPublicId, normalizeCatalogAlbum } = require("./utils/albumCatalog");
 const { buildCatalogSearchQuery } = require("./utils/catalogSearch");
 const { albumTopTrack } = require("./utils/trackRankings");
+const { isGenresEnabled } = require("./utils/serverConfig");
+const { resolveAlbumGenres } = require("../lib/genres/read");
 
 const router = express.Router();
 const PAGE_LIMIT = 24;
@@ -126,7 +128,8 @@ router.get("/album/:albumId/social", async (req, res) => {
 router.get("/album/:albumId", async (req, res) => {
   try {
     const album = await findAlbumByPublicId(req.params.albumId);
-    res.json(normalizeCatalogAlbum(album));
+    const normalized = normalizeCatalogAlbum(album);
+    res.json(isGenresEnabled() ? { ...normalized, genres: await resolveAlbumGenres(album) } : normalized);
   } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch album details" }); }
 });
 
