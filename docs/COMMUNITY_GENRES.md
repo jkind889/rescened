@@ -9,8 +9,9 @@ Built so far:
 - **Slice 3:** moderator approval through the API, which is the only way an album's genres change. See [Moderator approval](#moderator-approval).
 - **Slice 4:** the contributor and moderator UI. See [Frontend](#frontend).
 - **Slice 5:** moderator vocabulary commands and the operator merge. See [Vocabulary maintenance](#vocabulary-maintenance).
+- **Slice 6:** the genre browse page, the search filter, and top genres in stats. See [Endpoints](#endpoints) and [Frontend](#frontend).
 
-Browsing and the search filter are not built yet.
+What's left is the production rollout (slice 7 in the plan).
 
 ## Feature flag
 
@@ -163,9 +164,29 @@ All of these are public, read-only, and return `503 GENRES_DISABLED` while the f
 | `GET` | `/genres` | Active top-level genres by name, as `{ results }`. These are the parent choices for a new genre. |
 | `GET` | `/genres/search?q=` | Up to 10 active genres whose name or alias starts with the query, or has a word that starts with it. Ranking: exact name, exact alias, name prefix, then word match, alphabetical within each group. A result found through an alias carries `matchedAlias`. An empty query returns `[]`. Uses the IP `search` rate limit. |
 | `GET` | `/genres/:slug` | `{ genre, canonical, aliases, parent, children, albumCount }`. Resolves current slugs and alias slugs; `canonical: false` means the client should switch to `genre.slug`. Retired or unknown genres return `404 GENRE_NOT_FOUND`. `albumCount` counts albums tagged with this genre directly, not its children. |
+| `GET` | `/genres/:slug/albums?sort=rating\|recent&includeChildren=true\|false&limit=&cursor=` | The genre's albums, including active sub-genres unless `includeChildren=false`. Each album is `{ albumId, title, artistDisplayName, releaseYear, releaseType, cover, reviewCount, averageRating }`. See [Browsing](#browsing). Uses the IP `search` rate limit. |
 | `GET` | `/albums/album/:albumId` | Adds `genres: [{ genreId, slug, name }]` in stored order (primary first), with retired genres omitted. |
 
 Genre objects are always `{ genreId, slug, name }`.
+
+## Browsing
+
+`lib/genres/browse.js` computes each album's review count, average, and latest review date in one aggregation, using the `Review { albumCatalogId }` indexes.
+
+- **`sort=rating`** (the default): albums with at least 3 reviews (`minimumReviews` in the response) come first, by average, then review count. The rest follow in the same order, with unreviewed albums last.
+- **`sort=recent`:** by the most recent review; albums nobody reviewed come last.
+
+Both orders are keyset-paged with an opaque `nextCursor`, and `_id` breaks ties internally; responses never contain it. `limit` is 1–48 (default 24). A cursor from the other sort, or a malformed one, returns `400 INVALID_GENRE_CURSOR`. Other bad query fields return `400 INVALID_GENRE_BROWSE`.
+
+The aggregation looks up reviews for every album in the genre before sorting. That's fine at the current catalog size. Precompute per-album review stats if a genre grows to many thousands of albums.
+
+### Search filter
+
+`GET /search/search` accepts an optional `genre` (a slug or alias slug). It limits local catalog results to that genre and its active sub-genres, for both the paginated and the plain response shapes. The paginated response adds `genre: { genreId, slug, name }`. An unknown or retired genre returns `404 GENRE_NOT_FOUND`, and `genre` while genres are disabled returns `503 GENRES_DISABLED`. Search without `genre` is unchanged, and external discovery candidates never carry genres.
+
+### Top genres in stats
+
+While `GENRES_ENABLED` is on, profile stats add `topGenres`: up to 10 `{ genre, listenCount, albumCount }`. Every active genre on a listened album gets that album's listens, the same way artists are counted. See [LISTENING_STATS.md](LISTENING_STATS.md).
 
 ## Genre suggestions
 
@@ -304,7 +325,7 @@ Correction approval now writes provenance as dotted `fieldProvenance.<field>` pa
 The frontend treats an `album.genres` array on album detail as the signal that genres are enabled. When the field is absent, no genre UI appears. Shared logic (previews, payloads, and decision bodies) is in `frontend/src/features/community/genres.js`, and the styles are in `Components/Community/GenreSuggestion.css`.
 
 - **Album page:**
-  - Genres show as chips under the title line, with the primary genre filled. The chips aren't links yet: `/genre/:slug` arrives with the browse page in slice 6.
+  - Genres show as chips under the title line, with the primary genre filled. Each chip links to `/genre/:slug`.
   - Signed-in users get a "Suggest genres" action; signed-out users get the sign-in prompt.
   - If the viewer has an open genre suggestion for the album (`GET /suggestions/genres/open`), the action is hidden. A note links to the suggestion, or to "Revise it" when a moderator asked for changes.
 - **Suggestion form:** `/suggestions/genres/:albumId`, and `/suggestions/:submissionId/revise` for a genre suggestion, both use `GenreSuggestionForm`. A contributor can:
@@ -316,6 +337,9 @@ The frontend treats an `album.genres` array on album detail as the signal that g
 
   Revising starts from the stored suggestion, checked against the album's genres now. After sending, the confirmation names any proposed name that turned out to be an existing genre.
 - **Suggestion details:** these show the proposed genre changes and each revision's changes in place of release metadata and evidence. Approval events show a one-line summary of what was applied.
+- **Genre page:** `/genre/:slug` (`Pages/GenrePage.jsx`) shows the name, alternative names, a link to the broader genre, and sub-genre links. It has the two sort orders, an "Include sub-genres" toggle, a "Show more albums" button, and a search box that opens `/search?q=…&genre=<slug>`. An alias or old slug redirects to the current slug.
+- **Search page:** with `genre` set, it says which genre results are limited to, offers "Search all genres", and skips external candidates.
+- **Stats tab:** shows "Top genres" with links to each genre page.
 - **Moderation:**
   - The queue has a "Genre suggestions" filter.
   - Genre suggestions use `GenreModeratorDecision`: approve, request changes, or reject (no duplicate marking).
@@ -325,6 +349,8 @@ The frontend treats an `album.genres` array on album detail as the signal that g
   - A new name defaults to mapping when a candidate is an exact or close-spelling match, and to creating otherwise.
 
 ## Tests
+
+- `tests/genreBrowse.integration.test.js` covers the rating and recent orders, sub-genres, paging through both cursors, cursor and query validation, alias slugs, the search filter (including the disabled flag), and `topGenres`.
 
 - `tests/genreVocabulary.test.js` covers command and merge-argument validation.
 - `tests/genreVocabulary.integration.test.js` covers moderator access and flags, rename with alias promotion and slug redirects, name conflicts, stale revisions, parents and sub-genres, retire and restore, and a merge from dry run to apply (checksum refusal, remapping, alias transfer, and refusing to re-apply the same plan).

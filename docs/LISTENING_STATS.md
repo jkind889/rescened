@@ -49,6 +49,7 @@ Both endpoints share the `profileStats` bucket: 60 requests per 10 minutes, keye
   },
   "topAlbums": [{ "album": { "albumId": "…", "title": "…", "artistDisplayName": "…", "releaseYear": 2024, "cover": "…" }, "listenCount": 2, "lastListenedOn": "2026-09-29" }],
   "topArtists": [{ "name": "…", "listenCount": 2, "albumCount": 1 }],
+  "topGenres": [{ "genre": { "genreId": "…", "slug": "jazz-rap", "name": "Jazz rap" }, "listenCount": 2, "albumCount": 1 }],
   "eras": { "decades": [{ "decade": 2020, "listenCount": 9 }], "unknownYearListens": 0, "releasedThatYearShare": null },
   "listeningTime": { "estimatedHours": 2.7, "coveredListens": 10, "totalListens": 11 },
   "reviews": {
@@ -66,6 +67,7 @@ Both endpoints share the `profileStats` bucket: 60 requests per 10 minutes, keye
 
 - **Listening.** Listens are matched on `listenedOn`, which is already the listener's local calendar date, so no timezone conversion happens. `perMonth` has one entry per month in the period, including empty months. `weekdays` is Monday-first, and `busiestWeekday` indexes into it (`null` with no listens). `longestStreak` is the longest run of consecutive days with at least one listen.
 - **Top albums and artists.** Each has a top 10, ordered by listen count, then most recent listen. Artists are grouped by `artistDisplayName`, compared case-insensitively. Until the catalog has artist IDs, a collaboration credited as "A & B" counts as its own artist, and two artists who share a name are merged.
+- **Top genres.** This field is present only while `GENRES_ENABLED` is on. It's a top 10 in the same order as artists. Every active genre on a listened album gets that album's listens, so an album tagged Hip hop and Jazz rap counts toward both. Retired genres are left out. See [community genres](COMMUNITY_GENRES.md#top-genres-in-stats).
 - **Eras.** Listens are grouped by release decade, and listens to albums without a release year are counted in `unknownYearListens`. `releasedThatYearShare` is the share of listens to albums released in the selected calendar year, and is `null` for the rolling period.
 - **Listening time.** This is an estimate. It counts an album's runtime per listen only when every track on its tracklist has a duration, so a partial tracklist never understates time. `coveredListens` says how many listens the estimate includes.
 - **Reviews.**

@@ -85,7 +85,7 @@ export function ProfileStats({ userId, isOwner = false }) {
   if (error) return <section className="profile-stats">{controls}<p className="stats-muted" role="alert">{error}</p></section>;
   if (!stats) return <section className="profile-stats">{controls}<p className="stats-muted">Loading stats…</p></section>;
 
-  const { listening, topAlbums, topArtists, eras, listeningTime, reviews, library } = stats;
+  const { listening, topAlbums, topArtists, topGenres = [], eras, listeningTime, reviews, library } = stats;
   const hasListens = listening.totalListens > 0;
   const maxMonth = Math.max(...listening.perMonth.map((month) => month.count), 0);
   const maxRating = Math.max(...reviews.distribution.map((bucket) => bucket.count), 0);
@@ -160,6 +160,16 @@ export function ProfileStats({ userId, isOwner = false }) {
             <div className="stats-card">
               <h3>Top artists</h3>
               <BarList label="Top artists by listens" rows={topArtists.map((artist) => ({ key: artist.name, label: artist.name, value: artist.listenCount }))} />
+            </div>
+          )}
+
+          {topGenres.length > 0 && (
+            <div className="stats-card">
+              <h3>Top genres</h3>
+              <BarList
+                label="Top genres by listens"
+                rows={topGenres.map((entry) => ({ key: entry.genre.genreId, label: <Link to={`/genre/${entry.genre.slug}`}>{entry.genre.name}</Link>, value: entry.listenCount }))}
+              />
             </div>
           )}
 

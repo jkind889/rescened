@@ -109,8 +109,11 @@ The `/genres` routes are public reads. See [community genres](COMMUNITY_GENRES.m
 
 | Code | Status | Meaning |
 | --- | --- | --- |
-| `GENRES_DISABLED` | `503` | `GENRES_ENABLED` is off. |
-| `GENRE_NOT_FOUND` | `404` | No active genre has that slug or alias slug. Retired genres return this too. |
+| `GENRES_DISABLED` | `503` | `GENRES_ENABLED` is off. Search returns it only when a `genre` filter is sent. |
+| `GENRE_NOT_FOUND` | `404` | No active genre has that slug or alias slug. Retired genres return this too. `GET /search/search?genre=` returns it for an unknown genre filter. |
+| `INVALID_GENRE_BROWSE` | `400` | `GET /genres/:slug/albums` got an unsupported query field, a `sort` other than `rating` or `recent`, a non-boolean `includeChildren`, or a `limit` outside 1–48. |
+| `INVALID_GENRE_CURSOR` | `400` | A genre browse cursor is malformed or belongs to the other sort. |
+| `INVALID_GENRE_FILTER` | `400` | `GET /search/search` got a `genre` that isn't a single string. |
 | `GENRE_RETIRED` | `400` | A genre suggestion adds, promotes, or uses as a parent a retired genre, or proposes a name matching one. Removing a retired genre from an album is allowed. |
 | `GENRE_SUGGESTION_EXISTS` | `409` | The user already has a pending or needs-changes genre suggestion for this album. `details[0].submissionId` names it when known. |
 | `GENRE_LIMIT_EXCEEDED` | `409` | The suggestion would leave the album with more than 5 genres. |
@@ -162,7 +165,7 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Bucket | Protected routes | Key | Budget |
 | --- | --- | --- | --- |
 | Global API | Every API route except `/health` | IP | 300 requests per 5 minutes |
-| Local search | `GET /search/search` | IP | 90 requests per minute |
+| Local search | `GET /search/search`, `GET /genres/search`, `GET /genres/:slug/albums` | IP | 90 requests per minute |
 | External search | `GET /search/external`, `GET /search/musicbrainz/release-group/:mbid` | IP | 30 requests per minute |
 | Album save | `POST /boards/:boardId/albums` | authenticated user | 30 attempts per 10 minutes |
 | Diary mutation | `POST /diary`, `PATCH`/`DELETE /diary/:listenId`, `PUT`/`DELETE /boards/:boardId/listens/:listenId` | authenticated user | 30 attempts per 10 minutes |

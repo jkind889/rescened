@@ -1015,8 +1015,10 @@ export function AlbumDetail()
                         {album.genres?.length > 0 && (
                             <ul className="album-genre-list" aria-label="Genres">
                                 {album.genres.map((genre, index) => (
-                                    <li key={genre.genreId} className={`album-genre-badge ${index === 0 ? "album-genre-badge-primary" : "album-genre-badge-secondary"}`}>
-                                        {genre.name}
+                                    <li key={genre.genreId}>
+                                        <Link className={`album-genre-badge ${index === 0 ? "album-genre-badge-primary" : "album-genre-badge-secondary"}`} to={`/genre/${genre.slug}`}>
+                                            {genre.name}
+                                        </Link>
                                     </li>
                                 ))}
                             </ul>

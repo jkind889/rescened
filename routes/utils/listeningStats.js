@@ -5,6 +5,9 @@ const Listen = require("../../models/Listen");
 const Review = require("../../models/Reviews");
 const TrackRanking = require("../../models/TrackRanking");
 const { normalizeCatalogAlbum } = require("./albumCatalog");
+const { Genre } = require("../../models/Genre");
+const { toPublicGenre } = require("../../lib/genres/read");
+const { isGenresEnabled } = require("./serverConfig");
 const { unplayedSavedIds } = require("./boardPick");
 const { persistedReviewId } = require("./reviewInteractions");
 
@@ -147,6 +150,29 @@ function topArtists(albumRows) {
     .map(({ name, listenCount, albumCount }) => ({ name, listenCount, albumCount }));
 }
 
+// Every genre on a listened album gets that album's listens, the way an
+// artist does. Retired genres drop out.
+async function topGenres(albumRows) {
+  const counts = new Map();
+  for (const row of albumRows) {
+    for (const id of row.album.genres || []) {
+      const key = String(id);
+      const entry = counts.get(key) || { listenCount: 0, albumCount: 0, lastListenedOn: "" };
+      entry.listenCount += row.listenCount;
+      entry.albumCount += 1;
+      if (row.lastListenedOn > entry.lastListenedOn) entry.lastListenedOn = row.lastListenedOn;
+      counts.set(key, entry);
+    }
+  }
+  if (!counts.size) return [];
+  const genres = await Genre.find({ _id: { $in: [...counts.keys()] }, status: "active" }).lean();
+  return genres
+    .map((genre) => ({ genre: toPublicGenre(genre), ...counts.get(String(genre._id)) }))
+    .sort(byCountThenRecent)
+    .slice(0, TOP_LIMIT)
+    .map(({ genre, listenCount, albumCount }) => ({ genre, listenCount, albumCount }));
+}
+
 function eras(albumRows, year) {
   const decades = new Map();
   let unknown = 0;
@@ -228,7 +254,7 @@ async function listenAlbums(userId, period) {
         foreignField: "_id",
         pipeline: [{
           $project: {
-            _id: 0, albumId: 1, title: 1, artistDisplayName: 1, releaseYear: 1, cover: 1, artistCredits: 1, tracks: { $literal: [] },
+            _id: 0, albumId: 1, title: 1, artistDisplayName: 1, releaseYear: 1, cover: 1, artistCredits: 1, genres: 1, tracks: { $literal: [] },
             trackCount: { $size: { $ifNull: ["$tracks", []] } },
             timedTrackCount: { $size: { $filter: { input: { $ifNull: ["$tracks", []] }, cond: { $gt: ["$$this.durationMs", 0] } } } },
             runtimeMs: { $sum: { $ifNull: ["$tracks.durationMs", []] } },
@@ -304,9 +330,10 @@ async function libraryStats(userId) {
 async function listeningStats(userId, query, now = new Date()) {
   const period = parseStatsQuery(query, now);
   const [days, albums] = await Promise.all([listenDays(userId, period), listenAlbums(userId, period)]);
-  const [reviews, library] = await Promise.all([
+  const [reviews, library, genres] = await Promise.all([
     reviewStats(userId, period, albums.map((row) => row.albumCatalogId)),
     libraryStats(userId),
+    isGenresEnabled() ? topGenres(albums) : null,
   ]);
   return {
     userId,
@@ -316,6 +343,8 @@ async function listeningStats(userId, query, now = new Date()) {
     listening: { ...summarizeListening(days, period.from, period.to), distinctAlbums: albums.length },
     topAlbums: topAlbums(albums),
     topArtists: topArtists(albums),
+    // Present only while genres are enabled.
+    ...(genres ? { topGenres: genres } : {}),
     eras: eras(albums, period.year),
     listeningTime: listeningTime(albums),
     reviews,
@@ -336,6 +365,7 @@ module.exports = {
   summarizeListening,
   topAlbums,
   topArtists,
+  topGenres,
   versusCommunity,
   weekdayTotals,
 };

@@ -416,3 +416,76 @@
   color: var(--app-muted);
   overflow-wrap: anywhere;
 }
+
+.search-genre-filter {
+  color: var(--app-muted);
+  font-size: .85rem;
+  margin: .4rem 0 0;
+}
+
+.genre-page-header {
+  display: grid;
+  gap: .6rem;
+}
+
+.genre-page-related {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem .6rem;
+  font-size: .85rem;
+}
+
+.genre-page-related a {
+  border: 1px solid var(--app-line-strong);
+  color: var(--app-text);
+  padding: .25rem .55rem;
+  text-decoration: none;
+}
+
+.genre-page-related a:hover {
+  border-color: var(--app-accent);
+}
+
+.genre-page-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .6rem 1rem;
+  margin: 1rem 0;
+}
+
+.genre-page-search {
+  display: flex;
+  flex: 1 1 240px;
+  gap: .4rem;
+}
+
+.genre-page-search input {
+  background: var(--app-surface-strong);
+  border: 1px solid var(--app-line-strong);
+  color: var(--app-text);
+  flex: 1;
+  font: inherit;
+  min-height: 40px;
+  min-width: 0;
+  padding: .4rem .6rem;
+}
+
+.genre-page-sort {
+  display: flex;
+  gap: .4rem;
+}
+
+.genre-page-rating {
+  color: var(--app-muted);
+  font-size: .75rem;
+}
+
+.genre-page-sort button[aria-pressed="true"] {
+  border-color: var(--app-accent);
+}
+
+.genre-page-more {
+  margin-top: 1rem;
+}

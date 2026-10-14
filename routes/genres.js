@@ -2,6 +2,7 @@ const express = require("express");
 const { isGenresEnabled } = require("./utils/serverConfig");
 const { searchRateLimit } = require("./utils/rateLimit");
 const { genreDetail, listTopLevelGenres, searchGenres } = require("../lib/genres/read");
+const { genreAlbums } = require("../lib/genres/browse");
 
 const router = express.Router();
 
@@ -25,6 +26,15 @@ router.get("/search", searchRateLimit, async (req, res) => {
     res.json({ results: await searchGenres(req.query.q) });
   } catch (error) {
     res.status(500).json({ error: "Failed to search genres" });
+  }
+});
+
+router.get("/:slug/albums", searchRateLimit, async (req, res) => {
+  try {
+    return res.json(await genreAlbums(req.params.slug, req.query || {}));
+  } catch (error) {
+    if (error.status && error.status < 500) return res.status(error.status).json({ error: error.message, code: error.code });
+    return res.status(500).json({ error: "Failed to fetch genre albums" });
   }
 });
 
