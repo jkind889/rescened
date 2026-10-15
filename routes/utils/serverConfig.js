@@ -16,6 +16,10 @@ function isExternalAlbumSearchEnabled(env = process.env) {
   return String(env.EXTERNAL_ALBUM_SEARCH_ENABLED || "").trim().toLowerCase() === "true";
 }
 
+function isGenresEnabled(env = process.env) {
+  return String(env.GENRES_ENABLED || "").trim().toLowerCase() === "true";
+}
+
 function parseOriginList(value) {
   return String(value || "")
     .split(",")
@@ -118,6 +122,7 @@ module.exports = {
   getAllowedOrigins,
   getConfiguredOrigins,
   isExternalAlbumSearchEnabled,
+  isGenresEnabled,
   normalizeOrigin,
   parseOriginList,
   parsePort,

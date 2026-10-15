@@ -61,6 +61,12 @@ const RATE_LIMITS = {
     duration: 10 * 60,
     message: "Too many track ranking updates. Please try again soon.",
   },
+  profileStats: {
+    keyPrefix: "rescened:profile-stats",
+    points: 60,
+    duration: 10 * 60,
+    message: "Too many stats requests. Please try again soon.",
+  },
   submissionCreate: {
     keyPrefix: "rescened:submission-create",
     points: 6,
@@ -72,6 +78,14 @@ const RATE_LIMITS = {
     points: 20,
     duration: 10 * 60,
     message: "Too many suggestion updates. Please try again soon.",
+  },
+  // Genre suggestions are small and frequent, so they get their own bucket
+  // rather than sharing the six-per-ten-minutes album suggestion limit.
+  genreSuggestion: {
+    keyPrefix: "rescened:genre-suggestion",
+    points: 20,
+    duration: 60 * 60,
+    message: "Too many genre suggestions. Please try again later.",
   },
   moderationMutation: {
     keyPrefix: "rescened:moderation-mutation",
@@ -213,9 +227,11 @@ const diaryMutationLimiter = createRateLimiter(RATE_LIMITS.diaryMutation);
 const reviewMutationLimiter = createRateLimiter(RATE_LIMITS.reviewMutation);
 const likeMutationLimiter = createRateLimiter(RATE_LIMITS.likeMutation);
 const trackRankingMutationLimiter = createRateLimiter(RATE_LIMITS.trackRankingMutation);
+const profileStatsLimiter = createRateLimiter(RATE_LIMITS.profileStats);
 const submissionCreateLimiter = createRateLimiter(RATE_LIMITS.submissionCreate);
 const submissionMutationLimiter = createRateLimiter(RATE_LIMITS.submissionMutation);
 const moderationMutationLimiter = createRateLimiter(RATE_LIMITS.moderationMutation);
+const genreSuggestionLimiter = createRateLimiter(RATE_LIMITS.genreSuggestion);
 
 module.exports = {
   RATE_LIMIT_ERROR_CODE,
@@ -250,6 +266,12 @@ module.exports = {
     keyGenerator: getAuthenticatedUserRateLimitKey,
     message: RATE_LIMITS.likeMutation.message,
   }),
+  // Stats run several aggregations per request and are readable without
+  // signing in, so they get their own bucket keyed by user, or IP when anonymous.
+  profileStatsRateLimit: createRateLimitMiddleware(profileStatsLimiter, {
+    keyGenerator: getUserOrIpRateLimitKey,
+    message: RATE_LIMITS.profileStats.message,
+  }),
   reviewCreateRateLimit: createRateLimitMiddleware(reviewCreateLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,
     message: RATE_LIMITS.reviewCreate.message,
@@ -269,6 +291,10 @@ module.exports = {
   submissionMutationRateLimit: createRateLimitMiddleware(submissionMutationLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,
     message: RATE_LIMITS.submissionMutation.message,
+  }),
+  genreSuggestionRateLimit: createRateLimitMiddleware(genreSuggestionLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.genreSuggestion.message,
   }),
   moderationMutationRateLimit: createRateLimitMiddleware(moderationMutationLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,

@@ -7,6 +7,9 @@ const mongoose = require("mongoose");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const TrackRanking = require("../models/TrackRanking");
+const Follow = require("../models/Follow");
+const UserProfile = require("../models/UserProfile");
+const { listUserRankings } = require("../routes/utils/trackRankings");
 
 const enabled = process.env.RUN_MONGO_INTEGRATION === "true";
 let replSet;
@@ -51,7 +54,7 @@ test.before(async () => {
 
 test.beforeEach(async () => {
   if (!enabled) return;
-  await Promise.all([AlbumCatalog.deleteMany({}), TrackRanking.deleteMany({})]);
+  await Promise.all([AlbumCatalog.deleteMany({}), TrackRanking.deleteMany({}), Follow.deleteMany({}), UserProfile.deleteMany({})]);
   album = await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Ranked", artistDisplayName: "Artist", catalogSource: "manual", tracks });
   bare = await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "No tracks", artistDisplayName: "Artist", catalogSource: "manual" });
 });
@@ -125,7 +128,7 @@ integration("albums without rankings or a tracklist return empty standings", asy
 
   const noTracklist = await request("GET", `/track-rankings/album/${bare.albumId}`);
   assert.equal(noTracklist.status, 200);
-  assert.deepEqual(noTracklist.body, { albumId: bare.albumId, rankingCount: 0, tracks: [], viewerRanking: null });
+  assert.deepEqual(noTracklist.body, { albumId: bare.albumId, scope: "community", rankingCount: 0, confidence: "early", tracks: [], viewerRanking: null, viewerComparison: null });
 
   const invalidId = await request("GET", `/track-rankings/album/${String(album._id)}`);
   assert.equal(invalidId.status, 400);
@@ -188,4 +191,61 @@ integration("invalid rankings are rejected before any write", async () => {
   assert.equal((await save("u1", ["a"], crypto.randomUUID())).status, 404);
   assert.equal((await save("u1", ["a"], String(album._id))).status, 400);
   assert.equal(await TrackRanking.countDocuments({}), 0);
+});
+
+integration("circle standings count the viewer and public followed profiles only, and comparison excludes the viewer", async () => {
+  await save("viewer", ["a", "b", "c", "d"]);
+  await save("friend", ["a", "b", "c", "d"]);
+  await save("private-friend", ["d", "c", "b", "a"]);
+  await save("stranger", ["d", "c", "b", "a"]);
+  await Follow.create([{ followerId: "viewer", followingId: "friend" }, { followerId: "viewer", followingId: "private-friend" }]);
+  await UserProfile.create({ userId: "private-friend", isPrivate: true });
+
+  const circle = await request("GET", `/track-rankings/album/${album.albumId}?scope=circle`, "viewer");
+  assert.equal(circle.status, 200);
+  assert.equal(circle.body.scope, "circle");
+  assert.equal(circle.body.rankingCount, 2, "the private follow is left out");
+  assert.equal(circle.body.confidence, "early");
+  assert.deepEqual(circle.body.tracks.map((track) => track.trackId), ["a", "b", "c", "d"]);
+  assert.equal(circle.body.viewerComparison, null);
+
+  const community = await request("GET", `/track-rankings/album/${album.albumId}`, "viewer");
+  assert.equal(community.body.rankingCount, 4);
+  assert.equal(community.body.confidence, "settled");
+  assert.equal(community.body.viewerComparison.rankingCount, 3, "the viewer's own ranking is not compared with itself");
+  assert.equal(community.body.viewerComparison.agreement, 0, "two of three others reversed the order, so it is fully reversed");
+  assert.equal(community.body.viewerComparison.hottestTake.trackId, "a");
+
+  assert.equal((await request("GET", `/track-rankings/album/${album.albumId}?scope=circle`)).status, 401);
+  assert.equal((await request("GET", `/track-rankings/album/${album.albumId}?scope=everyone`, "viewer")).status, 400);
+});
+
+integration("a comparison with fewer than three other rankers is withheld", async () => {
+  await save("viewer", ["a", "b", "c", "d"]);
+  await save("only-other", ["d", "c", "b", "a"]);
+  const withheld = await request("GET", `/track-rankings/album/${album.albumId}`, "viewer");
+  assert.deepEqual(withheld.body.viewerComparison, { rankingCount: 1, confidence: "early", agreement: null, hottestTake: null, tracks: [] });
+});
+
+integration("profile ranking pages skip stale rankings before the limit and survive a deleted cursor album", async () => {
+  const second = await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Second", artistDisplayName: "Artist", catalogSource: "manual", tracks });
+  const deleted = await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Deleted", artistDisplayName: "Artist", catalogSource: "manual", tracks });
+  const at = (minutes) => new Date(Date.UTC(2026, 9, 1, 0, minutes));
+  // Newest first: a ranking whose tracks are all gone, one of a deleted album, then two live ones.
+  await TrackRanking.collection.insertMany([
+    { userId: "owner", albumCatalogId: bare._id, rankedTrackIds: ["gone"], createdAt: at(4), updatedAt: at(4) },
+    { userId: "owner", albumCatalogId: deleted._id, rankedTrackIds: ["a"], createdAt: at(3), updatedAt: at(3) },
+    { userId: "owner", albumCatalogId: second._id, rankedTrackIds: ["b", "a"], createdAt: at(2), updatedAt: at(2) },
+    { userId: "owner", albumCatalogId: album._id, rankedTrackIds: ["c"], createdAt: at(1), updatedAt: at(1) },
+  ]);
+  await AlbumCatalog.deleteOne({ _id: deleted._id });
+
+  const first = await listUserRankings("owner", { limit: "1" });
+  assert.deepEqual(first.rankings.map((entry) => entry.album.albumId), [second.albumId], "stale rows do not consume the page");
+  assert.ok(first.nextCursor);
+
+  await AlbumCatalog.deleteOne({ _id: second._id });
+  const next = await listUserRankings("owner", { limit: "1", cursor: first.nextCursor });
+  assert.deepEqual(next.rankings.map((entry) => entry.album.albumId), [album.albumId], "a deleted cursor album pages by time");
+  assert.equal(next.nextCursor, null);
 });

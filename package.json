@@ -19,6 +19,8 @@
     "catalog:validate": "node scripts/validateCatalogDataset.js",
     "catalog:import": "node scripts/importCatalogDataset.js",
     "catalog:backfill-covers": "node scripts/backfillMissingAlbumCovers.js",
+    "genres:import": "node scripts/importGenres.js",
+    "genres:merge": "node scripts/mergeGenres.js",
     "db:reconcile-community-state": "node scripts/reconcileCommunityPublication.js",
     "db:migrate:review-ids": "node scripts/migrateReviewIds.js",
     "db:migrate:legacy": "node scripts/migrateLegacyDatabase.js",

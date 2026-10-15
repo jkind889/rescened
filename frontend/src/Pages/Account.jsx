@@ -15,6 +15,8 @@ import BoardPreview from "../Components/BoardPreview";
 import LastfmConnectionPanel from "../Components/LastfmConnectionPanel.jsx";
 import ShareButton from "../Components/ShareButton";
 import DiaryCalendar from "../features/diary/DiaryCalendar";
+import ProfileRankings from "../features/rankings/ProfileRankings";
+import ProfileStats from "../features/stats/ProfileStats";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import { REVIEW_SORTS, REVIEW_SORT_OPTIONS } from "../utils/reviewSorts";
 
@@ -24,6 +26,8 @@ const tabs = [
   { id: "reviews", label: "Reviews" },
   { id: "activity", label: "Activity" },
   { id: "diary", label: "Diary" },
+  { id: "stats", label: "Stats" },
+  { id: "rankings", label: "Rankings" },
   { id: "boards", label: "Boards" },
   { id: "network", label: "Network" },
   { id: "lastfm", label: "Last.fm" },
@@ -894,6 +898,7 @@ export function Account() {
             liked_album: "Liked",
             liked_review: "Liked",
             follow: "Followed",
+            ranked_album: "Ranked",
           };
           const actionTextByType = {
             saved_album: "saved",
@@ -902,6 +907,7 @@ export function Account() {
             liked_album: "liked",
             liked_review: "liked a review of",
             follow: "followed",
+            ranked_album: "ranked the tracks on",
           };
           const actionLabel = actionLabelByType[activity.type] || "Activity";
           const actionText = actionTextByType[activity.type] || "updated";
@@ -964,6 +970,13 @@ export function Account() {
                   <p className="profile-listen-date">
                     Listened on <time dateTime={activity.listenedOn}>{formatDate(`${activity.listenedOn}T12:00:00`)}</time>
                   </p>
+                )}
+                {activity.type === "ranked_album" && activity.topTracks?.length > 0 && (
+                  <ol className="profile-activity-ranking">
+                    {activity.topTracks.map((track) => (
+                      <li key={track.trackId}><span>{track.position}</span>{track.title || "Untitled Track"}</li>
+                    ))}
+                  </ol>
                 )}
                 {activity.reviewText && <p className="profile-review-copy">{activity.reviewText}</p>}
                 {activity.type === "review" && (
@@ -1186,6 +1199,14 @@ export function Account() {
       return <DiaryCalendar key={profileUserId} userId={isPublicProfile ? profileUserId : ""} />;
     }
 
+    if (activeTab === "stats") {
+      return <ProfileStats key={profileUserId} userId={profileUserId} isOwner={canManageProfile} />;
+    }
+
+    if (activeTab === "rankings") {
+      return <ProfileRankings key={profileUserId} userId={profileUserId} isOwner={canManageProfile} />;
+    }
+
     if (activeTab === "boards") {
       return renderBoards();
     }
@@ -1400,6 +1421,7 @@ export function Account() {
                           liked_album: "Liked",
                           liked_review: "Liked",
                           follow: "Followed",
+                          ranked_album: "Ranked",
                         };
                         const actionLabel = actionLabelByType[activity.type] || "Activity";
                         const activityPath = activity.type === "follow" && targetUser.userId

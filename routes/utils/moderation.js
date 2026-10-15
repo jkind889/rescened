@@ -9,7 +9,7 @@ const SUBMISSION_STATUSES = new Set([
   "duplicate",
   "withdrawn",
 ]);
-const SUBMISSION_TYPES = new Set(["new_album", "catalog_correction"]);
+const SUBMISSION_TYPES = new Set(["new_album", "catalog_correction", "genre_suggestion"]);
 const CORRECTION_FIELDS = new Set(["title", "artists", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"]);
 const MODERATOR_DEFAULT_PAGE_LIMIT = 20;
 const MODERATOR_MAX_PAGE_LIMIT = 50;
@@ -97,7 +97,7 @@ function normalizeCommandBody(body, action) {
     };
   }
   if (action === "approve") {
-    assertKeys(body, new Set(["albumId", "confirmPossibleDuplicate", "reason", "applyFields"]));
+    assertKeys(body, new Set(["albumId", "confirmPossibleDuplicate", "reason", "applyFields", "genreDecisions"]));
     if (body.albumId !== undefined && body.albumId !== null && body.albumId !== "") {
       body.albumId = publicUuid(body.albumId, "albumId");
     }
@@ -117,6 +117,8 @@ function normalizeCommandBody(body, action) {
       confirmPossibleDuplicate: body.confirmPossibleDuplicate === true,
       confirmPossibleDuplicateProvided: Object.prototype.hasOwnProperty.call(body, "confirmPossibleDuplicate"),
       applyFields: body.applyFields,
+      // Checked against the stored suggestion by the genre approval itself.
+      genreDecisions: body.genreDecisions,
       reason: optionalReason(body.reason),
     };
   }
@@ -136,7 +138,7 @@ function parseStatusFilter(value) {
 function parseSubmissionTypeFilter(value) {
   if (value === undefined || value === null || value === "") return undefined;
   if (typeof value !== "string" || !SUBMISSION_TYPES.has(value.trim())) {
-    fail("submissionType must be new_album or catalog_correction");
+    fail("submissionType must be new_album, catalog_correction, or genre_suggestion");
   }
   return value.trim();
 }

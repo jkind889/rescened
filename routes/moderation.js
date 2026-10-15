@@ -4,6 +4,7 @@ const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
 const { isModerator, serializeSubmission } = require("./utils/submissions");
 const { approveAlbumSubmission } = require("./utils/approval");
+const { genreReview } = require("../lib/genres/review");
 const {
   ModerationConflictError,
   ModerationValidationError,
@@ -169,10 +170,12 @@ function moderatorSummary(submission) {
 }
 
 async function moderatorDetail(submission) {
-  return {
+  const detail = {
     suggestion: serializeSubmission(submission, { detail: true, moderator: true }),
     duplicateCandidates: await duplicateCandidates(submission),
   };
+  if (asPlain(submission)?.submissionType === "genre_suggestion") detail.genreReview = await genreReview(submission);
+  return detail;
 }
 
 function stateQuery(submissionId, currentRevision) {
@@ -190,6 +193,9 @@ async function transition(req, res, action) {
     if (!current) return res.status(404).json({ error: "Suggestion not found", code: "SUGGESTION_NOT_FOUND" });
     if (current.status !== "pending") {
       return res.status(409).json({ error: "Only pending suggestions can be moderated", code: "INVALID_SUBMISSION_STATE" });
+    }
+    if (action === "mark_duplicate" && current.submissionType === "genre_suggestion") {
+      return res.status(400).json({ error: "Genre suggestions cannot be marked as duplicates; reject them instead", code: "INVALID_MODERATION_REQUEST" });
     }
 
     const now = new Date();
@@ -209,6 +215,8 @@ async function transition(req, res, action) {
       stateQuery(req.params.submissionId, current.currentRevision),
       {
         $set: set,
+        // Rejected and duplicate suggestions close; needs-changes stays open.
+        ...(action === "request_changes" ? {} : { $unset: { openGenreSuggestionKey: "" } }),
         $push: {
           moderationHistory: {
             actorUserId: req.userId,

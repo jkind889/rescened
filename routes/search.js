@@ -13,7 +13,8 @@ const {
   externalSearchRateLimit,
   searchRateLimit,
 } = require("./utils/rateLimit");
-const { isExternalAlbumSearchEnabled } = require("./utils/serverConfig");
+const { isExternalAlbumSearchEnabled, isGenresEnabled } = require("./utils/serverConfig");
+const { genreFilterIds } = require("../lib/genres/browse");
 
 const router = express.Router();
 const DEFAULT_LIMIT = 24;
@@ -91,11 +92,11 @@ function externalSearchUnavailable(res) {
   });
 }
 
-async function findLocal(query, { skip = 0, limit, paginated = false }) {
+async function findLocal(query, { skip = 0, limit, paginated = false, genreIds = null }) {
   // Search exposes only a next-page flag, not a total. One extra row answers
   // that question without counting every match across the catalog.
   const albums = await AlbumCatalog.aggregate(buildRankedCatalogSearchPipeline(query, {
-    skip, limit: limit + (paginated ? 1 : 0),
+    skip, limit: limit + (paginated ? 1 : 0), genreIds,
   }));
   return { albums: paginated ? albums.slice(0, limit) : albums, hasNextPage: paginated && albums.length > limit };
 }
@@ -105,19 +106,29 @@ router.get("/search", searchRateLimit, async (req, res) => {
   if (!query) return res.json([]);
 
   try {
+    // Optional genre filter: the genre (by slug or alias slug) and its
+    // sub-genres. Local catalog albums only; external candidates have none.
+    let genreFilter = null;
+    if (req.query.genre !== undefined) {
+      if (!isGenresEnabled()) return res.status(503).json({ error: "Genres are currently disabled", code: "GENRES_DISABLED" });
+      if (typeof req.query.genre !== "string") return res.status(400).json({ error: "genre must be a slug", code: "INVALID_GENRE_FILTER" });
+      genreFilter = await genreFilterIds(req.query.genre);
+      if (!genreFilter) return res.status(404).json({ error: "Genre not found", code: "GENRE_NOT_FOUND" });
+    }
     const limit = getLimit(req.query.limit);
     if (req.query.page !== undefined) {
       const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1);
-      const result = await findLocal(query, { skip: (page - 1) * limit, limit, paginated: true });
+      const result = await findLocal(query, { skip: (page - 1) * limit, limit, paginated: true, genreIds: genreFilter?.ids });
       return res.json({
         results: result.albums.map(toSearchResult),
         page,
         limit,
         hasPreviousPage: page > 1,
         hasNextPage: result.hasNextPage,
+        ...(genreFilter ? { genre: genreFilter.genre } : {}),
       });
     }
-    const result = await findLocal(query, { limit });
+    const result = await findLocal(query, { limit, genreIds: genreFilter?.ids });
     return res.json(result.albums.map(toSearchResult));
   } catch (error) {
     console.error(error);

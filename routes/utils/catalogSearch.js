@@ -63,7 +63,7 @@ function artistExpression(pattern) {
   ] };
 }
 
-function buildRankedCatalogSearchPipeline(value, { skip = 0, limit = 24 } = {}) {
+function buildRankedCatalogSearchPipeline(value, { skip = 0, limit = 24, genreIds = null } = {}) {
   const query = normalizeQuery(value);
   const pattern = buildRankedSearchPattern(query);
   const tokens = [...new Set(query.split(" "))];
@@ -84,7 +84,7 @@ function buildRankedCatalogSearchPipeline(value, { skip = 0, limit = 24 } = {}) 
     : textMatch;
   const exact = `^${pattern}$`;
   return [
-    { $match: match },
+    { $match: genreIds ? { $and: [match, { genres: { $in: genreIds } }] } : match },
     { $set: { searchRank: { $switch: { branches: [
       ...(preferredPattern ? [{ case: artistExpression(preferredPattern), then: -1 }] : []),
       { case: artistExpression(exact), then: 0 },

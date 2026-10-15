@@ -86,6 +86,12 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `CATALOG_ALBUM_NOT_FOUND` | `409` | An approval command supplies an `albumId` that does not resolve to a usable catalog album. |
 | `CATALOG_TARGET_MISSING` | `409` | A previously created correction has lost its target album before revision or approval. |
 
+### Listening stats
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `INVALID_STATS_REQUEST` | `400` | A stats request used an unsupported field, a `period` other than `2y` or a calendar year inside the two-year window, or an `automatic` value other than `include` or `exclude`. See [the stats guide](LISTENING_STATS.md). |
+
 ### Track rankings
 
 `GET /track-rankings/album/:albumId` is public; `PUT` and `DELETE` require Clerk authentication and share the `trackRankingMutation` limit. An unknown album returns the existing code-less `404`, and a malformed `albumId` the code-less `400`. See [track rankings](TRACK_RANKINGS.md) for the request and response contract.
@@ -94,6 +100,36 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | --- | --- | --- |
 | `INVALID_TRACK_RANKING` | `400` | The body is not exactly `{ rankedTrackIds }`, or the list is empty, too long, contains duplicates or non-strings, or names a track that is not on the album's current tracklist. |
 | `TRACKLIST_UNAVAILABLE` | `409` | The album has no mapped tracklist yet, so it cannot be ranked. |
+| `INVALID_TRACK_RANKING_REQUEST` | `400` | A standings read used a `scope` other than `community` or `circle`, or a profile ranking list used an unsupported field or an invalid `limit`. |
+| `INVALID_TRACK_RANKING_CURSOR` | `400` | A profile ranking-list cursor is malformed or names an album that no longer exists. |
+
+### Community genres
+
+The `/genres` routes are public reads. See [community genres](COMMUNITY_GENRES.md).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `GENRES_DISABLED` | `503` | `GENRES_ENABLED` is off. Search returns it only when a `genre` filter is sent. |
+| `GENRE_NOT_FOUND` | `404` | No active genre has that slug or alias slug. Retired genres return this too. `GET /search/search?genre=` returns it for an unknown genre filter. |
+| `INVALID_GENRE_BROWSE` | `400` | `GET /genres/:slug/albums` got an unsupported query field, a `sort` other than `rating` or `recent`, a non-boolean `includeChildren`, or a `limit` outside 1–48. |
+| `INVALID_GENRE_CURSOR` | `400` | A genre browse cursor is malformed or belongs to the other sort. |
+| `INVALID_GENRE_FILTER` | `400` | `GET /search/search` got a `genre` that isn't a single string. |
+| `GENRE_RETIRED` | `400` | A genre suggestion adds, promotes, or uses as a parent a retired genre, or proposes a name matching one. Removing a retired genre from an album is allowed. |
+| `GENRE_SUGGESTION_EXISTS` | `409` | The user already has a pending or needs-changes genre suggestion for this album. `details[0].submissionId` names it when known. |
+| `GENRE_LIMIT_EXCEEDED` | `409` | The suggestion would leave the album with more than 5 genres. |
+| `GENRE_PROPOSAL_LIMIT` | `409` | The user would have more than 10 proposed new genre names across their open genre suggestions. |
+| `GENRE_NAME_CONFLICT` | `409` | Approval would create a genre, or add an alias, whose name or slug another genre already uses. `details[0]` names that genre. Nothing was written. |
+| `GENRES_CHANGED` | `409` | The album's `genresRevision` changed between the approval's read and write. Retry the approval. |
+| `INVALID_GENRE_COMMAND` | `400` | A moderator vocabulary command has an unknown field, a missing `expectedRevision`, an invalid name or parent, no change, or (for retire) no reason. |
+| `GENRE_REVISION_CONFLICT` | `409` | The genre's `revision` no longer matches `expectedRevision`. Reload the genre and retry. |
+| `GENRE_HAS_CHILDREN` | `409` | The genre has active sub-genres, so it can't be retired, given a parent, or merged away. |
+| `GENRE_NOT_TOP_LEVEL` | `409` | The chosen parent itself has a parent; genres nest one level deep. |
+| `INVALID_GENRE_STATE` | `409` | `restore` was sent for a genre that isn't retired. |
+| `GENRE_COMMAND_UNAVAILABLE` | `503` | Vocabulary commands need a transaction-capable MongoDB deployment. |
+
+At approval, `GENRE_RETIRED` and `GENRE_NOT_FOUND` are `409`: an added genre was retired, or a mapped genre no longer exists, after the suggestion was made. `GENRE_LIMIT_EXCEEDED` (`409`) also applies at approval when the accepted operations would leave more than 5 genres. Approval failures roll back every write, including genres created in the same approval.
+
+Invalid genre suggestion bodies use `INVALID_SUBMISSION`, and missing albums use `CATALOG_TARGET_NOT_FOUND`, as for corrections. Marking a genre suggestion as a duplicate returns `400 INVALID_MODERATION_REQUEST`.
 
 ### Submission and moderation conflicts
 
@@ -129,16 +165,19 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Bucket | Protected routes | Key | Budget |
 | --- | --- | --- | --- |
 | Global API | Every API route except `/health` | IP | 300 requests per 5 minutes |
-| Local search | `GET /search/search` | IP | 90 requests per minute |
+| Local search | `GET /search/search`, `GET /genres/search`, `GET /genres/:slug/albums` | IP | 90 requests per minute |
 | External search | `GET /search/external`, `GET /search/musicbrainz/release-group/:mbid` | IP | 30 requests per minute |
 | Album save | `POST /boards/:boardId/albums` | authenticated user | 30 attempts per 10 minutes |
 | Diary mutation | `POST /diary`, `PATCH`/`DELETE /diary/:listenId`, `PUT`/`DELETE /boards/:boardId/listens/:listenId` | authenticated user | 30 attempts per 10 minutes |
 | Review create | `POST /reviews/review` | authenticated user | 6 attempts per 10 minutes |
 | Review mutation | `PATCH` and `DELETE /reviews/review/user/:id` | authenticated user | 30 attempts per 10 minutes |
 | Like mutation | `PUT /likes/album/:albumId`, `PUT /likes/review/:reviewId` | authenticated user | 120 attempts per 10 minutes |
+| Track ranking mutation | `PUT` and `DELETE /track-rankings/album/:albumId` | authenticated user | 60 attempts per 10 minutes |
+| Profile stats | `GET /profile/me/stats`, `GET /profile/:userId/stats` | signed-in user, or IP when anonymous | 60 requests per 10 minutes |
 | Suggestion create | `POST /suggestions`, `POST /suggestions/corrections` | authenticated user | 6 attempts per 10 minutes |
 | Suggestion mutation | `POST /suggestions/:submissionId/revise`, `POST /suggestions/:submissionId/withdraw` | authenticated user | 20 attempts per 10 minutes |
-| Moderation mutation | Request-changes, reject, duplicate, and approve commands | authenticated moderator | 120 attempts per 10 minutes |
+| Genre suggestion | `POST /suggestions/genres` | authenticated user | 20 attempts per hour |
+| Moderation mutation | Request-changes, reject, duplicate, and approve commands, and genre vocabulary commands | authenticated moderator | 120 attempts per 10 minutes |
 
 The current implementation uses in-process memory. Counters reset on restart and are not shared between workers or instances. `TRUST_PROXY_HOPS` must match the real proxy chain so IP keys are neither collapsed onto the proxy nor client-spoofable. Unexpected limiter infrastructure errors currently log and fail open; ordinary exhausted buckets fail closed with `429 RATE_LIMITED`.
 
@@ -313,6 +352,43 @@ Row statuses are `resolved` in dry-run mode, `updated` after a successful apply,
 
 Source: [`scripts/backfillMissingAlbumCovers.js`](../scripts/backfillMissingAlbumCovers.js).
 
+## Genre seed command codes
+
+| Code | Meaning |
+| --- | --- |
+| `GENRE_SEED_FAILED` | Generic fatal seed failure. |
+| `INVALID_ARGUMENTS` | CLI flags are invalid, duplicated, or contradictory, or `--apply` lacks a 64-character `--expect-sha256`. |
+| `INVALID_GENRE_DATASET` | The envelope or a row fails validation. `details` lists each JSON pointer and problem. |
+| `GENRE_DATASET_READ_FAILED` | The dataset file cannot be read. |
+| `GENRE_DATASET_TOO_LARGE` | The dataset exceeds 512 KiB. |
+| `GENRE_DATASET_MALFORMED_JSON` | The dataset is not valid JSON. |
+| `GENRE_DATASET_CHECKSUM_MISSING` | The `<dataset>.sha256` sidecar is absent. |
+| `GENRE_DATASET_CHECKSUM_MISMATCH` | The dataset differs from its sidecar or from `--expect-sha256`. |
+| `GENRE_SEED_CONFLICT` | A row's name, slug, or alias belongs to a different existing genre. Nothing was written. |
+| `GENRE_SEED_PLAN_CHANGED` | The vocabulary changed between the dry run and the apply transaction. Nothing was written. |
+| `TRANSACTION_UNAVAILABLE` | MongoDB is not a replica set or sharded deployment. |
+| `MISSING_MONGO_URI` | `MONGO_URI` was not supplied. |
+| `GENRE_SEED_COMMITTED_REPORT_FAILED` | The apply committed, but the report could not be written. This is not a rollback. |
+
+Source: [`scripts/importGenres.js`](../scripts/importGenres.js) and [`lib/genres/seed.js`](../lib/genres/seed.js).
+
+## Genre merge command codes
+
+| Code | Meaning |
+| --- | --- |
+| `GENRE_MERGE_FAILED` | Generic fatal merge failure. |
+| `INVALID_ARGUMENTS` | CLI flags are invalid, duplicated, or contradictory; the genres are the same; or `--apply` lacks a 64-character `--expect-plan-sha256`. |
+| `GENRE_NOT_FOUND` | No genre has the `--from` or `--into` slug. |
+| `GENRE_RETIRED` | The `--into` genre is retired. |
+| `GENRE_HAS_CHILDREN` | The `--from` genre has active sub-genres. `details` lists their slugs. |
+| `GENRE_MERGE_TOO_LARGE` | More than 5,000 albums would change in one transaction. |
+| `GENRE_MERGE_PLAN_CHANGED` | The plan no longer matches the reviewed `planSha256`, or an album or genre changed during the apply. Nothing was written. |
+| `TRANSACTION_UNAVAILABLE` | MongoDB is not a replica set or sharded deployment. |
+| `MISSING_MONGO_URI` | `MONGO_URI` was not supplied. |
+| `GENRE_MERGE_COMMITTED_REPORT_FAILED` | The apply committed, but the report could not be written. This is not a rollback. |
+
+Source: [`scripts/mergeGenres.js`](../scripts/mergeGenres.js) and [`lib/genres/merge.js`](../lib/genres/merge.js).
+
 ## Community reconciliation command codes
 
 | Code | Meaning |
@@ -482,12 +558,13 @@ These are not error codes, but they frequently appear beside them in API respons
 | Workflow | Values |
 | --- | --- |
 | Submission status | `pending`, `needs_changes`, `approved`, `rejected`, `duplicate`, `withdrawn` |
-| Submission type | `new_album`, `catalog_correction` |
-| Approval publication type | `catalog_created`, `catalog_linked`, `catalog_corrected` |
+| Submission type | `new_album`, `catalog_correction`, `genre_suggestion` |
+| Approval publication type | `catalog_created`, `catalog_linked`, `catalog_corrected`, `genres_updated` |
 | Catalog-fetch report | `running`, `complete`, `incomplete`, `failed` |
 | Cover resolver | `resolved`, `unresolved` |
 | Cover backfill row | `resolved`, `updated`, `unresolved`, `conflict`, `failed` |
 | Import action | `inserted`, `refreshed`, `unchanged` |
+| Genre seed plan | `create`, `unchanged`, `drift`, `conflicts` |
 | Migration catalog action | `created`, `reused`, `quarantined`, `archived` |
 | Migration ledger | `running`, `completed` |
 

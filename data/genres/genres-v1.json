@@ -1,0 +1,551 @@
+{
+  "schemaVersion": "1.0.0",
+  "datasetId": "rescened-genres-v1",
+  "genres": [
+    {
+      "name": "Rock"
+    },
+    {
+      "name": "Pop"
+    },
+    {
+      "name": "Hip hop",
+      "aliases": [
+        "Rap"
+      ]
+    },
+    {
+      "name": "R&B",
+      "aliases": [
+        "Rhythm and blues",
+        "RnB"
+      ]
+    },
+    {
+      "name": "Soul"
+    },
+    {
+      "name": "Funk"
+    },
+    {
+      "name": "Disco"
+    },
+    {
+      "name": "Jazz"
+    },
+    {
+      "name": "Blues"
+    },
+    {
+      "name": "Electronic",
+      "aliases": [
+        "Electronica"
+      ]
+    },
+    {
+      "name": "Country"
+    },
+    {
+      "name": "Folk"
+    },
+    {
+      "name": "Classical"
+    },
+    {
+      "name": "Metal"
+    },
+    {
+      "name": "Punk"
+    },
+    {
+      "name": "Reggae"
+    },
+    {
+      "name": "Latin"
+    },
+    {
+      "name": "Gospel"
+    },
+    {
+      "name": "Experimental"
+    },
+    {
+      "name": "African music"
+    },
+    {
+      "name": "Alternative rock",
+      "parent": "Rock",
+      "aliases": [
+        "Alt-rock"
+      ]
+    },
+    {
+      "name": "Indie rock",
+      "parent": "Rock"
+    },
+    {
+      "name": "Hard rock",
+      "parent": "Rock"
+    },
+    {
+      "name": "Psychedelic rock",
+      "parent": "Rock"
+    },
+    {
+      "name": "Progressive rock",
+      "parent": "Rock",
+      "aliases": [
+        "Prog rock"
+      ]
+    },
+    {
+      "name": "Post-rock",
+      "parent": "Rock"
+    },
+    {
+      "name": "Shoegaze",
+      "parent": "Rock"
+    },
+    {
+      "name": "Garage rock",
+      "parent": "Rock"
+    },
+    {
+      "name": "Grunge",
+      "parent": "Rock"
+    },
+    {
+      "name": "Folk rock",
+      "parent": "Rock"
+    },
+    {
+      "name": "Art rock",
+      "parent": "Rock"
+    },
+    {
+      "name": "Synth-pop",
+      "parent": "Pop",
+      "aliases": [
+        "Synthpop"
+      ]
+    },
+    {
+      "name": "Dream pop",
+      "parent": "Pop"
+    },
+    {
+      "name": "Indie pop",
+      "parent": "Pop"
+    },
+    {
+      "name": "Art pop",
+      "parent": "Pop"
+    },
+    {
+      "name": "Dance-pop",
+      "parent": "Pop"
+    },
+    {
+      "name": "K-pop",
+      "parent": "Pop",
+      "aliases": [
+        "Kpop"
+      ]
+    },
+    {
+      "name": "J-pop",
+      "parent": "Pop",
+      "aliases": [
+        "Jpop"
+      ]
+    },
+    {
+      "name": "Hyperpop",
+      "parent": "Pop"
+    },
+    {
+      "name": "Chamber pop",
+      "parent": "Pop"
+    },
+    {
+      "name": "Trap",
+      "parent": "Hip hop"
+    },
+    {
+      "name": "Boom bap",
+      "parent": "Hip hop"
+    },
+    {
+      "name": "Jazz rap",
+      "parent": "Hip hop"
+    },
+    {
+      "name": "Conscious hip hop",
+      "parent": "Hip hop",
+      "aliases": [
+        "Conscious rap"
+      ]
+    },
+    {
+      "name": "Gangsta rap",
+      "parent": "Hip hop"
+    },
+    {
+      "name": "Drill",
+      "parent": "Hip hop"
+    },
+    {
+      "name": "Cloud rap",
+      "parent": "Hip hop"
+    },
+    {
+      "name": "Alternative hip hop",
+      "parent": "Hip hop"
+    },
+    {
+      "name": "Grime",
+      "parent": "Hip hop"
+    },
+    {
+      "name": "Contemporary R&B",
+      "parent": "R&B"
+    },
+    {
+      "name": "Alternative R&B",
+      "parent": "R&B"
+    },
+    {
+      "name": "Neo-soul",
+      "parent": "R&B"
+    },
+    {
+      "name": "New jack swing",
+      "parent": "R&B"
+    },
+    {
+      "name": "Quiet storm",
+      "parent": "R&B"
+    },
+    {
+      "name": "Northern soul",
+      "parent": "Soul"
+    },
+    {
+      "name": "Psychedelic soul",
+      "parent": "Soul"
+    },
+    {
+      "name": "Southern soul",
+      "parent": "Soul"
+    },
+    {
+      "name": "P-Funk",
+      "parent": "Funk"
+    },
+    {
+      "name": "Boogie",
+      "parent": "Funk"
+    },
+    {
+      "name": "Nu-disco",
+      "parent": "Disco"
+    },
+    {
+      "name": "Italo disco",
+      "parent": "Disco"
+    },
+    {
+      "name": "Bebop",
+      "parent": "Jazz"
+    },
+    {
+      "name": "Hard bop",
+      "parent": "Jazz"
+    },
+    {
+      "name": "Cool jazz",
+      "parent": "Jazz"
+    },
+    {
+      "name": "Modal jazz",
+      "parent": "Jazz"
+    },
+    {
+      "name": "Free jazz",
+      "parent": "Jazz"
+    },
+    {
+      "name": "Jazz fusion",
+      "parent": "Jazz",
+      "aliases": [
+        "Fusion"
+      ]
+    },
+    {
+      "name": "Spiritual jazz",
+      "parent": "Jazz"
+    },
+    {
+      "name": "Vocal jazz",
+      "parent": "Jazz"
+    },
+    {
+      "name": "Delta blues",
+      "parent": "Blues"
+    },
+    {
+      "name": "Chicago blues",
+      "parent": "Blues"
+    },
+    {
+      "name": "Electric blues",
+      "parent": "Blues"
+    },
+    {
+      "name": "House",
+      "parent": "Electronic"
+    },
+    {
+      "name": "Deep house",
+      "parent": "Electronic"
+    },
+    {
+      "name": "Techno",
+      "parent": "Electronic"
+    },
+    {
+      "name": "Ambient",
+      "parent": "Electronic"
+    },
+    {
+      "name": "Drum and bass",
+      "parent": "Electronic",
+      "aliases": [
+        "Drum & bass",
+        "DnB"
+      ]
+    },
+    {
+      "name": "Dubstep",
+      "parent": "Electronic"
+    },
+    {
+      "name": "UK garage",
+      "parent": "Electronic",
+      "aliases": [
+        "UKG"
+      ]
+    },
+    {
+      "name": "IDM",
+      "parent": "Electronic",
+      "aliases": [
+        "Intelligent dance music"
+      ]
+    },
+    {
+      "name": "Trip hop",
+      "parent": "Electronic"
+    },
+    {
+      "name": "Downtempo",
+      "parent": "Electronic"
+    },
+    {
+      "name": "Synthwave",
+      "parent": "Electronic"
+    },
+    {
+      "name": "Trance",
+      "parent": "Electronic"
+    },
+    {
+      "name": "Vaporwave",
+      "parent": "Electronic"
+    },
+    {
+      "name": "Alt-country",
+      "parent": "Country",
+      "aliases": [
+        "Alternative country"
+      ]
+    },
+    {
+      "name": "Outlaw country",
+      "parent": "Country"
+    },
+    {
+      "name": "Bluegrass",
+      "parent": "Country"
+    },
+    {
+      "name": "Americana",
+      "parent": "Country"
+    },
+    {
+      "name": "Indie folk",
+      "parent": "Folk"
+    },
+    {
+      "name": "Singer-songwriter",
+      "parent": "Folk"
+    },
+    {
+      "name": "Contemporary folk",
+      "parent": "Folk"
+    },
+    {
+      "name": "Freak folk",
+      "parent": "Folk"
+    },
+    {
+      "name": "Baroque",
+      "parent": "Classical"
+    },
+    {
+      "name": "Modern classical",
+      "parent": "Classical",
+      "aliases": [
+        "Contemporary classical"
+      ]
+    },
+    {
+      "name": "Minimalism",
+      "parent": "Classical",
+      "aliases": [
+        "Minimalist music"
+      ]
+    },
+    {
+      "name": "Opera",
+      "parent": "Classical"
+    },
+    {
+      "name": "Heavy metal",
+      "parent": "Metal"
+    },
+    {
+      "name": "Thrash metal",
+      "parent": "Metal"
+    },
+    {
+      "name": "Death metal",
+      "parent": "Metal"
+    },
+    {
+      "name": "Black metal",
+      "parent": "Metal"
+    },
+    {
+      "name": "Doom metal",
+      "parent": "Metal"
+    },
+    {
+      "name": "Metalcore",
+      "parent": "Metal"
+    },
+    {
+      "name": "Progressive metal",
+      "parent": "Metal"
+    },
+    {
+      "name": "Post-metal",
+      "parent": "Metal"
+    },
+    {
+      "name": "Hardcore punk",
+      "parent": "Punk"
+    },
+    {
+      "name": "Post-punk",
+      "parent": "Punk"
+    },
+    {
+      "name": "Pop punk",
+      "parent": "Punk"
+    },
+    {
+      "name": "Emo",
+      "parent": "Punk"
+    },
+    {
+      "name": "Post-hardcore",
+      "parent": "Punk"
+    },
+    {
+      "name": "Roots reggae",
+      "parent": "Reggae"
+    },
+    {
+      "name": "Dub",
+      "parent": "Reggae"
+    },
+    {
+      "name": "Dancehall",
+      "parent": "Reggae"
+    },
+    {
+      "name": "Ska",
+      "parent": "Reggae"
+    },
+    {
+      "name": "Rocksteady",
+      "parent": "Reggae"
+    },
+    {
+      "name": "Reggaeton",
+      "parent": "Latin",
+      "aliases": [
+        "Reguetón"
+      ]
+    },
+    {
+      "name": "Salsa",
+      "parent": "Latin"
+    },
+    {
+      "name": "Bossa nova",
+      "parent": "Latin"
+    },
+    {
+      "name": "Latin pop",
+      "parent": "Latin"
+    },
+    {
+      "name": "Cumbia",
+      "parent": "Latin"
+    },
+    {
+      "name": "Noise",
+      "parent": "Experimental"
+    },
+    {
+      "name": "Avant-garde",
+      "parent": "Experimental"
+    },
+    {
+      "name": "Drone",
+      "parent": "Experimental"
+    },
+    {
+      "name": "Sound collage",
+      "parent": "Experimental"
+    },
+    {
+      "name": "Afrobeat",
+      "parent": "African music"
+    },
+    {
+      "name": "Afrobeats",
+      "parent": "African music"
+    },
+    {
+      "name": "Highlife",
+      "parent": "African music"
+    },
+    {
+      "name": "Amapiano",
+      "parent": "African music"
+    }
+  ]
+}

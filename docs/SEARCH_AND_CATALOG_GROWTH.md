@@ -100,7 +100,7 @@ Capture catalog size, search latency, and representative query results as import
 
 ### Local results remain primary
 
-`GET /search/search` keeps its current catalog-only contract. Existing consumers do not receive mixed local and external records.
+`GET /search/search` keeps its current catalog-only contract. Existing consumers do not receive mixed local and external records. An optional `genre` parameter limits results to a genre and its sub-genres; see [community genres](COMMUNITY_GENRES.md#search-filter).
 
 - Navbar autocomplete continues to return up to five local albums.
 - The profile editor continues to offer only albums that can be saved by Rescened `albumId`.

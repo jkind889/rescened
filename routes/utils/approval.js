@@ -18,6 +18,8 @@ const {
   isTransactionUnavailable,
 } = require("./moderation");
 
+const { approveGenreSuggestion } = require("../../lib/genres/approval");
+
 const MBID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function baselineService() {
@@ -419,6 +421,19 @@ async function correctionReferenceConflicts(target, references, session) {
   return [...new Set(conflicts)];
 }
 
+// The $set for a correction patch. Provenance goes in as dotted paths for
+// the fields the correction owns, so it can't drop provenance another writer
+// (such as a genre approval) recorded. A legacy album whose fieldProvenance
+// isn't an object gets the whole patched object instead.
+function correctionUpdateSet(patch, target) {
+  const { fieldProvenance, ...fields } = patch;
+  const existing = plain(target)?.fieldProvenance;
+  if (!existing || typeof existing !== "object" || Array.isArray(existing)) return { ...fields, fieldProvenance };
+  const changed = Object.keys(fieldProvenance)
+    .filter((key) => JSON.stringify(fieldProvenance[key]) !== JSON.stringify(existing[key]));
+  return { ...fields, ...Object.fromEntries(changed.map((key) => [`fieldProvenance.${key}`, fieldProvenance[key]])) };
+}
+
 function correctionApprovalFields(submission, applyFields) {
   const proposedFields = correctionProposedFields(submission);
   if (!Array.isArray(applyFields) || !applyFields.length) {
@@ -507,7 +522,7 @@ async function approveCatalogCorrection({ preliminary, submissionId, actorUserId
           albumId: plain(target).albumId,
           catalogRevision: baselineRevision === 1 ? { $in: [null, 1] } : baselineRevision,
         },
-        { $set: { ...patch, catalogRevision: baselineRevision + 1 } },
+        { $set: { ...correctionUpdateSet(patch, target), catalogRevision: baselineRevision + 1 } },
         { returnDocument: "after", runValidators: true, session },
       );
       if (!updatedAlbum) throw new ModerationConflictError("Catalog album changed while the correction was being applied", "CATALOG_CHANGED");
@@ -578,6 +593,7 @@ async function approveAlbumSubmission({
   confirmPossibleDuplicate = false,
   reason = "",
   applyFields,
+  genreDecisions,
   confirmPossibleDuplicateProvided = false,
   coverResolver,
 }) {
@@ -590,6 +606,17 @@ async function approveAlbumSubmission({
     throw new ModerationConflictError("Suggestion not found", "SUGGESTION_NOT_FOUND");
   }
   const preliminary = plain(preliminarySubmission);
+  // Genre suggestions have their own approval, including the idempotent
+  // retry, so they never reach the album publication logic below.
+  if (preliminary.submissionType === "genre_suggestion") {
+    if (albumId || confirmPossibleDuplicateProvided || confirmPossibleDuplicate || applyFields !== undefined) {
+      throw new ModerationValidationError("Genre suggestion approval takes only genreDecisions and reason");
+    }
+    return approveGenreSuggestion({ preliminary, submissionId, actorUserId, genreDecisions, reason });
+  }
+  if (genreDecisions !== undefined) {
+    throw new ModerationValidationError("genreDecisions is only valid for genre suggestion approvals");
+  }
   if (preliminary.status === "approved") {
     const approvedAlbum = await findCatalogByInternalId(preliminary.approvedAlbumCatalogId);
     if (!approvedAlbum) throw new ModerationConflictError("Approved suggestion has no usable catalog album", "APPROVAL_INCONSISTENT");

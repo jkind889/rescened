@@ -1,5 +1,50 @@
 [
   {
+    "id": "community-genres",
+    "date": "2026-10-14",
+    "title": "Genres, shaped by the community",
+    "summary": "Albums now have genres, and anyone can suggest them. Browse a genre, search inside one, and see your own top genres.",
+    "changes": [
+      "Genres appear under each album’s title, with the main genre highlighted. Tap one to open its genre page.",
+      "Use Suggest genres on any album to add or remove genres and pick the main one. Search finds genres by any of their names, so “rap” finds Hip hop.",
+      "Can’t find the right genre? Propose up to two new ones per suggestion. A moderator reviews every change before anyone sees it.",
+      "If a moderator asks for changes, the album page links straight to your suggestion so you can revise it.",
+      "Genre pages list albums by highest rated or most recently reviewed, include sub-genres like Jazz rap under Hip hop, and link to related genres.",
+      "Search within a genre from its page to find albums that match both.",
+      "Your Stats tab now shows your top genres.",
+      "Moderators review genre suggestions in the suggestion queue, can map a new name onto an existing genre, and maintain the genre list from a new Genres page."
+    ]
+  },
+  {
+    "id": "profile-listening-stats",
+    "date": "2026-10-14",
+    "title": "Your listening stats",
+    "summary": "A new Stats tab on every profile sums up the last two years of listening, reviewing, and saving.",
+    "changes": [
+      "See total listens, albums, days listened, your longest streak, and an estimate of hours listened.",
+      "A month-by-month chart shows when you listened most, along with your busiest day of the week.",
+      "Find your top albums and artists, and which decades your music comes from.",
+      "Review stats show your rating spread, how many of the albums you heard you reviewed, how your ratings compare with everyone else's, and your most-liked review.",
+      "Pick the last two years or a single year, and turn automatically logged listens on or off.",
+      "Stats are visible on public profiles. Private profiles keep them to the owner."
+    ]
+  },
+  {
+    "id": "track-ranking-takes-and-favorites",
+    "date": "2026-10-14",
+    "title": "Your take on track rankings",
+    "summary": "See how your track ranking compares with everyone else’s, rank with the people you follow, and find each album’s fan favorite.",
+    "changes": [
+      "After you rank an album, the community view shows how much you agree with other listeners and your hottest take: the track you rate most differently.",
+      "Arrows next to each track show whether you rank it higher or lower than everyone else.",
+      "Switch the community view to People you follow to see standings from just your circle. Private profiles aren’t counted there.",
+      "Standings based on fewer than three rankings are marked Early, since the order can still change a lot.",
+      "Once enough people agree, the top track gets a Fan favorite badge on the album page.",
+      "A new Rankings tab on profiles lists every album someone has ranked, with their top three tracks.",
+      "Ranking an album now shows up in profile activity and in your network feed."
+    ]
+  },
+  {
     "id": "diary-calendar-sharing-and-sorting",
     "date": "2026-10-13",
     "title": "A diary calendar, shareable reviews, and smarter boards",

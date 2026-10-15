@@ -7,6 +7,7 @@ import AlbumReviewFeed from "./AlbumReviewFeed";
 import LikeButton from "./LikeButton";
 import TrackRanking from "./TrackRanking";
 import ShareButton from "./ShareButton";
+import "./Community/GenreSuggestion.css";
 import AsyncState from "./Loading/AsyncState";
 import { SignInButton, useAuth } from "@clerk/react";
 import { getApiErrorMessage } from "../utils/apiErrors";
@@ -81,6 +82,7 @@ const getDefaultAlbumSocial = () => ({
     ratingDistribution: getEmptyRatingDistribution(),
     viewerRating: null,
     followedAverageRating: null,
+    topTrack: null,
     followedReviewers: [],
     followedAlbumLikers: [],
 });
@@ -131,6 +133,9 @@ export function AlbumDetail()
     const [deleteErrors, setDeleteErrors] = useState({});
     const { getToken, isSignedIn, userId } = useAuth();
     const canUseAuthenticatedActions = Boolean(isSignedIn && userId);
+    // Album detail includes a genres array only while the server has genres on.
+    const genresEnabled = Array.isArray(album?.genres);
+    const [openGenreSuggestion, setOpenGenreSuggestion] = useState(null);
     const activeAlbumIdRef = useRef(albumId);
 
     // Consume the one-time open-review request so a refresh or back navigation
@@ -242,6 +247,7 @@ export function AlbumDetail()
                         ratingDistribution: normalizeRatingDistribution(data.ratingDistribution),
                         viewerRating: finiteOrNull(data.viewerRating),
                         followedAverageRating: finiteOrNull(data.followedAverageRating),
+                        topTrack: data.topTrack?.trackId ? data.topTrack : null,
                         followedReviewers: Array.isArray(data.followedReviewers) ? data.followedReviewers : [],
                         followedAlbumLikers: Array.isArray(data.followedAlbumLikers) ? data.followedAlbumLikers : [],
                     });
@@ -319,6 +325,30 @@ export function AlbumDetail()
         };
     }, [canUseAuthenticatedActions, albumId, getToken]);
         
+
+    // The viewer's own pending genre suggestion for this album, if any.
+    useEffect(() => {
+        if (!canUseAuthenticatedActions || !genresEnabled || !albumId) {
+            setOpenGenreSuggestion(null);
+            return undefined;
+        }
+        const controller = new AbortController();
+        (async () => {
+            try {
+                const token = await getToken();
+                const res = await fetch(`${API_BASE_URL}/suggestions/genres/open?albumId=${encodeURIComponent(albumId)}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                    signal: controller.signal,
+                });
+                if (!res.ok) throw new Error("open genre suggestion unavailable");
+                const data = await res.json();
+                setOpenGenreSuggestion(data.suggestion || null);
+            } catch (error) {
+                if (error?.name !== "AbortError") setOpenGenreSuggestion(null);
+            }
+        })();
+        return () => controller.abort();
+    }, [canUseAuthenticatedActions, genresEnabled, albumId, getToken]);
 
     useEffect(() => {
         let shouldIgnore = false;
@@ -611,6 +641,10 @@ export function AlbumDetail()
         ? formatRuntime(sortedTracks.reduce((total, track) => total + Number(track.durationMs), 0))
         : "";
     const viewerRating = finiteOrNull(albumSocial.viewerRating);
+    // Only named once at least three people have ranked the album and #1 is not tied.
+    const fanFavorite = albumSocial.topTrack && sortedTracks.some((track) => track.trackId === albumSocial.topTrack.trackId)
+        ? albumSocial.topTrack
+        : null;
     const previewTracks = sortedTracks.slice(0, 14);
     const hasMoreTracks = sortedTracks.length > 14;
     const selectedReviews = reviews;
@@ -899,6 +933,13 @@ export function AlbumDetail()
                                 Suggest a correction
                             </Link>
                         ) : renderSignInAction("Suggest a correction")}
+                        {genresEnabled && (canUseAuthenticatedActions ? (
+                            openGenreSuggestion ? null : (
+                                <Link className="album-side-action" to={`/suggestions/genres/${album.albumId}`}>
+                                    Suggest genres
+                                </Link>
+                            )
+                        ) : renderSignInAction("Suggest genres"))}
                         <ShareButton className="album-side-action" path={`/album/${album.albumId}`} title={`${album.title} on Rescened`} label="Share album" />
                         {listenMessage && <p className="board-save-message" role="status">{listenMessage}</p>}
                         {boardSaveMessage && <p className="board-save-message" role="status">{boardSaveMessage}</p>}
@@ -945,6 +986,13 @@ export function AlbumDetail()
                             <strong>{averageRating || "--"}</strong>
                         </div>
                         {viewerRating !== null && <p className="album-rating-viewer-note">Your rating: ★ {viewerRating}</p>}
+                        {fanFavorite && (
+                            <p className="album-fan-favorite-note">
+                                Fan favorite:{" "}
+                                <button type="button" onClick={() => setActiveTab("ranking")}>{fanFavorite.title || "Untitled Track"}</button>
+                                <small> · {fanFavorite.rankingCount} rankings</small>
+                            </p>
+                        )}
                     </div>
 
                     {hasAlbumSocialConnections && (
@@ -964,6 +1012,24 @@ export function AlbumDetail()
                             {album.label && <span>{album.label}</span>}
                             {sortedTracks.length > 0 && <span>{sortedTracks.length} track{sortedTracks.length === 1 ? "" : "s"}{runtimeLabel ? ` · ${runtimeLabel}` : ""}</span>}
                         </div>
+                        {album.genres?.length > 0 && (
+                            <ul className="album-genre-list" aria-label="Genres">
+                                {album.genres.map((genre, index) => (
+                                    <li key={genre.genreId}>
+                                        <Link className={`album-genre-badge ${index === 0 ? "album-genre-badge-primary" : "album-genre-badge-secondary"}`} to={`/genre/${genre.slug}`}>
+                                            {genre.name}
+                                        </Link>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                        {openGenreSuggestion && (
+                            <p className="album-genre-pending">
+                                {openGenreSuggestion.status === "needs_changes"
+                                    ? <>A moderator asked for changes to your genre suggestion. <Link to={`/suggestions/${openGenreSuggestion.submissionId}/revise`}>Revise it</Link></>
+                                    : <>Your genre suggestion is waiting for review. <Link to={`/suggestions/${openGenreSuggestion.submissionId}`}>View it</Link></>}
+                            </p>
+                        )}
                     </div>
 
                     <nav className="album-tabs" aria-label="Album sections">
@@ -1053,7 +1119,10 @@ export function AlbumDetail()
                                                 return (
                                                     <li key={track.trackId || `${discNumber}-${trackNumber}-${track.title}`}>
                                                         <span className="album-track-number">{trackLabel}</span>
-                                                        <span className="album-track-title">{track.title || "Untitled Track"}</span>
+                                                        <span className="album-track-title">
+                                                            {track.title || "Untitled Track"}
+                                                            {fanFavorite?.trackId === track.trackId && <span className="album-fan-favorite-badge" title={`Ranked #1 across ${fanFavorite.rankingCount} rankings`}>Fan favorite</span>}
+                                                        </span>
                                                         <span className="album-track-duration">{formatTrackDuration(track.durationMs)}</span>
                                                     </li>
                                                 );

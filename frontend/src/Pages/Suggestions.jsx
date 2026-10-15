@@ -40,7 +40,8 @@ function ErrorNotice({ error, onRetry = null }) {
 }
 
 function SuggestionCard({ suggestion, selected = false, compact = false }) {
-  const metadata = suggestion.proposedMetadata || {};
+  // Corrections and genre suggestions describe an existing album instead.
+  const metadata = suggestion.proposedMetadata || suggestion.targetAlbum || {};
   const TitleTag = compact ? "p" : "h2";
 
   return (
@@ -60,7 +61,9 @@ function SuggestionCard({ suggestion, selected = false, compact = false }) {
           <TitleTag className="suggestion-list-title">{metadata.title || "Untitled suggestion"}</TitleTag>
           <p className="suggestion-list-artist">{metadata.artistDisplayName || "Artist not supplied"}</p>
           <p className="suggestion-list-meta">
-            {[formatCommunityValue(metadata.releaseType), metadata.releaseDate || metadata.releaseYear].filter(Boolean).join(" · ")}
+            {suggestion.submissionType === "genre_suggestion"
+              ? "Genre suggestion"
+              : [formatCommunityValue(metadata.releaseType), metadata.releaseDate || metadata.releaseYear].filter(Boolean).join(" · ")}
           </p>
         </div>
         <div className="suggestion-list-aside">

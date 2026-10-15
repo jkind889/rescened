@@ -1,7 +1,7 @@
 const express = require("express");
 const { getAuth } = require("@clerk/express");
 const { findAlbumByPublicId } = require("./utils/albumCatalog");
-const { albumRankings, deleteRanking, normalizeRankingInput, requireTracklist, saveRanking } = require("./utils/trackRankings");
+const { albumRankings, deleteRanking, normalizeRankingInput, parseScope, requireTracklist, saveRanking } = require("./utils/trackRankings");
 const { trackRankingMutationRateLimit } = require("./utils/rateLimit");
 
 const router = express.Router();
@@ -11,11 +11,13 @@ function fail(res, error, fallback) {
   res.status(error.status || 500).json({ error: error.status ? error.message : fallback, ...(error.code && error.status ? { code: error.code } : {}) });
 }
 
-// Community standings for an album, plus the signed-in viewer's own ranking.
+// Standings for an album, plus the signed-in viewer's own ranking.
+// ?scope=circle limits standings to the viewer and people they follow.
 router.get("/album/:albumId", async (req, res) => {
   try {
+    const scope = parseScope(req.query.scope);
     const album = await findAlbumByPublicId(req.params.albumId);
-    res.json(await albumRankings(album, viewer(req)));
+    res.json(await albumRankings(album, viewer(req), scope));
   } catch (error) { fail(res, error, "Failed to fetch track rankings"); }
 });
 

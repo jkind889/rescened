@@ -777,6 +777,8 @@ Cover correction is intentionally offline. The submitted HTTPS URL is reviewed b
 
 Every supported generation-2 catalog writer must condition on the revision it read and increment it exactly once for a successful mutation. This includes community corrections, imported-record refreshes, cover backfills, and any maintained manual-edit path. Create-only publication initializes the token but does not need a prior revision. Direct database writers remain restricted and must follow the same rule.
 
+Album genres are the one exception. Only the genre service writes `genres`, `genresRevision`, and `fieldProvenance.genres`, and no other writer touches them, so genre changes advance their own `genresRevision` instead of `catalogRevision`. Correction approval must therefore never put `genres` in a patch. See [community genres](COMMUNITY_GENRES.md#ownership-and-the-revision-exception).
+
 The correction revision stores `baseCatalogRevision`, and approval guards on that exact value. This monotonic token, rather than timestamp equality, makes stale detection deterministic even when two writes occur within one clock tick. Catalog `updatedAt` remains useful display and diagnostics metadata but is not the correctness boundary.
 
 ### Moderator review and approval contract
@@ -825,7 +827,7 @@ Correction approval performs these steps inside one Mongo transaction:
 3. Require the album's `catalogRevision` to equal that revision's `baseCatalogRevision`. Any supported intervening catalog write returns `409 CATALOG_CHANGED`; the service never silently rebases or field-merges against a new version.
 4. Construct a strict server-owned patch containing only `applyFields`, validate the complete resulting `AlbumCatalog` document, and recheck external-reference uniqueness.
 5. Conditionally update the target by internal `_id`, immutable public `albumId`, and expected `catalogRevision`, then increment the revision exactly once.
-6. For every applied field, replace its catalog provenance with `source: "community"`, the public correction `submissionId`, revision, approving user ID, and approval time. Cover provenance also retains the submitted source URL without making a license claim. The prior provenance remains in the correction revision's immutable `baseProvenance`; it is not recursively nested into the current catalog entry.
+6. For every applied field, replace its catalog provenance (written as a dotted `fieldProvenance.<field>` path, so provenance for other fields, such as genres, is kept) with `source: "community"`, the public correction `submissionId`, revision, approving user ID, and approval time. Cover provenance also retains the submitted source URL without making a license claim. The prior provenance remains in the correction revision's immutable `baseProvenance`; it is not recursively nested into the current catalog entry.
 7. Preserve the target's `albumId`, `_id`, `catalogSource`, omitted fields, omitted provenance, and all existing social references.
 8. Set the submission to approved, retain `approvedAlbumCatalogId`, set `approvedAt` and `approvalPublicationType: "catalog_corrected"`, and append the one approval event with its immutable application object.
 

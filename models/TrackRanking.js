@@ -39,8 +39,9 @@ const trackRankingSchema = new mongoose.Schema(
 trackRankingSchema.index({ userId: 1, albumCatalogId: 1 }, { unique: true });
 // Community aggregates for one album.
 trackRankingSchema.index({ albumCatalogId: 1 });
-// A user's recent rankings (profiles); also serves account deletion.
-trackRankingSchema.index({ userId: 1, updatedAt: -1, _id: -1 });
+// A user's recent rankings (profile pages and activity feeds), matching their
+// sort and cursor tiebreak; also serves account deletion.
+trackRankingSchema.index({ userId: 1, updatedAt: -1, albumCatalogId: -1 });
 
 trackRankingSchema.statics.MAX_RANKED_TRACKS = MAX_RANKED_TRACKS;
 

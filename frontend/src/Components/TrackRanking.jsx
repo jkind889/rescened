@@ -3,7 +3,13 @@ import { SignInButton, useAuth } from "@clerk/react";
 import { API_BASE_URL } from "../config/api";
 import { getApiErrorMessage } from "../utils/apiErrors";
 
-const EMPTY_STANDINGS = { rankingCount: 0, tracks: [], viewerRanking: null };
+const EMPTY_STANDINGS = { rankingCount: 0, confidence: "early", tracks: [], viewerRanking: null, viewerComparison: null };
+const SCOPES = [["community", "Everyone"], ["circle", "People you follow"]];
+
+function formatDelta(delta) {
+    if (!delta) return "=";
+    return delta > 0 ? `▲${delta}` : `▼${Math.abs(delta)}`;
+}
 
 function sameOrder(first, second) {
     return first.length === second.length && first.every((trackId, index) => trackId === second[index]);
@@ -23,6 +29,9 @@ export function TrackRanking({ albumId, tracks, getTrackLabel, formatDuration })
     const { getToken, isSignedIn, userId } = useAuth();
     const canRank = Boolean(isSignedIn && userId);
     const [view, setView] = useState("community");
+    const [scope, setScope] = useState("community");
+    const [refreshKey, setRefreshKey] = useState(0);
+    const activeScope = canRank ? scope : "community";
     const [standings, setStandings] = useState(EMPTY_STANDINGS);
     const [isLoading, setIsLoading] = useState(true);
     const [loadError, setLoadError] = useState("");
@@ -39,8 +48,10 @@ export function TrackRanking({ albumId, tracks, getTrackLabel, formatDuration })
     const applyStandings = useCallback((data) => {
         const next = {
             rankingCount: Number(data.rankingCount) || 0,
+            confidence: data.confidence === "settled" ? "settled" : "early",
             tracks: Array.isArray(data.tracks) ? data.tracks : [],
             viewerRanking: data.viewerRanking || null,
+            viewerComparison: data.viewerComparison || null,
         };
         setStandings(next);
         setDraft(next.viewerRanking?.rankedTrackIds || []);
@@ -54,7 +65,8 @@ export function TrackRanking({ albumId, tracks, getTrackLabel, formatDuration })
             try {
                 const token = userId ? await getToken() : null;
                 const headers = token ? { Authorization: `Bearer ${token}` } : {};
-                const response = await fetch(`${API_BASE_URL}/track-rankings/album/${albumId}`, { headers, signal: controller.signal });
+                const query = activeScope === "circle" ? "?scope=circle" : "";
+                const response = await fetch(`${API_BASE_URL}/track-rankings/album/${albumId}${query}`, { headers, signal: controller.signal });
                 if (!response.ok) throw new Error(await getApiErrorMessage(response, "Track rankings are unavailable right now."));
                 applyStandings(await response.json());
             } catch (error) {
@@ -67,7 +79,7 @@ export function TrackRanking({ albumId, tracks, getTrackLabel, formatDuration })
         }
         if (albumId) void fetchStandings();
         return () => controller.abort();
-    }, [albumId, applyStandings, getToken, userId]);
+    }, [activeScope, albumId, applyStandings, getToken, refreshKey, userId]);
 
     async function submit(method) {
         setIsSaving(true);
@@ -85,7 +97,10 @@ export function TrackRanking({ albumId, tracks, getTrackLabel, formatDuration })
             if (!response.ok) {
                 throw new Error(await getApiErrorMessage(response, method === "PUT" ? "Could not save your ranking." : "Could not remove your ranking."));
             }
-            applyStandings(await response.json());
+            const data = await response.json();
+            // Mutations answer with everyone's standings; the circle view reloads its own.
+            if (activeScope === "community") applyStandings(data);
+            else setRefreshKey((key) => key + 1);
             setMessage(method === "PUT" ? "Ranking saved." : "Ranking removed.");
         } catch (error) {
             console.error(error);
@@ -119,8 +134,58 @@ export function TrackRanking({ albumId, tracks, getTrackLabel, formatDuration })
         );
     };
 
+    const renderScopeToggle = () => canRank && (
+        <div className="track-ranking-scope" role="group" aria-label="Whose rankings to count">
+            {SCOPES.map(([value, label]) => (
+                <button key={value} type="button" aria-pressed={activeScope === value} onClick={() => setScope(value)}>
+                    {label}
+                </button>
+            ))}
+        </div>
+    );
+
+    const renderComparison = () => {
+        const comparison = standings.viewerComparison;
+        if (activeScope !== "community" || !comparison) return null;
+        const hottest = comparison.hottestTake;
+        const hottestTitle = hottest ? tracksById.get(hottest.trackId)?.title || "Untitled Track" : "";
+        // Below three other rankers the server withholds the comparison so it
+        // never shows one specific person's ordering.
+        if (comparison.confidence === "early") {
+            return (
+                <div className="track-ranking-comparison">
+                    <p>
+                        <strong>Your take</strong>{" "}
+                        Your comparison appears once 3 other listeners have ranked this album ({comparison.rankingCount} so far).
+                    </p>
+                </div>
+            );
+        }
+        return (
+            <div className="track-ranking-comparison">
+                <p>
+                    <strong>Your take</strong>{" "}
+                    compared with {comparison.rankingCount} other listener{comparison.rankingCount === 1 ? "" : "s"}
+                </p>
+                {comparison.agreement !== null && <p>You agree with them {comparison.agreement}% of the way.</p>}
+                {hottest && (
+                    <p>
+                        Hottest take: <strong>{hottestTitle}</strong>. You put it #{hottest.viewerPosition}; they put it #{hottest.communityPosition}.
+                    </p>
+                )}
+            </div>
+        );
+    };
+
     const renderCommunity = () => {
         if (standings.rankingCount === 0) {
+            if (activeScope === "circle") {
+                return (
+                    <p className="album-empty-copy">
+                        No one you follow has ranked this album yet. Profiles set to private aren't counted here.
+                    </p>
+                );
+            }
             return (
                 <p className="album-empty-copy">
                     No one has ranked this album yet.{" "}
@@ -134,14 +199,22 @@ export function TrackRanking({ albumId, tracks, getTrackLabel, formatDuration })
         }
 
         const rankedCount = standings.rankingCount;
+        const isEarly = standings.confidence === "early";
+        // A null delta means no one else ranked the track, so there is nothing to compare.
+        const viewerDeltas = new Map((activeScope === "community" ? standings.viewerComparison?.tracks || [] : [])
+            .filter((track) => Number.isFinite(track.delta))
+            .map((track) => [track.trackId, track.delta]));
         const rows = standings.tracks
             .filter((entry) => tracksById.has(entry.trackId))
             .map((entry) => ({ ...entry, points: Math.round((Number(entry.score) || 0) * 100) }));
         return (
             <>
                 <p className="track-ranking-summary">
-                    Based on {rankedCount} ranking{rankedCount === 1 ? "" : "s"}. Higher means listeners tend to put the track nearer the top.
+                    Based on {rankedCount} ranking{rankedCount === 1 ? "" : "s"}{activeScope === "circle" ? " from you and people you follow" : ""}.
+                    {isEarly && <span className="track-ranking-early" title="Fewer than 3 people have ranked this album, so the order can still change a lot.">Early</span>}
+                    {" "}Higher means listeners tend to put the track nearer the top.
                 </p>
+                {renderComparison()}
                 <ol className="track-ranking-list">
                     {rows.map((entry) => {
                         const { points } = entry;
@@ -151,6 +224,19 @@ export function TrackRanking({ albumId, tracks, getTrackLabel, formatDuration })
                             <li key={entry.trackId} className="track-ranking-row">
                                 <span className="track-ranking-position">{position}</span>
                                 <span className="track-ranking-name">{renderTrackName(entry.trackId)}</span>
+                                {viewerDeltas.has(entry.trackId) && (
+                                    <span
+                                        className="track-ranking-delta"
+                                        title="Your position compared with other listeners"
+                                        aria-label={viewerDeltas.get(entry.trackId) > 0
+                                            ? `You rank it ${viewerDeltas.get(entry.trackId)} higher than others`
+                                            : viewerDeltas.get(entry.trackId) < 0
+                                                ? `You rank it ${Math.abs(viewerDeltas.get(entry.trackId))} lower than others`
+                                                : "You rank it where others do"}
+                                    >
+                                        {formatDelta(viewerDeltas.get(entry.trackId))}
+                                    </span>
+                                )}
                                 <span className="track-ranking-score" aria-label={`Score ${points} of 100`}>
                                     <span className="track-ranking-bar" aria-hidden="true">
                                         <span style={{ width: `${points}%` }} />
@@ -279,7 +365,7 @@ export function TrackRanking({ albumId, tracks, getTrackLabel, formatDuration })
                 <p className="album-empty-copy">Loading rankings…</p>
             ) : loadError ? (
                 <p className="album-empty-copy">{loadError}</p>
-            ) : view === "community" ? renderCommunity() : renderEditor()}
+            ) : view === "community" ? <>{renderScopeToggle()}{renderCommunity()}</> : renderEditor()}
 
             <p className="like-message" role="status" aria-live="polite">{message}</p>
         </div>

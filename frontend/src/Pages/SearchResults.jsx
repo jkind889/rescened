@@ -23,6 +23,9 @@ export function SearchResults() {
   const query = searchParams.get("q") || "";
   const page = Math.max(Number.parseInt(searchParams.get("page") || "1", 10) || 1, 1);
   const viewParam = searchParams.get("view") || "grid";
+  // Optional genre filter (a slug), set by a genre page's "Search this genre".
+  const genre = searchParams.get("genre") || "";
+  const [genreName, setGenreName] = useState("");
   const viewMode = viewParam === "list" ? "list" : "grid";
 
   useEffect(() => {
@@ -92,7 +95,7 @@ export function SearchResults() {
 
       try {
         const response = await fetch(
-          `${API_BASE_URL}/search/search?q=${encodeURIComponent(query)}&page=${page}`,
+          `${API_BASE_URL}/search/search?q=${encodeURIComponent(query)}&page=${page}${genre ? `&genre=${encodeURIComponent(genre)}` : ""}`,
           { signal: controller.signal },
         );
 
@@ -107,9 +110,11 @@ export function SearchResults() {
         const localResults = Array.isArray(results) ? results : [];
         setResults(localResults);
         setHasNextPage(Boolean(data?.hasNextPage));
+        setGenreName(data?.genre?.name || "");
         setLoading(false);
 
-        if (page === 1) {
+        // External candidates carry no genres, so a genre-filtered search skips them.
+        if (page === 1 && !genre) {
           await fetchExternalResults();
         }
       } catch (searchError) {
@@ -130,7 +135,7 @@ export function SearchResults() {
       shouldIgnore = true;
       controller.abort();
     };
-  }, [query, page, externalRetry]);
+  }, [query, page, externalRetry, genre]);
 
   function updatePage(nextPage) {
     const nextParams = new URLSearchParams(searchParams);
@@ -279,6 +284,23 @@ export function SearchResults() {
         <div className="search-results-header">
           <p className="search-results-kicker">Search results</p>
           <h2>{query || "Search"}</h2>
+          {genre ? (
+            <p className="search-genre-filter">
+              In <Link to={`/genre/${encodeURIComponent(genre)}`}>{genreName || genre}</Link> and its sub-genres ·{" "}
+              <button
+                className="community-text-button"
+                onClick={() => {
+                  const nextParams = new URLSearchParams(searchParams);
+                  nextParams.delete("genre");
+                  nextParams.delete("page");
+                  setSearchParams(nextParams);
+                }}
+                type="button"
+              >
+                Search all genres
+              </button>
+            </p>
+          ) : null}
           <div className="search-results-toolbar">
             <p className="search-results-summary">
               {loading

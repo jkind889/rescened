@@ -25,9 +25,9 @@ const SOURCE_TYPES = new Set([
   "other",
 ]);
 const ACTIVE_STATUSES = ["pending", "needs_changes"];
-const SUBMISSION_TYPES = ["new_album", "catalog_correction"];
+const SUBMISSION_TYPES = ["new_album", "catalog_correction", "genre_suggestion"];
 const CORRECTION_FIELD_GROUPS = ["title", "artists", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"];
-const APPROVAL_PUBLICATION_TYPES = ["catalog_created", "catalog_linked", "catalog_corrected"];
+const APPROVAL_PUBLICATION_TYPES = ["catalog_created", "catalog_linked", "catalog_corrected", "genres_updated"];
 const PUBLIC_UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 50;
@@ -648,6 +648,27 @@ function publicAlbumId(value) {
   return source?.albumId || "";
 }
 
+// The stored lists are additions/removals (Mongoose reserves "remove");
+// the API speaks add/remove, matching the request body.
+function publicGenreChanges(value) {
+  const source = plain(value) || {};
+  const ref = (genre) => (genre ? { genreId: genre.genreId, slug: genre.slug, name: genre.name } : null);
+  return {
+    add: (source.additions || []).map((entry) => (entry.genre
+      ? { genre: ref(entry.genre) }
+      : { newGenre: { name: entry.newGenre.name, slug: entry.newGenre.slug, parent: ref(entry.newGenre.parent) } })),
+    remove: (source.removals || []).map(ref),
+    primary: source.primary
+      ? (source.primary.genre ? { genre: ref(source.primary.genre) } : { addIndex: source.primary.addIndex })
+      : null,
+    note: source.note || "",
+  };
+}
+
+function publicGenreBaseline(value) {
+  return (plain(value)?.genres || []).map((genre) => ({ genreId: genre.genreId, slug: genre.slug, name: genre.name }));
+}
+
 function publicSnapshot(value) {
   const source = plain(value);
   const result = {
@@ -664,6 +685,11 @@ function publicSnapshot(value) {
     result.baseCatalogRevision = source.baseCatalogRevision;
     result.baseValues = source.baseValues || {};
     result.proposedChanges = source.proposedChanges || {};
+  }
+  if (result.submissionType === "genre_suggestion") {
+    result.targetAlbumId = publicAlbumId(source.targetAlbumCatalogId) || undefined;
+    result.baseGenres = publicGenreBaseline(source.genreBaseline);
+    result.genreChanges = publicGenreChanges(source.genreChanges);
   }
   if (!result.candidateAlbumId) delete result.candidateAlbumId;
   if (!result.targetAlbumId) delete result.targetAlbumId;
@@ -704,6 +730,11 @@ function serializeSubmission(value, { detail = false, moderator = false } = {}) 
     if (source.targetAlbumCatalogId?.albumId) result.targetAlbum = normalizeCatalogAlbum(source.targetAlbumCatalogId);
     if (moderator && source.baseProvenance) result.baseProvenance = clone(source.baseProvenance);
   }
+  if (submissionType === "genre_suggestion") {
+    result.baseGenres = publicGenreBaseline(source.genreBaseline);
+    result.genreChanges = publicGenreChanges(source.genreChanges);
+    if (source.targetAlbumCatalogId?.albumId) result.targetAlbum = normalizeCatalogAlbum(source.targetAlbumCatalogId);
+  }
   if (detail) {
     result.revisions = (source.revisions || []).map(publicSnapshot);
     result.moderationHistory = (source.moderationHistory || []).map((event) => {
@@ -715,6 +746,10 @@ function serializeSubmission(value, { detail = false, moderator = false } = {}) 
         createdAt: item.createdAt,
       };
       if (item.application) serializedEvent.application = clone(item.application);
+      if (item.genreApplication) {
+        const { removals, ...rest } = clone(item.genreApplication);
+        serializedEvent.genreApplication = { ...rest, remove: removals || [] };
+      }
       return serializedEvent;
     });
   }

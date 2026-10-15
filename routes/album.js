@@ -7,6 +7,9 @@ const Like = require("../models/Like");
 const Review = require("../models/Reviews");
 const { findAlbumByPublicId, normalizeCatalogAlbum } = require("./utils/albumCatalog");
 const { buildCatalogSearchQuery } = require("./utils/catalogSearch");
+const { albumTopTrack } = require("./utils/trackRankings");
+const { isGenresEnabled } = require("./utils/serverConfig");
+const { resolveAlbumGenres } = require("../lib/genres/read");
 
 const router = express.Router();
 const PAGE_LIMIT = 24;
@@ -63,10 +66,11 @@ function averageOf(ratings) {
 }
 
 async function socialContext(album, viewerId) {
-  const [savedCount, summary, viewerReview] = await Promise.all([
+  const [savedCount, summary, viewerReview, topTrack] = await Promise.all([
     savedUserCount(album._id),
     ratingSummary(album._id),
     viewerId ? Review.findOne({ albumCatalogId: album._id, userId: viewerId }).sort({ date: -1, _id: -1 }) : null,
+    albumTopTrack(album),
   ]);
   let followedReviewers = [];
   let followedAlbumLikers = [];
@@ -89,7 +93,7 @@ async function socialContext(album, viewerId) {
     }
   }
   return {
-    savedCount, ...summary,
+    savedCount, ...summary, topTrack,
     viewerRating: viewerReview ? plain(viewerReview).rating : null,
     followedAverageRating: averageOf(followedReviewers.map((reviewer) => Number(reviewer.rating)).filter(Number.isFinite)),
     followedReviewers, followedAlbumLikers,
@@ -124,7 +128,8 @@ router.get("/album/:albumId/social", async (req, res) => {
 router.get("/album/:albumId", async (req, res) => {
   try {
     const album = await findAlbumByPublicId(req.params.albumId);
-    res.json(normalizeCatalogAlbum(album));
+    const normalized = normalizeCatalogAlbum(album);
+    res.json(isGenresEnabled() ? { ...normalized, genres: await resolveAlbumGenres(album) } : normalized);
   } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch album details" }); }
 });
 
