@@ -1,0 +1,209 @@
+/* Listen-next queue: the owner's editor, read-only "Up next" lists, and the album-page actions. */
+
+.listen-queue {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  font-family: var(--app-font);
+}
+
+.listen-queue-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.listen-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 56px;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--app-line);
+  color: var(--app-text);
+}
+
+.listen-queue-editable .listen-queue-row {
+  padding-right: 0.5rem;
+  cursor: grab;
+  transition: background 120ms ease;
+}
+
+.listen-queue-editable .listen-queue-row:hover {
+  background: var(--app-surface);
+}
+
+.listen-queue-row.is-dragging {
+  opacity: 0.45;
+}
+
+.listen-queue-handle {
+  width: 1rem;
+  color: var(--app-muted);
+  font-size: 0.75rem;
+  letter-spacing: -0.15em;
+  text-align: center;
+}
+
+.listen-queue-position {
+  flex: 0 0 1.6rem;
+  color: var(--app-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.listen-queue-album {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.listen-queue-album:hover strong,
+.listen-queue-album:focus-visible strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.listen-queue-cover {
+  display: block;
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  background: var(--app-surface-strong);
+}
+
+.listen-queue-copy {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.listen-queue-copy strong,
+.listen-queue-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listen-queue-copy strong {
+  font-weight: 600;
+}
+
+.listen-queue-copy small,
+.listen-queue-footer small,
+.listen-queue-note {
+  color: var(--app-muted);
+  font-size: 0.72rem;
+}
+
+.listen-queue-note {
+  margin: 0;
+}
+
+.listen-queue-controls {
+  display: inline-flex;
+  flex: none;
+  gap: 0.25rem;
+}
+
+.listen-queue-controls button,
+.listen-queue-actions button,
+.listen-queue-more,
+.queue-add button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--app-line-strong);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--app-text);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.listen-queue-controls button:hover:not(:disabled),
+.listen-queue-actions button:hover:not(:disabled),
+.listen-queue-more:hover:not(:disabled),
+.queue-add button:hover:not(:disabled),
+.listen-queue-actions button.is-primary {
+  border-color: var(--app-text);
+  background: var(--app-text);
+  color: var(--app-bg);
+}
+
+.listen-queue-controls button:disabled,
+.listen-queue-actions button:disabled,
+.listen-queue-more:disabled,
+.queue-add button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.listen-queue-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.listen-queue-actions {
+  display: inline-flex;
+  gap: 0.4rem;
+}
+
+.listen-queue-more {
+  justify-self: start;
+}
+
+/* Album page: two actions side by side, sized like the listen/like pair. */
+.album-side-actions .album-queue-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  grid-column: 1 / -1;
+  border-bottom: 1px solid var(--app-line);
+}
+
+.album-queue-action .album-side-action {
+  min-width: 0;
+  border-bottom: 0;
+}
+
+.album-queue-action > .album-side-action:first-child {
+  border-right: 1px solid var(--app-line);
+}
+
+.album-queue-action .board-save-message {
+  grid-column: 1 / -1;
+}
+
+/* Pick results: a compact add button with its outcome. */
+.queue-add {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--app-font);
+}
+
+.queue-add small {
+  color: var(--app-muted);
+  font-size: 0.72rem;
+}
+
+@media (max-width: 560px) {
+  .listen-queue-handle {
+    display: none;
+  }
+
+  .listen-queue-controls button {
+    min-width: 36px;
+    min-height: 36px;
+  }
+}

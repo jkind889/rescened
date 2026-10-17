@@ -64,6 +64,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
     albumSave: 0,
     likeMutation: 0,
     profileStats: 0,
+    queueMutation: 0,
     reviewCreate: 0,
     reviewMutation: 0,
     search: 0,
@@ -88,6 +89,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
     externalSearchRateLimit: (req, res, next) => next(),
     likeMutationRateLimit: blocker("likeMutation", 52),
     profileStatsRateLimit: blocker("profileStats", 57),
+    queueMutationRateLimit: blocker("queueMutation", 58),
     reviewCreateRateLimit: blocker("reviewCreate", 53),
     reviewMutationRateLimit: blocker("reviewMutation", 54),
     searchRateLimit: blocker("search", 55),
@@ -182,6 +184,9 @@ test("routes register the intended limiter after authentication where required",
     [routers.trackRankings, "delete", "/album/:albumId", 1, limiters.trackRankingMutationRateLimit],
     [routers.profile, "get", "/me/stats", 1, limiters.profileStatsRateLimit],
     [routers.profile, "get", "/:userId/stats", 0, limiters.profileStatsRateLimit],
+    [routers.profile, "post", "/me/queue", 1, limiters.queueMutationRateLimit],
+    [routers.profile, "put", "/me/queue", 1, limiters.queueMutationRateLimit],
+    [routers.profile, "delete", "/me/queue/:albumId", 1, limiters.queueMutationRateLimit],
   ];
 
   for (const [router, method, path, limiterIndex, expectedLimiter] of cases) {
@@ -204,6 +209,9 @@ test("route-specific limiters stop work and preserve 429 response metadata", asy
     [routers.trackRankings, "delete", "/album/:albumId", { headers: {}, params: { albumId: "album" } }, "trackRankingMutation", 56],
     [routers.profile, "get", "/me/stats", { query: {}, headers: {} }, "profileStats", 57],
     [routers.profile, "get", "/:userId/stats", { query: {}, headers: {}, params: { userId: "user_public" } }, "profileStats", 57],
+    [routers.profile, "post", "/me/queue", { body: {}, headers: {} }, "queueMutation", 58],
+    [routers.profile, "put", "/me/queue", { body: {}, headers: {} }, "queueMutation", 58],
+    [routers.profile, "delete", "/me/queue/:albumId", { headers: {}, params: { albumId: "album" } }, "queueMutation", 58],
   ];
 
   for (const [router, method, path, req, limiterName, retryAfterSeconds] of cases) {
@@ -227,6 +235,8 @@ test("authentication rejects mutations before consuming their route-specific lim
     [installed.routers.likes, "put", "/review/:reviewId", { body: {}, headers: {}, params: { reviewId: "review" } }],
     [installed.routers.boards, "post", "/:boardId/albums", { body: {}, headers: {}, params: { boardId: "board" } }],
     [installed.routers.trackRankings, "put", "/album/:albumId", { body: {}, headers: {}, params: { albumId: "album" } }],
+    [installed.routers.profile, "post", "/me/queue", { body: {}, headers: {} }],
+    [installed.routers.profile, "delete", "/me/queue/:albumId", { headers: {}, params: { albumId: "album" } }],
     [installed.routers.trackRankings, "delete", "/album/:albumId", { headers: {}, params: { albumId: "album" } }],
     [installed.routers.profile, "get", "/me/stats", { query: {}, headers: {} }],
   ];
@@ -239,6 +249,7 @@ test("authentication rejects mutations before consuming their route-specific lim
     albumSave: 0,
     likeMutation: 0,
     profileStats: 0,
+    queueMutation: 0,
     reviewCreate: 0,
     reviewMutation: 0,
     search: 0,

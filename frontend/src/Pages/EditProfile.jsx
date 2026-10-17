@@ -87,7 +87,6 @@ export function EditProfile() {
   const [spotifyProfileUrl, setSpotifyProfileUrl] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
   const [favoriteAlbums, setFavoriteAlbums] = useState([]);
-  const [listeningNextAlbum, setListeningNextAlbum] = useState(null);
   const [pinnedReviewId, setPinnedReviewId] = useState("");
   const [pinnedBoardId, setPinnedBoardId] = useState("");
   const [reviews, setReviews] = useState([]);
@@ -163,7 +162,6 @@ export function EditProfile() {
         setSpotifyProfileUrl(typeof data.spotifyProfileUrl === "string" ? data.spotifyProfileUrl : "");
         setIsPrivate(Boolean(data.isPrivate));
         setFavoriteAlbums(Array.isArray(data.favoriteAlbums) ? data.favoriteAlbums : []);
-        setListeningNextAlbum(data.listeningNextAlbum || null);
         setPinnedReviewId(data.pinnedReview?.reviewId || "");
         setPinnedBoardId(data.pinnedBoard?.boardId || "");
         const initialReviews = Array.isArray(reviewsData.reviews) ? reviewsData.reviews : [];
@@ -365,16 +363,6 @@ export function EditProfile() {
     ));
   }
 
-  function setNextAlbum(album) {
-    const albumId = getAlbumId(album);
-
-    if (!albumId) {
-      return;
-    }
-
-    setListeningNextAlbum({ ...album, albumId });
-  }
-
   function moveFavoriteAlbum(albumId, direction) {
     setFavoriteAlbums((currentFavorites) => {
       const currentIndex = currentFavorites.findIndex((album) => getAlbumId(album) === albumId);
@@ -409,7 +397,6 @@ export function EditProfile() {
           bio,
           spotifyProfileUrl,
           favoriteAlbumIds: favoriteAlbums.map(getAlbumId),
-          listeningNextAlbumId: listeningNextAlbum ? getAlbumId(listeningNextAlbum) : "",
           pinnedReviewId,
           pinnedBoardId,
         }),
@@ -447,7 +434,6 @@ export function EditProfile() {
       setSpotifyProfileUrl(typeof data.spotifyProfileUrl === "string" ? data.spotifyProfileUrl : "");
       setIsPrivate(Boolean(data.isPrivate));
       setFavoriteAlbums(Array.isArray(data.favoriteAlbums) ? data.favoriteAlbums : []);
-      setListeningNextAlbum(data.listeningNextAlbum || null);
       setPinnedReviewId(data.pinnedReview?.reviewId || "");
       setPinnedBoardId(data.pinnedBoard?.boardId || "");
       setProfileStatus("Profile saved.");
@@ -518,33 +504,6 @@ export function EditProfile() {
 
                 <div className="edit-profile-favorites">
                   <div className="profile-section-header">
-                    <h2>Listening Next</h2>
-                  </div>
-
-                  {listeningNextAlbum ? (
-                    <article className="edit-profile-selected-album">
-                      <span className="edit-profile-rank">Next</span>
-                      <AlbumCover src={listeningNextAlbum.cover} title={listeningNextAlbum.title} />
-                      <div>
-                        <h3>{listeningNextAlbum.title || "Untitled album"}</h3>
-                        <p>{listeningNextAlbum.artistDisplayName || "Artist unknown"}</p>
-                      </div>
-                      <div className="edit-profile-album-actions">
-                        <button type="button" onClick={() => setListeningNextAlbum(null)}>
-                          Clear
-                        </button>
-                      </div>
-                    </article>
-                  ) : (
-                    <div className="profile-empty-state">
-                      <h3>No album queued</h3>
-                      <p>Search below and choose one album to show as Listening Next.</p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="edit-profile-favorites">
-                  <div className="profile-section-header">
                     <h2>Favorite Albums</h2>
                     <span>{favoriteAlbums.length}/{MAX_FAVORITES}</span>
                   </div>
@@ -612,7 +571,6 @@ export function EditProfile() {
                       {searchResults.map((album) => {
                         const albumId = getAlbumId(album);
                         const isSelected = favoriteAlbums.some((favoriteAlbum) => getAlbumId(favoriteAlbum) === albumId);
-                        const isListeningNext = getAlbumId(listeningNextAlbum || {}) === albumId;
 
                         return (
                           <article className="edit-profile-search-result" key={albumId}>
@@ -628,13 +586,6 @@ export function EditProfile() {
                                 onClick={() => addFavoriteAlbum(album)}
                               >
                                 {isSelected ? "Added" : "Add"}
-                              </button>
-                              <button
-                                type="button"
-                                disabled={isListeningNext}
-                                onClick={() => setNextAlbum(album)}
-                              >
-                                {isListeningNext ? "Queued" : "Set Next"}
                               </button>
                             </div>
                           </article>
