@@ -97,9 +97,14 @@ function orderInput(body) {
 // Resolves a settings change against the board's current settings. Leaving
 // manual order also drops the ranked display, unless the request asks for it,
 // which is rejected: a ranked board must be in manual order.
-function nextSettings(board, input) {
+function settingsInput(input) {
   if (input.orderMode !== undefined && !ORDER_MODES.includes(input.orderMode)) throw invalid("orderMode must be added or manual");
   if (input.displayStyle !== undefined && !DISPLAY_STYLES.includes(input.displayStyle)) throw invalid("displayStyle must be grid or ranked");
+  return { orderMode: input.orderMode, displayStyle: input.displayStyle };
+}
+
+function nextSettings(board, input) {
+  settingsInput(input);
   const mode = input.orderMode ?? orderMode(board);
   let style = input.displayStyle ?? displayStyle(board);
   if (input.displayStyle === undefined && mode !== "manual") style = "grid";
@@ -109,5 +114,5 @@ function nextSettings(board, input) {
 
 module.exports = {
   BOARD_ORDER_LIMIT, ORDER_MODES, DISPLAY_STYLES,
-  orderMode, displayStyle, orderEntries, orderedCount, reconciledOrder, seededOrder, requestedOrder, orderInput, nextSettings,
+  orderMode, displayStyle, orderEntries, orderedCount, reconciledOrder, seededOrder, requestedOrder, orderInput, settingsInput, nextSettings,
 };

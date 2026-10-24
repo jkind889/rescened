@@ -61,6 +61,12 @@ const RATE_LIMITS = {
     duration: 10 * 60,
     message: "Too many track ranking updates. Please try again soon.",
   },
+  boardMutation: {
+    keyPrefix: "rescened:board-mutation",
+    points: 60,
+    duration: 10 * 60,
+    message: "Too many board updates. Please try again soon.",
+  },
   queueMutation: {
     keyPrefix: "rescened:queue-mutation",
     points: 60,
@@ -240,6 +246,7 @@ const reviewMutationLimiter = createRateLimiter(RATE_LIMITS.reviewMutation);
 const likeMutationLimiter = createRateLimiter(RATE_LIMITS.likeMutation);
 const trackRankingMutationLimiter = createRateLimiter(RATE_LIMITS.trackRankingMutation);
 const profileStatsLimiter = createRateLimiter(RATE_LIMITS.profileStats);
+const boardMutationLimiter = createRateLimiter(RATE_LIMITS.boardMutation);
 const queueMutationLimiter = createRateLimiter(RATE_LIMITS.queueMutation);
 const submissionCreateLimiter = createRateLimiter(RATE_LIMITS.submissionCreate);
 const submissionMutationLimiter = createRateLimiter(RATE_LIMITS.submissionMutation);
@@ -258,6 +265,10 @@ module.exports = {
   albumSaveRateLimit: createRateLimitMiddleware(albumSaveLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,
     message: RATE_LIMITS.albumSave.message,
+  }),
+  boardMutationRateLimit: createRateLimitMiddleware(boardMutationLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.boardMutation.message,
   }),
   buildRateLimitPayload,
   consumeRateLimit,

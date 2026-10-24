@@ -10,7 +10,7 @@ const UserProfile = require("../../models/UserProfile");
 const { DiaryAlbumFence } = require("../../models/AutomaticListen");
 const { normalizeCatalogAlbum } = require("./albumCatalog");
 const { fail, uuid, fields, calendarDate, listeningDate, creationInput, isCalendarDate } = require("./diaryValidation");
-const { transaction, claimBoard, touchBoard, claimListen } = require("./boardMutations");
+const { transaction, claimBoard, touchBoard, syncOrder, claimListen } = require("./boardMutations");
 const { ownedBoard } = require("./boardLibrary");
 const { removeListenedAlbum } = require("./listenQueue");
 
@@ -99,6 +99,7 @@ async function createListen(userId, body, key) {
     await ListenCreation.create([{ userId, key: input.key, fingerprint: input.fingerprint, listenId: listen.listenId }], { session });
     for (const board of boards) {
       await BoardListen.create([{ userId, boardId: board._id, listenId: listen._id, albumCatalogId: album._id }], { session });
+      await syncOrder(board, session);
       await touchBoard(board, session);
     }
     await UserProfile.updateOne({ userId }, { $setOnInsert: { userId } }, { upsert: true, session });
@@ -134,6 +135,7 @@ async function deleteListen(userId, listenId) {
     const listen = await claimListen(userId, id, session);
     await BoardListen.deleteMany({ listenId: listen._id }, { session });
     await Listen.deleteOne({ _id: listen._id, userId }, { session });
+    for (const board of boards) await syncOrder(board, session);
   });
 }
 

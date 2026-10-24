@@ -2,10 +2,11 @@ const express = require("express");
 const { getAuth } = require("@clerk/express");
 const Board = require("../models/Board");
 const { findAlbumByPublicId } = require("./utils/albumCatalog");
-const { albumSaveRateLimit, diaryMutationRateLimit } = require("./utils/rateLimit");
+const { albumSaveRateLimit, boardMutationRateLimit, diaryMutationRateLimit } = require("./utils/rateLimit");
 const { fail, fields } = require("./utils/diaryValidation");
 const { getDefaultBoard, ownedBoard, formatBoard, albumBoards, publicBoardId } = require("./utils/boardLibrary");
-const { saveAlbum, removeAlbum, deleteBoard, setMembership } = require("./utils/boardMutations");
+const { saveAlbum, removeAlbum, deleteBoard, setMembership, updateBoard, reorderBoard } = require("./utils/boardMutations");
+const { orderInput, settingsInput } = require("./utils/boardOrder");
 const { listListens } = require("./utils/listeningDiary");
 const { pickUnplayedAlbum } = require("./utils/boardPick");
 
@@ -87,22 +88,33 @@ router.get("/:boardId", auth, async (req, res) => {
   } catch (error) { sendError(res, error, "Failed to fetch board"); }
 });
 
-// Accepts a title, a description, or both. Omitted fields stay unchanged.
-router.patch("/:boardId", auth, async (req, res) => {
+// Accepts any of title, description, orderMode, and displayStyle. Omitted
+// fields stay unchanged. Whether the order settings fit the board is checked
+// against it inside the update's transaction.
+router.patch("/:boardId", auth, boardMutationRateLimit, async (req, res) => {
   try {
-    const input = body(req, ["title", "description"]);
+    const input = body(req, ["title", "description", "orderMode", "displayStyle"]);
     const hasTitle = input.title !== undefined;
     const boardTitle = title(input.title);
     if (hasTitle && (!boardTitle || boardTitle.length > 80)) return res.status(400).json({ error: "Board title must be 1–80 characters" });
     const boardDescription = description(input.description);
-    if (!hasTitle && boardDescription === undefined) throw fail(400, "INVALID_DIARY_REQUEST", "Board update must include a title or description");
-    const board = await ownedBoard(req.userId, req.params.boardId);
-    if (!board) return res.status(404).json({ error: "Board not found" });
-    if (hasTitle) board.title = boardTitle;
-    if (boardDescription !== undefined) board.description = boardDescription;
-    await board.save();
-    res.json(await formatBoard(board));
-  } catch (error) { sendError(res, error, "Failed to rename board"); }
+    const settings = settingsInput(input);
+    if (!hasTitle && boardDescription === undefined && settings.orderMode === undefined && settings.displayStyle === undefined) {
+      throw fail(400, "INVALID_DIARY_REQUEST", "Board update must include a title, description, or order setting");
+    }
+    const boardId = target(req);
+    await updateBoard(req.userId, boardId, { title: hasTitle ? boardTitle : undefined, description: boardDescription, ...settings });
+    res.json(await formatBoard(await ownedBoard(req.userId, boardId), { revision: true }));
+  } catch (error) { sendError(res, error, "Failed to update board"); }
+});
+
+// Replaces a manual board's order and returns the whole board in it.
+router.put("/:boardId/order", auth, boardMutationRateLimit, async (req, res) => {
+  try {
+    const boardId = target(req);
+    await reorderBoard(req.userId, boardId, orderInput(req.body));
+    res.json(await formatBoard(await ownedBoard(req.userId, boardId), { albums: true, revision: true }));
+  } catch (error) { sendError(res, error, "Failed to reorder board"); }
 });
 
 router.delete("/:boardId", auth, async (req, res) => {

@@ -63,6 +63,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
   let userId = initialUserId;
   const calls = {
     albumSave: 0,
+    boardMutation: 0,
     likeMutation: 0,
     notificationMutation: 0,
     profileStats: 0,
@@ -88,6 +89,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
   const limiters = {
     diaryMutationRateLimit: (req, res, next) => next(),
     albumSaveRateLimit: blocker("albumSave", 51),
+    boardMutationRateLimit: blocker("boardMutation", 60),
     externalSearchRateLimit: (req, res, next) => next(),
     likeMutationRateLimit: blocker("likeMutation", 52),
     notificationMutationRateLimit: blocker("notificationMutation", 59),
@@ -184,6 +186,8 @@ test("routes register the intended limiter after authentication where required",
     [routers.likes, "put", "/album/:albumId", 1, limiters.likeMutationRateLimit],
     [routers.likes, "put", "/review/:reviewId", 1, limiters.likeMutationRateLimit],
     [routers.boards, "post", "/:boardId/albums", 1, limiters.albumSaveRateLimit],
+    [routers.boards, "patch", "/:boardId", 1, limiters.boardMutationRateLimit],
+    [routers.boards, "put", "/:boardId/order", 1, limiters.boardMutationRateLimit],
     [routers.trackRankings, "put", "/album/:albumId", 1, limiters.trackRankingMutationRateLimit],
     [routers.trackRankings, "delete", "/album/:albumId", 1, limiters.trackRankingMutationRateLimit],
     [routers.profile, "get", "/me/stats", 1, limiters.profileStatsRateLimit],
@@ -212,6 +216,8 @@ test("route-specific limiters stop work and preserve 429 response metadata", asy
     [routers.likes, "put", "/album/:albumId", { body: {}, headers: {}, params: { albumId: "album" } }, "likeMutation", 52],
     [routers.likes, "put", "/review/:reviewId", { body: {}, headers: {}, params: { reviewId: "review" } }, "likeMutation", 52],
     [routers.boards, "post", "/:boardId/albums", { body: {}, headers: {}, params: { boardId: "board" } }, "albumSave", 51],
+    [routers.boards, "patch", "/:boardId", { body: {}, headers: {}, params: { boardId: "board" } }, "boardMutation", 60],
+    [routers.boards, "put", "/:boardId/order", { body: {}, headers: {}, params: { boardId: "board" } }, "boardMutation", 60],
     [routers.trackRankings, "put", "/album/:albumId", { body: {}, headers: {}, params: { albumId: "album" } }, "trackRankingMutation", 56],
     [routers.trackRankings, "delete", "/album/:albumId", { headers: {}, params: { albumId: "album" } }, "trackRankingMutation", 56],
     [routers.profile, "get", "/me/stats", { query: {}, headers: {} }, "profileStats", 57],
@@ -244,6 +250,8 @@ test("authentication rejects mutations before consuming their route-specific lim
     [installed.routers.likes, "put", "/album/:albumId", { body: {}, headers: {}, params: { albumId: "album" } }],
     [installed.routers.likes, "put", "/review/:reviewId", { body: {}, headers: {}, params: { reviewId: "review" } }],
     [installed.routers.boards, "post", "/:boardId/albums", { body: {}, headers: {}, params: { boardId: "board" } }],
+    [installed.routers.boards, "patch", "/:boardId", { body: {}, headers: {}, params: { boardId: "board" } }],
+    [installed.routers.boards, "put", "/:boardId/order", { body: {}, headers: {}, params: { boardId: "board" } }],
     [installed.routers.trackRankings, "put", "/album/:albumId", { body: {}, headers: {}, params: { albumId: "album" } }],
     [installed.routers.profile, "post", "/me/queue", { body: {}, headers: {} }],
     [installed.routers.profile, "delete", "/me/queue/:albumId", { headers: {}, params: { albumId: "album" } }],
@@ -260,6 +268,7 @@ test("authentication rejects mutations before consuming their route-specific lim
   }
   assert.deepEqual(installed.calls, {
     albumSave: 0,
+    boardMutation: 0,
     likeMutation: 0,
     notificationMutation: 0,
     profileStats: 0,
