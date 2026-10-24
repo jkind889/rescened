@@ -165,10 +165,11 @@ test("notifications expose public UUIDs and resolved review UUIDs without leakin
   const review = { _id: internalReviewId, reviewId: REVIEW_ID, albumCatalogId: album, rating: 4 };
   t.mock.method(Notification, "find", () => ({
     sort() { return this; },
-    limit: async () => [notification],
+    limit() { return this; },
+    lean: async () => [notification],
   }));
   t.mock.method(Notification, "updateMany", async () => ({}));
-  t.mock.method(Review, "find", () => ({ populate: async () => [review] }));
+  t.mock.method(Review, "find", () => ({ lean: async () => [review] }));
   t.mock.method(AlbumCatalog, "find", async () => [album]);
   const router = loadRoute(t, notificationRoutePath);
 
@@ -178,6 +179,8 @@ test("notifications expose public UUIDs and resolved review UUIDs without leakin
   assert.equal(result.notificationId, NOTIFICATION_ID);
   assert.equal(result.reviewId, REVIEW_ID);
   assert.equal(result.review.reviewId, REVIEW_ID);
+  assert.equal(result.subject.review.reviewId, REVIEW_ID);
+  assert.equal(result.subject.album.albumId, album.albumId);
   assert.equal(Object.hasOwn(result, "_id"), false);
   assert.equal(Object.hasOwn(result.review, "_id"), false);
   assert.equal(JSON.stringify(result).includes(String(internalReviewId)), false);
@@ -199,9 +202,10 @@ test("a dangling notification review reference remains empty instead of exposing
   };
   t.mock.method(Notification, "find", () => ({
     sort() { return this; },
-    limit: async () => [notification],
+    limit() { return this; },
+    lean: async () => [notification],
   }));
-  t.mock.method(Review, "find", () => ({ populate: async () => [] }));
+  t.mock.method(Review, "find", () => ({ lean: async () => [] }));
   t.mock.method(AlbumCatalog, "find", async () => []);
   const router = loadRoute(t, notificationRoutePath);
 
@@ -209,6 +213,7 @@ test("a dangling notification review reference remains empty instead of exposing
   const result = response.body.notifications[0];
   assert.equal(result.reviewId, "");
   assert.equal(result.review, null);
+  assert.equal(result.subject, null);
   assert.equal(result.notificationId, NOTIFICATION_ID);
   assert.equal(Object.hasOwn(result, "_id"), false);
   assert.equal(JSON.stringify(result).includes(String(internalReviewId)), false);

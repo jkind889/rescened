@@ -258,3 +258,26 @@ test("a fan-out for a review deleted mid-run leaves no rows behind", { skip: !en
   assert.equal(result.notified, 0);
   assert.equal(await Notification.countDocuments({ reviewId: review._id }), 0);
 });
+
+test("pages are stable across equal timestamps and read state changes only on request", { skip: !enabled }, async () => {
+  const recipientUserId = "pager";
+  const createdAt = new Date("2026-10-10T00:00:00.000Z");
+  await Notification.insertMany(Array.from({ length: 35 }, (_, index) => ({
+    recipientUserId, actorUserId: `actor-${index}`, type: "follow", createdAt: index < 20 ? createdAt : new Date(createdAt.getTime() + index),
+  })));
+  const first = await readPage(recipientUserId);
+  const second = await readPage(recipientUserId, first.nextCursor);
+  assert.equal(first.rows.length, 30);
+  assert.equal(second.rows.length, 5);
+  assert.equal(second.nextCursor, null);
+  const ids = [...first.rows, ...second.rows].map((row) => row.notificationId);
+  assert.equal(new Set(ids).size, 35);
+  assert.equal(await unreadCount(recipientUserId), 35, "reading pages changes nothing");
+
+  assert.equal(await markRead(recipientUserId, { notificationIds: ids.slice(0, 3) }), 3);
+  assert.equal(await markRead("someone-else", { notificationIds: ids.slice(3, 6) }), 0, "other users' rows are untouched");
+  assert.equal(await unreadCount(recipientUserId), 32);
+  assert.equal(await markRead(recipientUserId, { all: true }), 32);
+  assert.equal(await clearNotifications(recipientUserId, { notificationIds: ids.slice(0, 5) }), 5);
+  assert.equal(await clearNotifications(recipientUserId, { all: true }), 30);
+});

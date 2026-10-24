@@ -89,8 +89,14 @@ test("suggestion notifications refuse to write outside a transaction and skip se
   assert.equal(await recordSuggestionStatus({ submission, status: "approved", actorUserId: "contributor", session: {} }), false);
 });
 
-test("the preference route rejects a bad body before touching the database", async (t) => {
+test("preference and read-state routes reject bad bodies before touching the database", async (t) => {
   const profile = loadRouter(t, "../routes/profile");
   const locked = await callLast(profile, "patch", "/me/notification-preferences", { suggestion_status: false });
   assert.deepEqual(locked, { status: 400, body: { error: "suggestion_status notifications cannot be turned off", code: "NOTIFICATION_PREFERENCE_LOCKED" } });
+  const notifications = loadRouter(t, "../routes/notifications");
+  for (const path of ["/read", "/clear"]) {
+    const result = await callLast(notifications, "post", path, { notificationIds: ["507f1f77bcf86cd799439011"] });
+    assert.equal(result.status, 400, path);
+    assert.equal(result.body.code, "INVALID_NOTIFICATION_REQUEST", path);
+  }
 });
