@@ -8,7 +8,7 @@ import AsyncState from "../Components/Loading/AsyncState";
 import PickAlbum from "../Components/PickAlbum";
 import ShareButton from "../Components/ShareButton";
 import { moveItem } from "../features/queue/queue";
-import { normalizeDraft, orderLimitOf, rankMap, sameOrder, saveBoardOrder, saveBoardSettings } from "../features/boards/boardOrder";
+import { earlierOrderTarget, normalizeDraft, orderLimitOf, rankMap, sameOrder, saveBoardOrder, saveBoardSettings } from "../features/boards/boardOrder";
 import "../features/boards/boards.css";
 
 const MAX_DESCRIPTION_LENGTH = 280;
@@ -51,6 +51,8 @@ export function BoardDetail() {
   const { getToken, isSignedIn } = useAuth();
   const isPublicBoard = Boolean(userId);
   const requestRef = useRef(null);
+  const mutationRef = useRef(false);
+  const metadataRef = useRef(null);
   const scope = `${userId || "owner"}:${boardId}:${isSignedIn}`;
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
@@ -75,6 +77,9 @@ export function BoardDetail() {
   const [dragIndex, setDragIndex] = useState(null);
   const [isSavingOrder, setIsSavingOrder] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [needsRefresh, setNeedsRefresh] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [orderStatus, setOrderStatus] = useState("");
 
   const fetchBoard = useCallback(async function fetchBoard(refresh = false) {
@@ -86,9 +91,12 @@ export function BoardDetail() {
       setBoard(null);
       setLoadError("");
       setIsLoading(false);
-      return;
+      setIsRefreshing(false);
+      requestRef.current = null;
+      return false;
     }
 
+    if (refresh) setIsRefreshing(true);
     try {
       if (!refresh) {
         setIsLoading(true);
@@ -111,19 +119,32 @@ export function BoardDetail() {
       const data = await response.json();
       if (controller.signal.aborted || scopeRef.current !== scope) return;
       setBoard(data);
-      setTitle(data.title || "");
-      setDescription(data.description || "");
+      const previousMetadata = metadataRef.current;
+      const nextTitle = data.title || "";
+      const nextDescription = data.description || "";
+      // Refresh the order without erasing independently edited form fields.
+      setTitle((current) => !refresh || current === previousMetadata?.title ? nextTitle : current);
+      setDescription((current) => !refresh || current === previousMetadata?.description ? nextDescription : current);
+      metadataRef.current = { title: nextTitle, description: nextDescription };
       setLoadError("");
+      setNeedsRefresh(false);
+      return true;
     } catch (boardError) {
       if (controller.signal.aborted || scopeRef.current !== scope) return;
       if (refresh) {
-        setActionError("Your change was saved, but the board could not refresh. Reload the page to see the latest totals.");
+        setNeedsRefresh(true);
+        setActionError("Could not refresh this board. Refresh it before making another change.");
       } else {
         setBoard(null);
         setLoadError(boardError.message || "Could not load this board.");
       }
+      return false;
     } finally {
-      if (!controller.signal.aborted && scopeRef.current === scope) setIsLoading(false);
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setIsRefreshing(false);
+        if (scopeRef.current === scope) setIsLoading(false);
+      }
     }
   }, [boardId, getToken, isPublicBoard, isSignedIn, userId, scope]);
 
@@ -143,6 +164,10 @@ export function BoardDetail() {
   const order = orderDraft.base === savedOrder ? orderDraft.order : savedOrder;
   const isOrderDirty = !sameOrder(order, savedOrder);
   const isFiltered = Boolean(query.trim()) || albumFilter !== "all";
+  // Hold the album snapshot and its revision steady while any write or refresh
+  // is pending, including listen edits made in the modal.
+  const isBoardBusy = Boolean(isSavingOrder || isSavingSettings || isSavingTitle || isSavingDescription
+    || isDeleting || removingAlbumId || savingAlbumId || isRefreshing || needsRefresh || selectedAlbum);
   const canArrange = !isPublicBoard && isManual && sortKey === CUSTOM_SORT && !isFiltered;
   const showRanks = isRanked && sortKey === CUSTOM_SORT;
   const showBlockEnd = isManual && sortKey === CUSTOM_SORT && !isFiltered && order.length > orderLimit;
@@ -165,6 +190,20 @@ export function BoardDetail() {
     return [...matching].sort((a, b) => compare(a, b) || ALBUM_SORTS.recent.compare(a, b));
   }, [albumFilter, albumsById, board, order, query, sortKey]);
 
+  // The ref also guards repeated actions before React has rendered busy state.
+  function beginMutation() {
+    if (isBoardBusy || mutationRef.current || requestRef.current) return false;
+    mutationRef.current = true;
+    return true;
+  }
+
+  async function retryRefresh() {
+    const refreshed = await fetchBoard(true);
+    if (scopeRef.current !== scope || !refreshed) return;
+    setActionError("");
+    setOrderStatus(isOrderDirty ? "Latest board loaded. Your unsaved order was discarded." : "Board refreshed.");
+  }
+
   function updateOrder(next, movedAlbumId) {
     const normalized = normalizeDraft(next, albumsById, orderLimit);
     setOrderDraft({ base: savedOrder, order: normalized });
@@ -178,7 +217,8 @@ export function BoardDetail() {
   }
 
   function moveAlbum(index, targetIndex) {
-    if (targetIndex < 0 || targetIndex >= order.length) return;
+    if (!canArrange || isBoardBusy || mutationRef.current || requestRef.current
+      || targetIndex < 0 || targetIndex >= order.length) return;
     updateOrder(moveItem(order, index, targetIndex), order[index]);
   }
 
@@ -195,7 +235,7 @@ export function BoardDetail() {
 
   // A board past the limit saves only its ordered block; the rest follow by date.
   async function saveOrder() {
-    if (!board || !isOrderDirty || isSavingOrder) return;
+    if (!board || !isOrderDirty || !beginMutation()) return;
     setIsSavingOrder(true);
     setActionError("");
     try {
@@ -207,18 +247,22 @@ export function BoardDetail() {
       if (scopeRef.current !== scope) return;
       if (orderError.code === "BOARD_CHANGED") {
         setOrderStatus("");
-        await fetchBoard(true);
-        setActionError("This board changed somewhere else, so its latest order is shown. Your unsaved order was discarded.");
+        const refreshed = await fetchBoard(true);
+        if (scopeRef.current !== scope) return;
+        setActionError(refreshed
+          ? "This board changed somewhere else, so its latest order is shown. Your unsaved order was discarded."
+          : "This board changed somewhere else, but its latest order could not load. Your unsaved order is still shown. Refresh the board before trying again.");
       } else {
         setActionError(orderError.message || "Could not save the new order.");
       }
     } finally {
+      mutationRef.current = false;
       setIsSavingOrder(false);
     }
   }
 
   async function updateOrderSettings(settings) {
-    if (!board || isSavingSettings || isOrderDirty) return;
+    if (!board || isOrderDirty || !beginMutation()) return;
     setIsSavingSettings(true);
     setActionError("");
     try {
@@ -231,6 +275,7 @@ export function BoardDetail() {
     } catch (settingsError) {
       if (scopeRef.current === scope) setActionError(settingsError.message || "Could not update how this board is ordered.");
     } finally {
+      mutationRef.current = false;
       setIsSavingSettings(false);
     }
   }
@@ -238,7 +283,7 @@ export function BoardDetail() {
   async function saveDescription(event) {
     event.preventDefault();
     const nextDescription = description.trim();
-    if (!board || nextDescription === (board.description || "") || isSavingDescription) return;
+    if (!board || nextDescription === (board.description || "") || isOrderDirty || !beginMutation()) return;
     try {
       setIsSavingDescription(true);
       setActionError("");
@@ -249,14 +294,16 @@ export function BoardDetail() {
         body: JSON.stringify({ description: nextDescription }),
       });
       if (!response.ok) throw new Error(await getApiErrorMessage(response, "Could not save the description."));
-      const updatedBoard = await response.json();
+      const summary = await response.json();
       if (scopeRef.current !== scope) return;
-      // The summary carries the board's new revision, which the next reorder needs.
-      setBoard((currentBoard) => ({ ...currentBoard, ...updatedBoard }));
-      setDescription(updatedBoard.description || "");
+      setDescription((current) => current === description ? summary.description || "" : current);
+      // PATCH returns a summary only. Fetch albums and revision together so a
+      // metadata save cannot authorize a reorder drawn from an older snapshot.
+      await fetchBoard(true);
     } catch (descriptionError) {
-      setActionError(descriptionError.message || "Could not save the description.");
+      if (scopeRef.current === scope) setActionError(descriptionError.message || "Could not save the description.");
     } finally {
+      mutationRef.current = false;
       setIsSavingDescription(false);
     }
   }
@@ -266,7 +313,7 @@ export function BoardDetail() {
 
     const nextTitle = title.trim();
 
-    if (!nextTitle || !board || nextTitle === board.title || isSavingTitle) {
+    if (!nextTitle || !board || nextTitle === board.title || isOrderDirty || !beginMutation()) {
       return;
     }
 
@@ -287,24 +334,26 @@ export function BoardDetail() {
         throw new Error("Failed to rename board");
       }
 
-      const updatedBoard = await response.json();
-      setBoard((currentBoard) => ({ ...currentBoard, ...updatedBoard }));
-      setTitle(updatedBoard.title);
-      setActionError("");
+      const summary = await response.json();
+      if (scopeRef.current !== scope) return;
+      setTitle((current) => current === title ? summary.title : current);
+      await fetchBoard(true);
     } catch (renameError) {
       console.error(renameError);
-      setActionError("Could not rename this board.");
+      if (scopeRef.current === scope) setActionError("Could not rename this board.");
     } finally {
+      mutationRef.current = false;
       setIsSavingTitle(false);
     }
   }
 
   async function deleteBoard() {
-    if (!board || board.isDefault) {
+    if (!board || board.isDefault || isOrderDirty || !beginMutation()) {
       return;
     }
 
     try {
+      setIsDeleting(true);
       setActionError("");
       const token = await getToken();
       const response = await fetch(`${API_BASE_URL}/boards/${board.boardId}`, {
@@ -318,15 +367,18 @@ export function BoardDetail() {
         throw new Error("Failed to delete board");
       }
 
-      navigate("/boards");
+      if (scopeRef.current === scope) navigate("/boards");
     } catch (deleteError) {
       console.error(deleteError);
-      setActionError("Could not delete this board.");
+      if (scopeRef.current === scope) setActionError("Could not delete this board.");
+    } finally {
+      mutationRef.current = false;
+      setIsDeleting(false);
     }
   }
 
   async function removeAlbum(albumId) {
-    if (!board || isPublicBoard || removingAlbumId || savingAlbumId || isOrderDirty) {
+    if (!board || isPublicBoard || isOrderDirty || !beginMutation()) {
       return;
     }
 
@@ -346,24 +398,20 @@ export function BoardDetail() {
       }
 
       if (scopeRef.current !== scope) return;
-      setBoard((currentBoard) => ({
-        ...currentBoard,
-        itemCount: Math.max(0, (currentBoard.itemCount || 1) - 1),
-        listenCount: Math.max(0, (currentBoard.listenCount || 0) - (currentBoard.albums.find((album) => album.albumId === albumId)?.listenCount || 0)),
-        albums: currentBoard.albums.filter((album) => album.albumId !== albumId),
-      }));
-      // The removal moved the board's revision; a later reorder needs the new one.
-      if (board.orderMode === "manual") await fetchBoard(true);
+      // Refresh the complete snapshot before any later reorder, even when the
+      // board was in date order when this removal began.
+      await fetchBoard(true);
     } catch (removeError) {
       console.error(removeError);
-      setActionError(removeError.message || "Could not remove that album.");
+      if (scopeRef.current === scope) setActionError(removeError.message || "Could not remove that album.");
     } finally {
+      mutationRef.current = false;
       setRemovingAlbumId("");
     }
   }
 
   async function keepAlbumSaved(albumId) {
-    if (isPublicBoard || !isSignedIn || savingAlbumId || removingAlbumId || isOrderDirty) return;
+    if (!board || isPublicBoard || !isSignedIn || isOrderDirty || !beginMutation()) return;
     setSavingAlbumId(albumId);
     setActionError("");
     try {
@@ -378,6 +426,7 @@ export function BoardDetail() {
     } catch (error) {
       if (scopeRef.current === scope) setActionError(error.message || "Could not save this album.");
     } finally {
+      mutationRef.current = false;
       setSavingAlbumId("");
     }
   }
@@ -388,8 +437,8 @@ export function BoardDetail() {
       <div className="board-album-listening">
         <p className="board-album-membership">{album.explicitlySaved ? "Saved album" : "Added through listens"}</p>
         <p>{count} listen{count === 1 ? "" : "s"}{album.latestListenedOn && <> · Latest <time dateTime={album.latestListenedOn}>{album.latestListenedOn}</time></>}</p>
-        {(!isPublicBoard || count > 0) && <button type="button" disabled={Boolean(removingAlbumId || savingAlbumId || (!isPublicBoard && isOrderDirty))} title={!isPublicBoard && isOrderDirty ? UNSAVED_ORDER_HINT : undefined} onClick={() => setSelectedAlbum(album)}>{isPublicBoard ? "View listening dates" : "Manage listens"}</button>}
-        {!isPublicBoard && !album.explicitlySaved && <button type="button" disabled={Boolean(savingAlbumId || removingAlbumId || isOrderDirty)} title={isOrderDirty ? UNSAVED_ORDER_HINT : undefined} onClick={() => keepAlbumSaved(album.albumId)}>{savingAlbumId === album.albumId ? "Saving…" : "Keep album saved"}</button>}
+        {(!isPublicBoard || count > 0) && <button type="button" disabled={isBoardBusy || (!isPublicBoard && isOrderDirty)} title={!isPublicBoard && isOrderDirty ? UNSAVED_ORDER_HINT : undefined} onClick={() => setSelectedAlbum(album)}>{isPublicBoard ? "View listening dates" : "Manage listens"}</button>}
+        {!isPublicBoard && !album.explicitlySaved && <button type="button" disabled={isBoardBusy || isOrderDirty} title={isOrderDirty ? UNSAVED_ORDER_HINT : undefined} onClick={() => keepAlbumSaved(album.albumId)}>{savingAlbumId === album.albumId ? "Saving…" : "Keep album saved"}</button>}
       </div>
     );
   }
@@ -399,15 +448,17 @@ export function BoardDetail() {
     return rank ? <span className="board-rank" aria-label={`Number ${rank}`}>{rank}</span> : null;
   }
 
-  // Arrow buttons move one place; in the grid "earlier" is left and up.
+  // Overflow albums enter the last custom position directly; the remaining
+  // overflow stays in date order. Inside the block arrows move one place.
   function renderArrangeControls(album, index, isGrid) {
     if (!canArrange) return null;
     const label = album.title || "album";
+    const isOverflow = index >= orderLimit;
     return (
       <span className="board-arrange-controls">
         <span className="board-arrange-handle" aria-hidden="true">⋮⋮</span>
-        <button type="button" onClick={() => moveAlbum(index, index - 1)} disabled={isSavingOrder || index === 0} aria-label={`Move ${label} ${isGrid ? "earlier" : "up"}`}>{isGrid ? "←" : "↑"}</button>
-        <button type="button" onClick={() => moveAlbum(index, index + 1)} disabled={isSavingOrder || index === order.length - 1} aria-label={`Move ${label} ${isGrid ? "later" : "down"}`}>{isGrid ? "→" : "↓"}</button>
+        <button type="button" onClick={() => moveAlbum(index, earlierOrderTarget(index, orderLimit))} disabled={isBoardBusy || index === 0} aria-label={isOverflow ? `Move ${label} into custom order` : `Move ${label} ${isGrid ? "earlier" : "up"}`} title={isOverflow ? `Move to position ${orderLimit}` : undefined}>{isGrid ? "←" : "↑"}</button>
+        <button type="button" onClick={() => moveAlbum(index, index + 1)} disabled={isBoardBusy || isOverflow || index === order.length - 1} aria-label={`Move ${label} ${isGrid ? "later" : "down"}`}>{isGrid ? "→" : "↓"}</button>
       </span>
     );
   }
@@ -415,8 +466,12 @@ export function BoardDetail() {
   function arrangeProps(index) {
     if (!canArrange) return {};
     return {
-      draggable: !isSavingOrder,
-      onDragStart: (event) => { setDragIndex(index); event.dataTransfer.effectAllowed = "move"; },
+      draggable: !isBoardBusy,
+      onDragStart: (event) => {
+        if (isBoardBusy || mutationRef.current || requestRef.current) { event.preventDefault(); return; }
+        setDragIndex(index);
+        event.dataTransfer.effectAllowed = "move";
+      },
       onDragOver: (event) => event.preventDefault(),
       onDrop: (event) => handleDrop(event, index),
       onDragEnd: () => setDragIndex(null),
@@ -441,7 +496,7 @@ export function BoardDetail() {
   function renderRemoveButton(album) {
     if (isPublicBoard) return null;
     return (
-      <button className="board-remove-album" type="button" disabled={Boolean(removingAlbumId || savingAlbumId || isOrderDirty)} title={isOrderDirty ? UNSAVED_ORDER_HINT : undefined} onClick={() => removeAlbum(album.albumId)}>
+      <button className="board-remove-album" type="button" disabled={isBoardBusy || isOrderDirty} title={isOrderDirty ? UNSAVED_ORDER_HINT : undefined} onClick={() => removeAlbum(album.albumId)}>
         {removingAlbumId === album.albumId ? "Removing…" : "Remove album"}
       </button>
     );
@@ -494,7 +549,7 @@ export function BoardDetail() {
               maxLength={80}
               aria-label="Board title"
             />
-            <button type="submit" disabled={!title.trim() || title.trim() === board.title || isSavingTitle}>
+            <button type="submit" disabled={!title.trim() || title.trim() === board.title || isBoardBusy || isOrderDirty} title={isOrderDirty ? UNSAVED_ORDER_HINT : undefined}>
               Rename
             </button>
           </form>
@@ -513,7 +568,7 @@ export function BoardDetail() {
             />
             <div>
               <small>{description.length}/{MAX_DESCRIPTION_LENGTH}</small>
-              <button type="submit" disabled={description.trim() === (board.description || "") || isSavingDescription}>
+              <button type="submit" disabled={description.trim() === (board.description || "") || isBoardBusy || isOrderDirty} title={isOrderDirty ? UNSAVED_ORDER_HINT : undefined}>
                 {isSavingDescription ? "Saving…" : "Save description"}
               </button>
             </div>
@@ -562,7 +617,7 @@ export function BoardDetail() {
             hint={isPublicBoard ? "" : "Others can open this link while your profile is public."}
           />
           {!isPublicBoard && !board.isDefault && (
-            <button className="board-danger-button" type="button" onClick={deleteBoard}>
+            <button className="board-danger-button" type="button" disabled={isBoardBusy || isOrderDirty} onClick={deleteBoard}>
               Delete
             </button>
           )}
@@ -575,7 +630,7 @@ export function BoardDetail() {
             <span>Order</span>
             <select
               value={isManual ? "manual" : "added"}
-              disabled={isSavingSettings || isOrderDirty}
+              disabled={isBoardBusy || isOrderDirty}
               onChange={(event) => updateOrderSettings({ orderMode: event.target.value })}
             >
               <option value="added">Date added</option>
@@ -586,7 +641,7 @@ export function BoardDetail() {
             <input
               type="checkbox"
               checked={isRanked}
-              disabled={isSavingSettings || isOrderDirty || (!isManual && board.itemCount > orderLimit)}
+              disabled={isBoardBusy || isOrderDirty || (!isManual && board.itemCount > orderLimit)}
               onChange={(event) => updateOrderSettings(event.target.checked ? { orderMode: "manual", displayStyle: "ranked" } : { displayStyle: "grid" })}
             />
             <span>Show as a ranked list</span>
@@ -595,12 +650,15 @@ export function BoardDetail() {
           {isManual && sortKey !== CUSTOM_SORT && <small>Choose Custom order in the sort menu to rearrange albums.</small>}
           {isManual && sortKey === CUSTOM_SORT && isFiltered && <small>Clear the search and filter to rearrange albums.</small>}
           {canArrange && order.length > 1 && <small>Drag albums or use the arrows to rearrange them, then save. New albums go to the bottom.</small>}
-          {isSavingSettings && <small>Updating…</small>}
+          {(isSavingSettings || isRefreshing) && <small>Updating…</small>}
         </div>
       )}
       {!isPublicBoard && board.explicitSaveCount > 0 && <PickAlbum key={board.boardId} boardId={board.boardId} />}
       {!isPublicBoard && <p className="board-listening-help">Removing an album clears its saves and listening dates from this board. Your diary entries stay intact.</p>}
       {actionError && <p role="alert" className="boards-error">{actionError}</p>}
+      {needsRefresh && <button type="button" disabled={isRefreshing || isSavingOrder} onClick={retryRefresh}>
+        {isRefreshing ? "Refreshing…" : "Refresh board"}
+      </button>}
 
       {filteredAlbums.length === 0 ? (
         <div className="boards-empty">
@@ -650,8 +708,8 @@ export function BoardDetail() {
       {!isPublicBoard && isOrderDirty && (
         <div className="board-order-bar" role="region" aria-label="Unsaved order">
           <span>You changed the order of this board.</span>
-          <button type="button" onClick={discardOrder} disabled={isSavingOrder}>Discard</button>
-          <button type="button" className="is-primary" onClick={saveOrder} disabled={isSavingOrder}>{isSavingOrder ? "Saving…" : "Save order"}</button>
+          <button type="button" onClick={discardOrder} disabled={isSavingOrder || isRefreshing}>Discard</button>
+          <button type="button" className="is-primary" onClick={saveOrder} disabled={isBoardBusy}>{isSavingOrder ? "Saving…" : "Save order"}</button>
         </div>
       )}
       {selectedAlbum && <BoardListens

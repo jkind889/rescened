@@ -12,6 +12,12 @@ export function sameOrder(first, second) {
   return first.length === second.length && first.every((albumId, index) => albumId === second[index]);
 }
 
+// Overflow is date-sorted, so a one-place move there would be undone. Promote
+// an overflow album directly into the last custom position instead.
+export function earlierOrderTarget(index, limit) {
+  return Math.min(index - 1, limit - 1);
+}
+
 // Past the limit only the first orderLimit albums keep a custom position; the
 // rest follow by date added, oldest first, as the server lists them. Applying
 // that after every move keeps the draft identical to what a save will show,
