@@ -9,6 +9,7 @@ const moderationPath = require.resolve("../routes/moderation");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
 const BaselineService = require("../lib/baselines/service");
+const Notification = require("../models/Notification");
 
 const ORIGINALS = {
   startSession: mongoose.startSession,
@@ -20,6 +21,7 @@ const ORIGINALS = {
   submissionFindOneAndUpdate: AlbumSubmission.findOneAndUpdate,
   publishSubmissionBaseline: BaselineService.publishSubmissionBaseline,
   invalidateAlbumBaseline: BaselineService.invalidateAlbumBaseline,
+  notificationUpdateOne: Notification.updateOne,
 };
 
 function validMetadata(title = "Kind of Blue") {
@@ -109,6 +111,15 @@ async function callRoute(router, method, path, req = {}) {
 function installMocks({ userId = "user_mod", documents = [], catalogs = [] } = {}) {
   let currentDocuments = documents;
   let currentCatalogs = catalogs;
+  const notifications = [];
+  // Upserts keyed like the real dedup index, so a retry inserts nothing.
+  Notification.updateOne = async (filter, update, options) => {
+    assert.ok(options?.session, "notification writes must join the moderation transaction");
+    const key = JSON.stringify(filter);
+    if (!notifications.some((row) => row.key === key)) notifications.push({ key, ...update.$setOnInsert });
+    return {};
+  };
+  mongoose.startSession = async () => ({ async withTransaction(callback) { await callback(); }, async endSession() {} });
   const pass = (req, res, next) => next();
   BaselineService.publishSubmissionBaseline = async () => null;
   BaselineService.invalidateAlbumBaseline = async () => false;
@@ -182,6 +193,7 @@ function installMocks({ userId = "user_mod", documents = [], catalogs = [] } = {
   return {
     get documents() { return currentDocuments; },
     get catalogs() { return currentCatalogs; },
+    notifications,
     router: require("../routes/moderation"),
   };
 }
@@ -196,6 +208,7 @@ test.afterEach(() => {
   AlbumSubmission.findOneAndUpdate = ORIGINALS.submissionFindOneAndUpdate;
   BaselineService.publishSubmissionBaseline = ORIGINALS.publishSubmissionBaseline;
   BaselineService.invalidateAlbumBaseline = ORIGINALS.invalidateAlbumBaseline;
+  Notification.updateOne = ORIGINALS.notificationUpdateOne;
   delete require.cache[moderationPath];
   delete require.cache[clerkPath];
   delete require.cache[rateLimitPath];
@@ -299,6 +312,10 @@ test("moderator commands enforce reasons, target validation, and conditional tra
   assert.equal(rejected.status, 200);
   assert.equal(rejected.body.suggestion.status, "rejected");
   assert.equal(rejected.body.suggestion.moderationHistory.at(-1).action, "rejected");
+  assert.equal(state.notifications.length, 1);
+  assert.equal(state.notifications[0].recipientUserId, document.submittedByUserId);
+  assert.equal(state.notifications[0].actorUserId, Notification.MODERATION_ACTOR_ID);
+  assert.equal(state.notifications[0].submissionStatus, "rejected");
 
   const duplicateDocument = makeSubmission();
   state.documents.push(duplicateDocument);
@@ -342,6 +359,27 @@ test("approval creates a catalog album transactionally and is idempotent", async
   assert.equal(second.body.idempotent, true);
   assert.equal(state.catalogs.length, 1);
   assert.equal(state.documents[0].moderationHistory.filter((event) => event.action === "approved").length, 1);
+  assert.equal(state.notifications.length, 1);
+  assert.equal(state.notifications[0].submissionStatus, "approved");
+});
+
+test("moderator commands return 503 instead of writing without a transaction", async () => {
+  const document = makeSubmission();
+  const state = installMocks({ documents: [document] });
+  mongoose.startSession = async () => { throw Object.assign(new Error("Transaction numbers are only allowed on a replica set member or mongos"), { code: 20 }); };
+  const result = await callRoute(state.router, "post", "/:submissionId/request-changes", { params: { submissionId: document.submissionId }, body: { reason: "Add a source" } });
+  assert.equal(result.status, 503);
+  assert.equal(result.body.code, "MODERATION_UNAVAILABLE");
+  assert.equal(document.status, "pending");
+  assert.equal(state.notifications.length, 0);
+});
+
+test("a moderator acting on their own suggestion is not notified", async () => {
+  const document = makeSubmission({ submittedByUserId: "user_mod" });
+  const state = installMocks({ documents: [document] });
+  const result = await callRoute(state.router, "post", "/:submissionId/request-changes", { params: { submissionId: document.submissionId }, body: { reason: "Add a source" } });
+  assert.equal(result.status, 200);
+  assert.equal(state.notifications.length, 0);
 });
 
 test("approval publishes a moderator-reviewed direct cover URL without fetching it", async () => {

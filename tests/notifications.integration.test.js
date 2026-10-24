@@ -16,6 +16,7 @@ const Review = require("../models/Reviews");
 const UserProfile = require("../models/UserProfile");
 const { createCatalogAlbum } = require("../routes/utils/albumCatalog");
 const { approveAlbumSubmission } = require("../routes/utils/approval");
+const { applyModerationCommand } = require("../routes/utils/moderationCommands");
 const { deleteOwnedReview, mutateReviewLike } = require("../routes/utils/reviewInteractions");
 const {
   clearNotifications,
@@ -157,4 +158,48 @@ test("a muted review author gets no like notification while the like still commi
   const result = await mutateReviewLike(review.reviewId, "liker", true);
   assert.equal(result.likeCount, 1);
   assert.equal(await Notification.countDocuments({ recipientUserId: "quiet-author" }), 0);
+});
+
+test("a failed moderation transition leaves neither the status change nor the notification", { skip: !enabled }, async (t) => {
+  const submission = await createSubmission("Rolled Back Album", "contributor-rollback");
+  t.mock.method(Notification, "updateOne", async () => { throw new Error("forced notification failure"); });
+  await assert.rejects(
+    applyModerationCommand({ submissionId: submission.submissionId, actorUserId: "moderator", action: "reject", body: { reason: "Nope" } }),
+    /forced notification failure/,
+  );
+  t.mock.restoreAll();
+  const persisted = await AlbumSubmission.findOne({ submissionId: submission.submissionId }).lean();
+  assert.equal(persisted.status, "pending");
+  assert.equal(persisted.moderationHistory.length, 1);
+  assert.equal(await Notification.countDocuments({ recipientUserId: "contributor-rollback" }), 0);
+
+  await applyModerationCommand({ submissionId: submission.submissionId, actorUserId: "moderator-secret-id", action: "request_changes", body: { reason: "Add a source" } });
+  const [row] = await Notification.find({ recipientUserId: "contributor-rollback" }).lean();
+  assert.equal(row.type, "suggestion_status");
+  assert.equal(row.submissionStatus, "needs_changes");
+  assert.equal(row.submissionRevision, 1);
+  assert.equal(row.actorUserId, Notification.MODERATION_ACTOR_ID);
+
+  const [serialized] = await serializeNotifications([row], new Map());
+  assert.equal(serialized.actor.username, "Rescened moderators");
+  assert.equal(serialized.actorUserId, null);
+  assert.deepEqual(serialized.subject, {
+    submissionId: submission.submissionId, submissionType: "new_album", title: "Rolled Back Album", status: "needs_changes",
+  });
+  assert.equal(JSON.stringify(serialized).includes("moderator-secret-id"), false, "the moderator's ID never reaches the contributor");
+  assert.equal(JSON.stringify(serialized).includes(String(submission._id)), false);
+});
+
+test("approval writes exactly one notification across retries and concurrent approvals", { skip: !enabled }, async () => {
+  const submission = await createSubmission("Notified Album", "contributor-approved");
+  const approve = (actorUserId) => approveAlbumSubmission({
+    submissionId: submission.submissionId, actorUserId, confirmPossibleDuplicate: true, coverResolver: null,
+  });
+  const results = await Promise.all([approve("moderator-a"), approve("moderator-b")]);
+  await approve("moderator-a");
+  const rows = await Notification.find({ recipientUserId: "contributor-approved" }).lean();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].submissionStatus, "approved");
+  const [serialized] = await serializeNotifications(rows, new Map());
+  assert.equal(serialized.subject.albumId, results[0].album.albumId);
 });
