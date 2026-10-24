@@ -1,0 +1,227 @@
+/* Board ordering: order settings, the owner's arrange controls, rank numbers,
+   the end of the ordered block, and the Save / Discard bar. */
+
+.board-order-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1.25rem;
+  margin: 0 0 1.25rem;
+  font-family: var(--app-font);
+  font-size: 0.8rem;
+}
+
+.board-order-settings label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--app-text);
+}
+
+.board-order-settings label > span:first-child {
+  color: var(--app-muted);
+}
+
+.board-order-settings select {
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--app-line);
+  border-radius: 0;
+  background: var(--app-bg);
+  color: var(--app-text);
+  font: inherit;
+}
+
+.board-order-settings .board-ranked-toggle > span {
+  color: var(--app-text);
+}
+
+.board-order-settings input[type="checkbox"] {
+  accent-color: var(--app-accent);
+}
+
+.board-order-settings select:disabled,
+.board-order-settings input:disabled,
+.board-order-settings input:disabled + span {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.board-order-settings small {
+  color: var(--app-muted);
+  font-size: 0.75rem;
+}
+
+/* Arranging */
+
+.board-album-card.is-arrangeable,
+.board-album-row.is-arrangeable {
+  cursor: grab;
+}
+
+.board-album-card.is-dragging,
+.board-album-row.is-dragging {
+  opacity: 0.45;
+}
+
+.board-album-card .board-arrange-controls,
+.board-album-row .board-arrange-controls {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.25rem;
+  width: auto;
+  aspect-ratio: auto;
+  background: none;
+}
+
+.board-album-card .board-arrange-controls button,
+.board-album-row .board-arrange-controls button {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.board-album-card .board-arrange-controls button:disabled,
+.board-album-row .board-arrange-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.board-album-card .board-arrange-handle,
+.board-album-row .board-arrange-handle {
+  display: inline;
+  width: auto;
+  margin-right: 0.25rem;
+  aspect-ratio: auto;
+  background: none;
+  color: var(--app-muted);
+  font-size: 0.75rem;
+  letter-spacing: -0.15em;
+}
+
+/* Listening buttons wait while an unsaved order is pending. */
+.board-album-listening button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Rank numbers */
+
+.board-album-card {
+  position: relative;
+}
+
+.board-album-card .board-rank {
+  position: absolute;
+  top: 0.4rem;
+  left: 0.4rem;
+  min-width: 2rem;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--app-line-strong);
+  background: var(--app-bg);
+  color: var(--app-text);
+  font-family: var(--app-font);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  pointer-events: none;
+}
+
+.board-album-row .board-rank {
+  display: block;
+  flex: 0 0 2.5rem;
+  width: 2.5rem;
+  aspect-ratio: auto;
+  background: none;
+  color: var(--app-accent);
+  font-family: var(--app-font);
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Rows that carry a rank or arrange controls lay their parts out in a line. */
+.board-album-row.is-arrangeable,
+.board-album-list.is-ranked .board-album-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+}
+
+.board-album-row.is-arrangeable > a,
+.board-album-list.is-ranked .board-album-row > a {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.board-album-row.is-arrangeable > .board-album-listening,
+.board-album-list.is-ranked .board-album-row > .board-album-listening {
+  flex: 0 1 220px;
+}
+
+.board-order-block-end {
+  grid-column: 1 / -1;
+  margin: 0.25rem 0;
+  padding: 0.6rem 0.75rem;
+  border-top: 2px solid var(--app-accent);
+  color: var(--app-muted);
+  font-family: var(--app-font);
+  font-size: 0.75rem;
+}
+
+.board-order-status {
+  min-height: 1em;
+  margin: 0.75rem 0 0;
+  color: var(--app-muted);
+  font-family: var(--app-font);
+  font-size: 0.75rem;
+}
+
+/* Save / Discard */
+
+.board-order-bar {
+  position: sticky;
+  bottom: 1rem;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem 0.75rem;
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--app-accent);
+  background: var(--app-surface);
+  color: var(--app-text);
+  font-family: var(--app-font);
+  font-size: 0.8rem;
+}
+
+.board-order-bar span {
+  margin-right: auto;
+}
+
+.board-order-bar button {
+  min-height: 36px;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--app-line-strong);
+  border-radius: 0;
+  background: transparent;
+  color: var(--app-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.board-order-bar button.is-primary,
+.board-order-bar button:hover:not(:disabled) {
+  border-color: var(--app-text);
+  background: var(--app-text);
+  color: var(--app-bg);
+}
+
+.board-order-bar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

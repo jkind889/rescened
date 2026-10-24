@@ -714,7 +714,7 @@ export function Account() {
                 <div>
                   <span>Pinned Board</span>
                   <h3>{profile.pinnedBoard.title || "Untitled board"}</h3>
-                  <p>{profile.pinnedBoard.itemCount || 0} album{profile.pinnedBoard.itemCount === 1 ? "" : "s"} · {profile.pinnedBoard.listenCount || 0} listen{profile.pinnedBoard.listenCount === 1 ? "" : "s"}</p>
+                  <p>{profile.pinnedBoard.itemCount || 0} album{profile.pinnedBoard.itemCount === 1 ? "" : "s"} · {profile.pinnedBoard.listenCount || 0} listen{profile.pinnedBoard.listenCount === 1 ? "" : "s"}{profile.pinnedBoard.displayStyle === "ranked" ? " · Ranked list" : ""}</p>
                 </div>
               </Link>
             ) : (
@@ -1087,6 +1087,7 @@ export function Account() {
                   {board.description && <p className="board-card-description">{board.description}</p>}
                   <p>
                     {board.itemCount} album{board.itemCount === 1 ? "" : "s"} · {board.listenCount || 0} listen{board.listenCount === 1 ? "" : "s"}
+                    {board.displayStyle === "ranked" ? " · Ranked list" : ""}
                     {board.isDefault ? " · Default" : ""}
                   </p>
                 </Link>
