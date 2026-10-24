@@ -63,6 +63,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
   const calls = {
     albumSave: 0,
     likeMutation: 0,
+    notificationMutation: 0,
     profileStats: 0,
     reviewCreate: 0,
     reviewMutation: 0,
@@ -87,6 +88,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
     albumSaveRateLimit: blocker("albumSave", 51),
     externalSearchRateLimit: (req, res, next) => next(),
     likeMutationRateLimit: blocker("likeMutation", 52),
+    notificationMutationRateLimit: blocker("notificationMutation", 58),
     profileStatsRateLimit: blocker("profileStats", 57),
     reviewCreateRateLimit: blocker("reviewCreate", 53),
     reviewMutationRateLimit: blocker("reviewMutation", 54),
@@ -182,6 +184,7 @@ test("routes register the intended limiter after authentication where required",
     [routers.trackRankings, "delete", "/album/:albumId", 1, limiters.trackRankingMutationRateLimit],
     [routers.profile, "get", "/me/stats", 1, limiters.profileStatsRateLimit],
     [routers.profile, "get", "/:userId/stats", 0, limiters.profileStatsRateLimit],
+    [routers.profile, "patch", "/me/notification-preferences", 1, limiters.notificationMutationRateLimit],
   ];
 
   for (const [router, method, path, limiterIndex, expectedLimiter] of cases) {
@@ -204,6 +207,7 @@ test("route-specific limiters stop work and preserve 429 response metadata", asy
     [routers.trackRankings, "delete", "/album/:albumId", { headers: {}, params: { albumId: "album" } }, "trackRankingMutation", 56],
     [routers.profile, "get", "/me/stats", { query: {}, headers: {} }, "profileStats", 57],
     [routers.profile, "get", "/:userId/stats", { query: {}, headers: {}, params: { userId: "user_public" } }, "profileStats", 57],
+    [routers.profile, "patch", "/me/notification-preferences", { body: {}, headers: {} }, "notificationMutation", 58],
   ];
 
   for (const [router, method, path, req, limiterName, retryAfterSeconds] of cases) {
@@ -229,6 +233,7 @@ test("authentication rejects mutations before consuming their route-specific lim
     [installed.routers.trackRankings, "put", "/album/:albumId", { body: {}, headers: {}, params: { albumId: "album" } }],
     [installed.routers.trackRankings, "delete", "/album/:albumId", { headers: {}, params: { albumId: "album" } }],
     [installed.routers.profile, "get", "/me/stats", { query: {}, headers: {} }],
+    [installed.routers.profile, "patch", "/me/notification-preferences", { body: {}, headers: {} }],
   ];
 
   for (const [router, method, path, req] of cases) {
@@ -238,6 +243,7 @@ test("authentication rejects mutations before consuming their route-specific lim
   assert.deepEqual(installed.calls, {
     albumSave: 0,
     likeMutation: 0,
+    notificationMutation: 0,
     profileStats: 0,
     reviewCreate: 0,
     reviewMutation: 0,

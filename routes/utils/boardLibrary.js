@@ -136,4 +136,4 @@ async function savedUserCount(albumCatalogId) {
   return new Set([...explicit, ...linked.map((row) => row._id)]).size;
 }
 
-module.exports = { publicBoardId, persistedBoardId, getDefaultBoard, ownedBoard, formatBoard, savedAlbums, albumBoards, savedUserCount };
+module.exports = { publicBoardId, persistedBoardId, getDefaultBoard, ownedBoard, formatBoard, savedAlbums, albumBoards, savedUserCount, liveMembershipStages };
