@@ -46,6 +46,7 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `SUBMISSIONS_DISABLED` | `503` | Contributor submission mutations are disabled by `COMMUNITY_SUBMISSIONS_ENABLED`. |
 | `MODERATION_DISABLED` | `503` | Moderator mutations are disabled by `COMMUNITY_MODERATION_ENABLED`. |
 | `APPROVAL_UNAVAILABLE` | `503` | Approval cannot run because transaction-capable MongoDB is unavailable. No publication fallback is attempted. |
+| `MODERATION_UNAVAILABLE` | `503` | Request changes, reject, or mark duplicate cannot run because transaction-capable MongoDB is unavailable. The status change and the contributor's notification are never written separately. |
 | `REVIEW_DELETION_UNAVAILABLE` | `503` | Review deletion cannot run because transaction-capable MongoDB is unavailable. No cascade write is attempted. |
 | `REVIEW_LIKE_UNAVAILABLE` | `503` | Review-like and notification mutation cannot run because transaction-capable MongoDB is unavailable. |
 | `REVIEW_PIN_UNAVAILABLE` | `503` | Pinning a review cannot run because transaction-capable MongoDB is unavailable. |
@@ -131,6 +132,18 @@ At approval, `GENRE_RETIRED` and `GENRE_NOT_FOUND` are `409`: an added genre was
 
 Invalid genre suggestion bodies use `INVALID_SUBMISSION`, and missing albums use `CATALOG_TARGET_NOT_FOUND`, as for corrections. Marking a genre suggestion as a duplicate returns `400 INVALID_MODERATION_REQUEST`.
 
+### Notifications
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `INVALID_NOTIFICATION_PREFERENCES` | `400` | A preference update is not an object of booleans, is empty, or names an unknown type. |
+| `NOTIFICATION_PREFERENCE_LOCKED` | `400` | A preference update tried to turn off `suggestion_status`, which cannot be muted. |
+| `INVALID_NOTIFICATION_REQUEST` | `400` | A read or clear body is not exactly `{ notificationIds }` (1 to 100 public UUIDs) or `{ all: true }`. |
+| `INVALID_NOTIFICATION_CURSOR` | `400` | A notification page cursor is malformed. Reload from the first page. |
+| `NOTIFICATION_ID_INTEGRITY_ERROR` | `500` | A stored notification has no valid public `notificationId`. |
+
+See [the notifications guide](NOTIFICATIONS.md).
+
 ### Submission and moderation conflicts
 
 | Code | Status | Meaning |
@@ -178,6 +191,7 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Suggestion mutation | `POST /suggestions/:submissionId/revise`, `POST /suggestions/:submissionId/withdraw` | authenticated user | 20 attempts per 10 minutes |
 | Genre suggestion | `POST /suggestions/genres` | authenticated user | 20 attempts per hour |
 | Moderation mutation | Request-changes, reject, duplicate, and approve commands, and genre vocabulary commands | authenticated moderator | 120 attempts per 10 minutes |
+| Notification mutation | `POST /notifications/read`, `POST /notifications/clear`, `PATCH /profile/me/notification-preferences` | authenticated user | 60 attempts per 10 minutes |
 
 The current implementation uses in-process memory. Counters reset on restart and are not shared between workers or instances. `TRUST_PROXY_HOPS` must match the real proxy chain so IP keys are neither collapsed onto the proxy nor client-spoofable. Unexpected limiter infrastructure errors currently log and fail open; ordinary exhausted buckets fail closed with `429 RATE_LIMITED`.
 

@@ -491,7 +491,7 @@ This table covers the community API surface. The [central error and status code 
 | `409` | `CATALOG_REFERENCE_CONFLICT` | A selected external-reference addition belongs to another catalog album. |
 | `429` | `RATE_LIMITED` | Per-user mutation bucket was exhausted. Includes `retryAfterSeconds` and a `Retry-After` header. |
 | `503` | `SUBMISSIONS_DISABLED` | Contributor mutations are disabled by feature flag. |
-| `503` | `MODERATION_DISABLED` or `APPROVAL_UNAVAILABLE` | Moderator commands are disabled or Mongo transactions are unavailable. |
+| `503` | `MODERATION_DISABLED`, `APPROVAL_UNAVAILABLE`, or `MODERATION_UNAVAILABLE` | Moderator commands are disabled or Mongo transactions are unavailable. |
 | `500` | Endpoint-specific `error` message | Unexpected server or database failure. |
 
 ## Tests and verification

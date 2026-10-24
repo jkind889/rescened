@@ -45,7 +45,8 @@ Remember these six rules:
 | File | Responsibility |
 | --- | --- |
 | `server.js` | Installs global middleware and mounts the moderator router at `/moderation/album-suggestions`. |
-| `routes/moderation.js` | Authentication, moderator authorization, queue/detail reads, command routes, conditional non-approval transitions, and HTTP error mapping. |
+| `routes/moderation.js` | Authentication, moderator authorization, queue/detail reads, command routes, and HTTP error mapping. |
+| `routes/utils/moderationCommands.js` | Transactional, conditional non-approval transitions and their contributor notifications. |
 | `routes/utils/moderation.js` | Strict command-body normalization, filter/cursor parsing, moderator error classes, UUID validation, and transaction-unavailable detection. |
 | `routes/suggestions.js` | Contributor create/correction/history/detail/revise/withdraw API plus the anonymous approved feed. |
 | `routes/utils/approval.js` | Idempotent, transaction-backed approval; new-album create/link behavior; correction patches; duplicate/reference conflict checks; catalog provenance. |
@@ -181,19 +182,20 @@ These are `POST` commands because the client is asking the server to perform a w
 
 ### The shared non-approval transition
 
-Request changes, reject, and mark duplicate all call `transition()` in `routes/moderation.js`:
+Request changes, reject, and mark duplicate all call `applyModerationCommand()` in `routes/utils/moderationCommands.js` through `transition()` in `routes/moderation.js`:
 
-1. Normalize and validate the action body.
-2. Read the submission by public `submissionId`.
+1. Normalize and validate the action body (in the route).
+2. Open a Mongo transaction and read the submission by public `submissionId`.
 3. Require its current status to be `pending`.
 4. For mark duplicate, load the target submission and require another `approved` submission with an `approvedAlbumCatalogId`.
 5. Run `findOneAndUpdate()` with `{ submissionId, status: "pending", currentRevision }`.
 6. Set the new state and append one server-authored moderation event.
-7. Reload and return moderator detail.
+7. Insert the contributor's `suggestion_status` notification.
+8. Commit, then reload and return moderator detail.
 
-The conditional filter protects against another command winning after the preliminary read. If it no longer matches, the route returns `409 STATE_CONFLICT`. Repeating a successful non-approval command returns a terminal-state conflict rather than appending a second audit event.
+The conditional filter protects against another command winning after the preliminary read. If it no longer matches, the command returns `409 STATE_CONFLICT`. Repeating a successful non-approval command returns a terminal-state conflict rather than appending a second audit event.
 
-These commands touch only one submission document, so they do not open a Mongo transaction. Approval uses a transaction because it coordinates `AlbumCatalog` and `AlbumSubmission` writes.
+The status change, audit event, and notification commit together or not at all. Standalone MongoDB returns `503 MODERATION_UNAVAILABLE`; there is no fallback that writes the status without the notification. Approval inserts the same notification inside its own transaction. See [notifications](NOTIFICATIONS.md#suggestion-updates).
 
 ### Mark duplicate versus link approval
 
@@ -350,6 +352,7 @@ Common failures:
 | `409 CATALOG_REFERENCE_CONFLICT` | An external reference selected for correction is already owned by another catalog album. Safe candidate album IDs may appear in `details`. |
 | `503 MODERATION_DISABLED` | Reads still work, but `COMMUNITY_MODERATION_ENABLED` is off. |
 | `503 APPROVAL_UNAVAILABLE` | MongoDB cannot run the required transaction; use a replica set or sharded deployment. |
+| `503 MODERATION_UNAVAILABLE` | The same, for request changes, reject, or mark duplicate. |
 | `429 RATE_LIMITED` | Respect `Retry-After` or `retryAfterSeconds` before retrying. |
 
 Unexpected errors use the route's operation-specific fallback message and status 500; private database/provider details are not returned to the client.
@@ -360,7 +363,7 @@ Unexpected errors use the route's operation-specific fallback message and status
 | --- | --- |
 | The moderator page shell loads, then shows restricted access | `ProtectedRoute` verifies sign-in only. Compare the signed-in Clerk ID exactly with `MODERATOR_USER_IDS`. |
 | Queue/detail works but every command returns 503 | Check `COMMUNITY_MODERATION_ENABLED=true`; reads intentionally ignore this flag. |
-| Approval returns `APPROVAL_UNAVAILABLE` | Confirm `MONGO_URI` targets a transaction-capable replica set or sharded deployment. |
+| Approval returns `APPROVAL_UNAVAILABLE`, or another command returns `MODERATION_UNAVAILABLE` | Confirm `MONGO_URI` targets a transaction-capable replica set or sharded deployment. |
 | Approval keeps returning `EXACT_CATALOG_MATCH` | `confirmPossibleDuplicate` cannot override exact identity. Send the correct existing `albumId`. |
 | Approval requests duplicate confirmation | Review candidate records; send `albumId` to link or `confirmPossibleDuplicate: true` to create intentionally. |
 | The selected existing album did not receive proposal metadata | This is expected link behavior. Updating it requires a separate `catalog_correction` submission and explicit `applyFields`. |
