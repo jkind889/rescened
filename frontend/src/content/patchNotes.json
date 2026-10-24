@@ -1,5 +1,18 @@
 [
   {
+    "id": "notification-types",
+    "date": "2026-10-23",
+    "title": "More useful notifications",
+    "summary": "Find out when a suggestion is reviewed or when someone you follow reviews an album on your boards, and choose what you get notified about.",
+    "changes": [
+      "When a moderator approves your suggestion, asks for changes, rejects it, or marks it as a duplicate, you get a notification that links straight to it.",
+      "When someone you follow reviews an album that's on one of your boards, you'll hear about it.",
+      "Notification settings let you turn off likes, follows, or reviews from people you follow. Suggestion updates always stay on, so you never miss a request for changes.",
+      "Mark everything read or clear your notifications from the Notifications page, and load older ones with Load more.",
+      "Likes on your reviews now open the review itself."
+    ]
+  },
+  {
     "id": "community-genres",
     "date": "2026-10-14",
     "title": "Genres, shaped by the community",
