@@ -1,6 +1,6 @@
 # Rescened error and status code reference
 
-Last reviewed: 2026-09-03
+Last reviewed: 2026-10-23
 
 This is the central reference for application-defined codes emitted by the Rescened HTTP API, browser client, provider adapters, operator commands, and retained reports. Codes are case-sensitive: for example, `MUSICBRAINZ_HYDRATION_FAILED` and `musicbrainz_hydration_failed` belong to different workflows.
 
@@ -52,7 +52,7 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `REVIEW_PIN_UNAVAILABLE` | `503` | Pinning a review cannot run because transaction-capable MongoDB is unavailable. |
 | `POPULAR_REVIEWS_UNAVAILABLE` | `503` | Popular review-history pagination cannot obtain a MongoDB snapshot, snapshot reads are unsupported, or the page exceeds its database time budget. No live-ranking fallback is used. |
 | `DIARY_WRITE_UNAVAILABLE` | `503` | A diary or listen-membership mutation requires MongoDB transactions. No partial fallback writes are attempted. |
-| `BOARD_WRITE_UNAVAILABLE` | `503` | Board saves, album removals, deletion, or board pinning require MongoDB transactions. |
+| `BOARD_WRITE_UNAVAILABLE` | `503` | Board saves, album removals, board updates and reorders, deletion, or board pinning require MongoDB transactions. |
 
 ### Request validation and lookup
 
@@ -67,7 +67,7 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `INVALID_REVIEW_CURSOR` | `400` | A review-list pagination cursor could not be decrypted, does not match its list/sort or supported version, or refers to an expired popular-ranking snapshot. Reload the list from its first page. |
 | `INVALID_REVIEW_SORT` | `400` | A review list requested a sort other than `recent`, `popular`, `highest`, or `lowest`. |
 | `INVALID_IDEMPOTENCY_KEY` | `400` | A review or diary creation request omitted or supplied a malformed UUID-v4 `Idempotency-Key`. |
-| `INVALID_DIARY_REQUEST` | `400` | A diary/board mutation contains unsupported fields, a board update supplies neither a title nor a description, or a diary filter, limit, calendar month (`YYYY-MM`), or board list is invalid. |
+| `INVALID_DIARY_REQUEST` | `400` | A diary/board mutation contains unsupported fields, a board update supplies no title, description, or order setting, or a diary filter, limit, calendar month (`YYYY-MM`), or board list is invalid. |
 | `INVALID_LISTEN_ID` | `400` | A listen identifier is not a public UUID-v4. |
 | `INVALID_ALBUM_ID` | `400` | A diary album identifier is not a public UUID-v4. |
 | `INVALID_LISTEN_DATE` | `400` | A calendar date is invalid, a listen is in the future in the supplied timezone, or a date range is reversed. |
@@ -92,6 +92,16 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | Code | Status | Meaning |
 | --- | --- | --- |
 | `INVALID_STATS_REQUEST` | `400` | A stats request used an unsupported field, a `period` other than `2y` or a calendar year inside the two-year window, or an `automatic` value other than `include` or `exclude`. See [the stats guide](LISTENING_STATS.md). |
+
+### Board order
+
+`PATCH /boards/:boardId` and `PUT /boards/:boardId/order` require Clerk authentication and share the `boardMutation` limit. A malformed album ID in a reorder returns `400 INVALID_ALBUM_ID`. See [ordered and ranked boards](BOARD_ORDERING.md).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `INVALID_BOARD_ORDER` | `400` | A reorder body is not `{ albumIds, revision }` with at most 100 distinct album IDs and a non-negative integer revision, a reorder targets a board in date order, an `orderMode` or `displayStyle` value is unknown, or a board would be ranked without custom order. |
+| `BOARD_CHANGED` | `409` | A reorder carried a stale `revision` or did not list exactly the board's albums (exactly 100 of them on a larger board). Nothing changed; refetch the board. |
+| `BOARD_ORDER_LIMIT` | `409` | Switching a board with more than 100 albums to custom order. Nothing in the update is applied. |
 
 ### Listen queue
 
@@ -197,6 +207,7 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Like mutation | `PUT /likes/album/:albumId`, `PUT /likes/review/:reviewId` | authenticated user | 120 attempts per 10 minutes |
 | Track ranking mutation | `PUT` and `DELETE /track-rankings/album/:albumId` | authenticated user | 60 attempts per 10 minutes |
 | Profile stats | `GET /profile/me/stats`, `GET /profile/:userId/stats` | signed-in user, or IP when anonymous | 60 requests per 10 minutes |
+| Board mutation | `PATCH /boards/:boardId`, `PUT /boards/:boardId/order` | authenticated user | 60 attempts per 10 minutes |
 | Queue mutation | `POST`/`PUT /profile/me/queue`, `DELETE /profile/me/queue/:albumId` | authenticated user | 60 attempts per 10 minutes |
 | Suggestion create | `POST /suggestions`, `POST /suggestions/corrections` | authenticated user | 6 attempts per 10 minutes |
 | Suggestion mutation | `POST /suggestions/:submissionId/revise`, `POST /suggestions/:submissionId/withdraw` | authenticated user | 20 attempts per 10 minutes |
