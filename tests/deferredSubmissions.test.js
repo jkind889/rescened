@@ -7,6 +7,7 @@ const suggestionsPath = require.resolve("../routes/suggestions");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
 const BaselineService = require("../lib/baselines/service");
+const Notification = require("../models/Notification");
 const {
   decodeApprovedCursor,
   encodeApprovedCursor,
@@ -30,6 +31,7 @@ const originals = {
   submissionFindOneAndUpdate: AlbumSubmission.findOneAndUpdate,
   publishSubmissionBaseline: BaselineService.publishSubmissionBaseline,
   invalidateAlbumBaseline: BaselineService.invalidateAlbumBaseline,
+  notificationUpdateOne: Notification.updateOne,
 };
 
 function chain(rows) {
@@ -110,10 +112,12 @@ test.afterEach(() => {
   AlbumSubmission.findOneAndUpdate = originals.submissionFindOneAndUpdate;
   BaselineService.publishSubmissionBaseline = originals.publishSubmissionBaseline;
   BaselineService.invalidateAlbumBaseline = originals.invalidateAlbumBaseline;
+  Notification.updateOne = originals.notificationUpdateOne;
   delete require.cache[suggestionsPath];
 });
 
 test.beforeEach(() => {
+  Notification.updateOne = async () => ({});
   BaselineService.publishSubmissionBaseline = async () => null;
   BaselineService.invalidateAlbumBaseline = async () => false;
 });

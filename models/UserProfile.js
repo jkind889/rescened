@@ -21,6 +21,18 @@ const queuedAlbumSchema = new mongoose.Schema(
   { _id: false },
 );
 
+// One switch per notification type a user can mute. Missing values read as on,
+// so profiles written before preferences existed receive everything.
+// suggestion_status is deliberately absent: it cannot be muted.
+const notificationPreferencesSchema = new mongoose.Schema(
+  {
+    review_like: { type: Boolean, default: true },
+    follow: { type: Boolean, default: true },
+    followed_review: { type: Boolean, default: true },
+  },
+  { _id: false },
+);
+
 const userProfileSchema = new mongoose.Schema(
   {
     userId: { type: String, required: true, unique: true },
@@ -44,6 +56,7 @@ const userProfileSchema = new mongoose.Schema(
     queueRevision: { type: Number, default: 0, min: 0 },
     pinnedReviewId: { type: mongoose.Schema.Types.ObjectId, ref: "Review", default: null },
     pinnedBoardId: { type: mongoose.Schema.Types.ObjectId, ref: "Board", default: null },
+    notificationPreferences: { type: notificationPreferencesSchema, default: () => ({}) },
   },
   { timestamps: true },
 );

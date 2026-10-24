@@ -22,6 +22,7 @@ const {
   recentCursorFilter,
 } = require("./utils/reviewPagination");
 const { deleteOwnedReview, assertReviewId, persistedReviewId } = require("./utils/reviewInteractions");
+const { fanOutFollowedReview } = require("./utils/notifications");
 const {
   reviewCreateRateLimit,
   reviewMutationRateLimit,
@@ -106,9 +107,17 @@ function rejectClientOwnedReviewId(body) {
   }
 }
 
+// Best effort: a failed fan-out is logged and never fails the review. A retry
+// with the same Idempotency-Key retries an uncommitted delivery. A committed
+// receipt on the review prevents re-delivery even after notifications are cleared.
+async function notifyFollowers(review) {
+  try { await fanOutFollowedReview(review); } catch (error) { console.error("[notifications] followed_review fan-out failed", { reviewId: review?.reviewId, message: error?.message }); }
+}
+
 async function serializeExistingCreation(res, userId, key) {
   const existing = await Review.findOne({ userId, creationKey: key });
   if (!existing) return false;
+  await notifyFollowers(existing);
   res.status(200).json((await serializeReviews([existing], userId))[0]);
   return true;
 }
@@ -125,6 +134,7 @@ router.post("/review", auth, reviewCreateRateLimit, async (req, res) => {
     if (!reviewText) return res.status(400).json({ error: "Review text is required" });
     if (reviewText.length > MAX_REVIEW_TEXT_LENGTH) return res.status(400).json({ error: "Review text must be 300 characters or fewer" });
     const review = await Review.create({ userId: req.userId, albumCatalogId: album._id, rating: parsedRating, reviewText, creationKey: key });
+    await notifyFollowers(review);
     res.status(201).json((await serializeReviews([review], req.userId))[0]);
   } catch (error) {
     if (error?.code === 11000) {

@@ -34,6 +34,9 @@ const reviewSchema = new mongoose.Schema({
   // Private request key used only to make a creation retry idempotent. It is
   // not a public review identifier and is excluded from all serializers.
   creationKey: { type: String, select: false, immutable: true },
+  // Durable delivery receipt: clearing notifications must not let a creation
+  // retry fan out again. Set atomically with the notifications, even if empty.
+  followedReviewFanoutAt: { type: Date, select: false },
 });
 
 // Server-only author kept on reviews after their account is deleted. The colon

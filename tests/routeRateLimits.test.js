@@ -6,6 +6,7 @@ const rateLimitPath = require.resolve("../routes/utils/rateLimit");
 const routePaths = {
   boards: require.resolve("../routes/boards"),
   likes: require.resolve("../routes/likes"),
+  notifications: require.resolve("../routes/notifications"),
   profile: require.resolve("../routes/profile"),
   reviews: require.resolve("../routes/reviews"),
   search: require.resolve("../routes/search"),
@@ -63,6 +64,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
   const calls = {
     albumSave: 0,
     likeMutation: 0,
+    notificationMutation: 0,
     profileStats: 0,
     queueMutation: 0,
     reviewCreate: 0,
@@ -88,6 +90,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
     albumSaveRateLimit: blocker("albumSave", 51),
     externalSearchRateLimit: (req, res, next) => next(),
     likeMutationRateLimit: blocker("likeMutation", 52),
+    notificationMutationRateLimit: blocker("notificationMutation", 59),
     profileStatsRateLimit: blocker("profileStats", 57),
     queueMutationRateLimit: blocker("queueMutation", 58),
     reviewCreateRateLimit: blocker("reviewCreate", 53),
@@ -120,6 +123,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
     routers: {
       boards: require("../routes/boards"),
       likes: require("../routes/likes"),
+      notifications: require("../routes/notifications"),
       profile: require("../routes/profile"),
       reviews: require("../routes/reviews"),
       search: require("../routes/search"),
@@ -187,6 +191,9 @@ test("routes register the intended limiter after authentication where required",
     [routers.profile, "post", "/me/queue", 1, limiters.queueMutationRateLimit],
     [routers.profile, "put", "/me/queue", 1, limiters.queueMutationRateLimit],
     [routers.profile, "delete", "/me/queue/:albumId", 1, limiters.queueMutationRateLimit],
+    [routers.profile, "patch", "/me/notification-preferences", 1, limiters.notificationMutationRateLimit],
+    [routers.notifications, "post", "/read", 1, limiters.notificationMutationRateLimit],
+    [routers.notifications, "post", "/clear", 1, limiters.notificationMutationRateLimit],
   ];
 
   for (const [router, method, path, limiterIndex, expectedLimiter] of cases) {
@@ -212,6 +219,9 @@ test("route-specific limiters stop work and preserve 429 response metadata", asy
     [routers.profile, "post", "/me/queue", { body: {}, headers: {} }, "queueMutation", 58],
     [routers.profile, "put", "/me/queue", { body: {}, headers: {} }, "queueMutation", 58],
     [routers.profile, "delete", "/me/queue/:albumId", { headers: {}, params: { albumId: "album" } }, "queueMutation", 58],
+    [routers.profile, "patch", "/me/notification-preferences", { body: {}, headers: {} }, "notificationMutation", 59],
+    [routers.notifications, "post", "/read", { body: {}, headers: {} }, "notificationMutation", 59],
+    [routers.notifications, "post", "/clear", { body: {}, headers: {} }, "notificationMutation", 59],
   ];
 
   for (const [router, method, path, req, limiterName, retryAfterSeconds] of cases) {
@@ -239,6 +249,9 @@ test("authentication rejects mutations before consuming their route-specific lim
     [installed.routers.profile, "delete", "/me/queue/:albumId", { headers: {}, params: { albumId: "album" } }],
     [installed.routers.trackRankings, "delete", "/album/:albumId", { headers: {}, params: { albumId: "album" } }],
     [installed.routers.profile, "get", "/me/stats", { query: {}, headers: {} }],
+    [installed.routers.profile, "patch", "/me/notification-preferences", { body: {}, headers: {} }],
+    [installed.routers.notifications, "post", "/read", { body: {}, headers: {} }],
+    [installed.routers.notifications, "post", "/clear", { body: {}, headers: {} }],
   ];
 
   for (const [router, method, path, req] of cases) {
@@ -248,6 +261,7 @@ test("authentication rejects mutations before consuming their route-specific lim
   assert.deepEqual(installed.calls, {
     albumSave: 0,
     likeMutation: 0,
+    notificationMutation: 0,
     profileStats: 0,
     queueMutation: 0,
     reviewCreate: 0,

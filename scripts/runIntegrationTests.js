@@ -20,6 +20,7 @@ const files = [
   "tests/catalogImport.integration.test.js",
   "tests/legacyMigration.integration.test.js",
   "tests/reviews.integration.test.js",
+  "tests/notifications.integration.test.js",
   "tests/profileNetwork.integration.test.js",
   "tests/trackRankings.integration.test.js",
   "tests/listeningStats.integration.test.js",

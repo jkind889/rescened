@@ -4,6 +4,7 @@ const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
 const { isModerator, serializeSubmission } = require("./utils/submissions");
 const { approveAlbumSubmission } = require("./utils/approval");
+const { applyModerationCommand } = require("./utils/moderationCommands");
 const { genreReview } = require("../lib/genres/review");
 const {
   ModerationConflictError,
@@ -178,57 +179,10 @@ async function moderatorDetail(submission) {
   return detail;
 }
 
-function stateQuery(submissionId, currentRevision) {
-  return { submissionId, status: "pending", currentRevision };
-}
-
 async function transition(req, res, action) {
   try {
     const body = normalizeCommandBody(req.body || {}, action);
-    const historyAction = {
-      mark_duplicate: "marked_duplicate",
-      reject: "rejected",
-    }[action] || action;
-    const current = await AlbumSubmission.findOne({ submissionId: req.params.submissionId });
-    if (!current) return res.status(404).json({ error: "Suggestion not found", code: "SUGGESTION_NOT_FOUND" });
-    if (current.status !== "pending") {
-      return res.status(409).json({ error: "Only pending suggestions can be moderated", code: "INVALID_SUBMISSION_STATE" });
-    }
-    if (action === "mark_duplicate" && current.submissionType === "genre_suggestion") {
-      return res.status(400).json({ error: "Genre suggestions cannot be marked as duplicates; reject them instead", code: "INVALID_MODERATION_REQUEST" });
-    }
-
-    const now = new Date();
-    const set = {
-      status: action === "request_changes" ? "needs_changes" : action === "reject" ? "rejected" : "duplicate",
-      approvedAlbumCatalogId: null,
-      duplicateOfSubmissionId: null,
-    };
-    if (action === "mark_duplicate") {
-      const target = await AlbumSubmission.findOne({ submissionId: body.duplicateOfSubmissionId });
-      if (!target || target.submissionId === current.submissionId || target.status !== "approved" || !target.approvedAlbumCatalogId) {
-        return res.status(409).json({ error: "duplicateOfSubmissionId must reference another approved suggestion", code: "INVALID_DUPLICATE_TARGET" });
-      }
-      set.duplicateOfSubmissionId = target._id;
-    }
-    const updated = await AlbumSubmission.findOneAndUpdate(
-      stateQuery(req.params.submissionId, current.currentRevision),
-      {
-        $set: set,
-        // Rejected and duplicate suggestions close; needs-changes stays open.
-        ...(action === "request_changes" ? {} : { $unset: { openGenreSuggestionKey: "" } }),
-        $push: {
-          moderationHistory: {
-            actorUserId: req.userId,
-            action: historyAction,
-            reason: body.reason,
-            createdAt: now,
-          },
-        },
-      },
-      { returnDocument: "after", runValidators: true },
-    );
-    if (!updated) return res.status(409).json({ error: "Suggestion changed while it was being moderated", code: "STATE_CONFLICT" });
+    const updated = await applyModerationCommand({ submissionId: req.params.submissionId, actorUserId: req.userId, action, body });
     const detail = await findDetail(req.params.submissionId);
     return res.json(await moderatorDetail(detail || updated));
   } catch (error) {

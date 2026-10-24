@@ -19,6 +19,7 @@ const {
 } = require("./moderation");
 
 const { approveGenreSuggestion } = require("../../lib/genres/approval");
+const { recordSuggestionStatus } = require("./notifications");
 
 const MBID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -562,6 +563,7 @@ async function approveCatalogCorrection({ preliminary, submissionId, actorUserId
         { returnDocument: "after", runValidators: true, session },
       );
       if (!updated) throw new ModerationConflictError("Suggestion changed while it was being approved", "STATE_CONFLICT");
+      await recordSuggestionStatus({ submission: updated, status: "approved", actorUserId, session });
       result = {
         submission: { ...plain(updated), targetAlbumCatalogId: target, approvedAlbumCatalogId: updatedAlbum },
         album: updatedAlbum,
@@ -756,6 +758,7 @@ async function approveAlbumSubmission({
         { returnDocument: "after", runValidators: true, session },
       );
       if (!updated) throw new ModerationConflictError("Suggestion changed while it was being approved", "STATE_CONFLICT");
+      await recordSuggestionStatus({ submission: updated, status: "approved", actorUserId, session });
       result = {
         submission: { ...plain(updated), approvedAlbumCatalogId: album },
         album,

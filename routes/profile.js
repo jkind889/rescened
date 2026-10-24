@@ -1,4 +1,3 @@
-const crypto = require("node:crypto");
 const express = require("express");
 const { clerkClient, getAuth } = require("@clerk/express");
 const UserProfile = require("../models/UserProfile");
@@ -7,7 +6,6 @@ const Review = require("../models/Reviews");
 const Board = require("../models/Board");
 const BoardItem = require("../models/BoardItem");
 const Like = require("../models/Like");
-const Notification = require("../models/Notification");
 const { findAlbumByPublicId, normalizeCatalogAlbum } = require("./utils/albumCatalog");
 const { runReviewTransaction, assertPinnedReview, isReviewId, persistedReviewId } = require("./utils/reviewInteractions");
 const { NETWORK_ACTIVITY_LIMIT, getNetworkActivity } = require("./utils/networkActivity");
@@ -18,8 +16,9 @@ const { getListenActivity } = require("./utils/listenActivity");
 const { suggestPeople } = require("./utils/peopleSuggestions");
 const { getRankingActivity, listUserRankings } = require("./utils/trackRankings");
 const { listeningStats } = require("./utils/listeningStats");
-const { profileStatsRateLimit, queueMutationRateLimit } = require("./utils/rateLimit");
+const { notificationMutationRateLimit, profileStatsRateLimit, queueMutationRateLimit } = require("./utils/rateLimit");
 const { addToQueue, queuePreview, readQueue, removeFromQueue, reorderQueue } = require("./utils/listenQueue");
+const { normalizePreferencesPatch, recordFollow, serializePreferences } = require("./utils/notifications");
 
 const router = express.Router();
 const MAX_FAVORITES = 5;
@@ -210,13 +209,30 @@ router.put("/me", auth, async (req, res) => {
 });
 router.patch("/me", auth, async (req, res) => { try { if (typeof req.body.isPrivate !== "boolean") return res.status(400).json({ error: "isPrivate must be true or false" }); const profile = await UserProfile.findOneAndUpdate({ userId: req.userId }, { $set: { userId: req.userId, isPrivate: req.body.isPrivate } }, { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }).populate("favoriteAlbums.albumCatalogId").populate({ path: "pinnedReviewId", populate: { path: "albumCatalogId" } }).populate("pinnedBoardId"); res.json({ ...(await formatProfile(profile)), ...(await socialStats(req.userId, req.userId)) }); } catch { res.status(500).json({ error: "Failed to update profile" }); } });
 
+router.get("/me/notification-preferences", auth, async (req, res) => {
+  try { res.json(serializePreferences(await UserProfile.findOne({ userId: req.userId }, { notificationPreferences: 1 }).lean())); } catch { res.status(500).json({ error: "Failed to fetch notification preferences" }); }
+});
+router.patch("/me/notification-preferences", auth, notificationMutationRateLimit, async (req, res) => {
+  try {
+    const set = normalizePreferencesPatch(req.body);
+    const profile = await UserProfile.findOneAndUpdate(
+      { userId: req.userId },
+      { $set: set, $setOnInsert: { userId: req.userId } },
+      { upsert: true, returnDocument: "after", setDefaultsOnInsert: true, projection: { notificationPreferences: 1 } },
+    ).lean();
+    res.json(serializePreferences(profile));
+  } catch (error) {
+    if (error.status === 400) return res.status(400).json({ error: error.message, code: error.code });
+    res.status(500).json({ error: "Failed to update notification preferences" });
+  }
+});
 // Registered before the /:userId routes so "suggestions" is not read as a user ID.
 router.get("/suggestions", async (req, res) => {
   try { res.json({ people: await suggestPeople({ viewerId: viewer(req), limit: req.query.limit, authors }) }); }
   catch { res.status(500).json({ error: "Failed to fetch suggestions" }); }
 });
 
-router.put("/:userId/follow", auth, async (req, res) => { try { const target = String(req.params.userId || "").trim(); if (target === req.userId) return res.status(400).json({ error: "You cannot follow yourself" }); if (typeof req.body.following !== "boolean") return res.status(400).json({ error: "following must be true or false" }); if (!(await followable(target))) return res.status(404).json({ error: "User not found" }); if (req.body.following) { await Follow.updateOne({ followerId: req.userId, followingId: target }, { $setOnInsert: { followerId: req.userId, followingId: target } }, { upsert: true }); await Notification.updateOne({ recipientUserId: target, actorUserId: req.userId, type: "follow" }, { $setOnInsert: { notificationId: crypto.randomUUID(), recipientUserId: target, actorUserId: req.userId, type: "follow" } }, { upsert: true }); } else await Follow.deleteOne({ followerId: req.userId, followingId: target }); res.json({ targetUserId: target, ...(await socialStats(target, req.userId)) }); } catch { res.status(500).json({ error: "Failed to update follow status" }); } });
+router.put("/:userId/follow", auth, async (req, res) => { try { const target = String(req.params.userId || "").trim(); if (target === req.userId) return res.status(400).json({ error: "You cannot follow yourself" }); if (typeof req.body.following !== "boolean") return res.status(400).json({ error: "following must be true or false" }); if (!(await followable(target))) return res.status(404).json({ error: "User not found" }); if (req.body.following) { await Follow.updateOne({ followerId: req.userId, followingId: target }, { $setOnInsert: { followerId: req.userId, followingId: target } }, { upsert: true }); await recordFollow({ recipientUserId: target, actorUserId: req.userId }); } else await Follow.deleteOne({ followerId: req.userId, followingId: target }); res.json({ targetUserId: target, ...(await socialStats(target, req.userId)) }); } catch { res.status(500).json({ error: "Failed to update follow status" }); } });
 
 for (const path of ["/:userId/diary", "/:userId/boards/:boardId/albums/:albumId/listens"]) {
   router.get(path, async (req, res) => {

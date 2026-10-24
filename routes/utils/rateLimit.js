@@ -93,6 +93,12 @@ const RATE_LIMITS = {
     duration: 60 * 60,
     message: "Too many genre suggestions. Please try again later.",
   },
+  notificationMutation: {
+    keyPrefix: "rescened:notification-mutation",
+    points: 60,
+    duration: 10 * 60,
+    message: "Too many notification updates. Please try again soon.",
+  },
   moderationMutation: {
     keyPrefix: "rescened:moderation-mutation",
     points: 120,
@@ -238,6 +244,7 @@ const queueMutationLimiter = createRateLimiter(RATE_LIMITS.queueMutation);
 const submissionCreateLimiter = createRateLimiter(RATE_LIMITS.submissionCreate);
 const submissionMutationLimiter = createRateLimiter(RATE_LIMITS.submissionMutation);
 const moderationMutationLimiter = createRateLimiter(RATE_LIMITS.moderationMutation);
+const notificationMutationLimiter = createRateLimiter(RATE_LIMITS.notificationMutation);
 const genreSuggestionLimiter = createRateLimiter(RATE_LIMITS.genreSuggestion);
 
 module.exports = {
@@ -310,6 +317,10 @@ module.exports = {
   moderationMutationRateLimit: createRateLimitMiddleware(moderationMutationLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,
     message: RATE_LIMITS.moderationMutation.message,
+  }),
+  notificationMutationRateLimit: createRateLimitMiddleware(notificationMutationLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.notificationMutation.message,
   }),
   searchRateLimit: createRateLimitMiddleware(searchLimiter, {
     keyGenerator: getIpRateLimitKey,
