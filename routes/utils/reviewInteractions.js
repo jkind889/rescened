@@ -12,6 +12,7 @@ const ACTION_CODES = {
   deletion: "REVIEW_DELETION_UNAVAILABLE",
   like: "REVIEW_LIKE_UNAVAILABLE",
   pin: "REVIEW_PIN_UNAVAILABLE",
+  notification: "REVIEW_NOTIFICATION_UNAVAILABLE",
 };
 class ReviewTransactionUnavailableError extends Error {
   constructor(action) {

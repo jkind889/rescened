@@ -108,7 +108,8 @@ function rejectClientOwnedReviewId(body) {
 }
 
 // Best effort: a failed fan-out is logged and never fails the review. A retry
-// with the same Idempotency-Key re-runs it, and its upserts insert nothing new.
+// with the same Idempotency-Key retries an uncommitted delivery. A committed
+// receipt on the review prevents re-delivery even after notifications are cleared.
 async function notifyFollowers(review) {
   try { await fanOutFollowedReview(review); } catch (error) { console.error("[notifications] followed_review fan-out failed", { reviewId: review?.reviewId, message: error?.message }); }
 }

@@ -193,7 +193,7 @@ Request changes, reject, and mark duplicate all call `applyModerationCommand()` 
 7. Insert the contributor's `suggestion_status` notification.
 8. Commit, then reload and return moderator detail.
 
-The conditional filter protects against another command winning after the preliminary read. If it no longer matches, the command returns `409 STATE_CONFLICT`. Repeating a successful non-approval command returns a terminal-state conflict rather than appending a second audit event.
+The conditional filter protects against another command winning after the preliminary read. The first observed revision is retained across automatic transaction retries, so a command cannot silently move onto a newer contributor revision. If the revision changes or the conditional write no longer matches, the command returns `409 STATE_CONFLICT`. Repeating a successful non-approval command returns a terminal-state conflict rather than appending a second audit event.
 
 The status change, audit event, and notification commit together or not at all. Standalone MongoDB returns `503 MODERATION_UNAVAILABLE`; there is no fallback that writes the status without the notification. Approval inserts the same notification inside its own transaction. See [notifications](NOTIFICATIONS.md#suggestion-updates).
 

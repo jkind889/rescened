@@ -1,5 +1,5 @@
 import { API_BASE_URL } from "../config/api";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@clerk/react";
 import AsyncState from "../Components/Loading/AsyncState";
@@ -197,6 +197,7 @@ export function Notifications() {
   const [showSettings, setShowSettings] = useState(false);
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
+  const pageGeneration = useRef(0);
 
   const request = useCallback(async (path, { method = "GET", body } = {}) => {
     const token = await getToken();
@@ -233,12 +234,12 @@ export function Notifications() {
     if (cursor) params.set("cursor", cursor);
     const data = await request(`/notifications?${params}`);
     const rows = Array.isArray(data.notifications) ? data.notifications : [];
-    markLoadedRead(rows);
     return { rows, nextCursor: data.nextCursor || null };
-  }, [markLoadedRead, request]);
+  }, [request]);
 
   useEffect(() => {
     let isCurrent = true;
+    const generation = ++pageGeneration.current;
 
     async function fetchNotifications() {
       if (!isLoaded) {
@@ -256,12 +257,13 @@ export function Notifications() {
         setError("");
         const page = await fetchPage(null);
 
-        if (!isCurrent) {
+        if (!isCurrent || generation !== pageGeneration.current) {
           return;
         }
 
         setNotifications(page.rows);
         setNextCursor(page.nextCursor);
+        markLoadedRead(page.rows);
       } catch (notificationError) {
         console.error(notificationError);
 
@@ -279,24 +281,29 @@ export function Notifications() {
 
     return () => {
       isCurrent = false;
+      pageGeneration.current += 1;
     };
-  }, [fetchPage, isLoaded, isSignedIn]);
+  }, [fetchPage, isLoaded, isSignedIn, markLoadedRead]);
 
   async function loadMore() {
+    if (isUpdating || isLoadingMore || !nextCursor) return;
+    const generation = pageGeneration.current;
     setIsLoadingMore(true);
     setActionError("");
 
     try {
       const page = await fetchPage(nextCursor);
+      if (generation !== pageGeneration.current) return;
       setNotifications((current) => {
         const seen = new Set(current.map((row) => row.notificationId));
         return [...current, ...page.rows.filter((row) => !seen.has(row.notificationId))];
       });
       setNextCursor(page.nextCursor);
+      markLoadedRead(page.rows);
     } catch (loadError) {
-      setActionError(loadError.message);
+      if (generation === pageGeneration.current) setActionError(loadError.message);
     } finally {
-      setIsLoadingMore(false);
+      if (generation === pageGeneration.current) setIsLoadingMore(false);
     }
   }
 
@@ -316,7 +323,12 @@ export function Notifications() {
   }
 
   async function clearAll() {
+    if (isUpdating) return;
     if (!window.confirm("Clear all of your notifications? This cannot be undone.")) return;
+    // Invalidate pages already in flight before clearing. Even a response that
+    // arrives after the mutation completes must not restore deleted rows.
+    pageGeneration.current += 1;
+    setIsLoadingMore(false);
     setIsUpdating(true);
     setActionError("");
 
@@ -344,7 +356,7 @@ export function Notifications() {
           <div className="notifications-actions">
             {hasNotifications && (
               <>
-                <button className="community-text-button" type="button" onClick={markAllRead} disabled={isUpdating}>
+                <button className="community-text-button" type="button" onClick={markAllRead} disabled={isUpdating || isLoadingMore}>
                   Mark all read
                 </button>
                 <button className="community-text-button" type="button" onClick={clearAll} disabled={isUpdating}>
@@ -383,7 +395,7 @@ export function Notifications() {
           ))}
         </div>
         {nextCursor && (
-          <button className="community-secondary-button notifications-more" type="button" onClick={loadMore} disabled={isLoadingMore}>
+          <button className="community-secondary-button notifications-more" type="button" onClick={loadMore} disabled={isLoadingMore || isUpdating}>
             {isLoadingMore ? "Loading..." : "Load more"}
           </button>
         )}

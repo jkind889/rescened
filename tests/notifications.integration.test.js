@@ -11,16 +11,21 @@ const BoardItem = require("../models/BoardItem");
 const BoardListen = require("../models/BoardListen");
 const Follow = require("../models/Follow");
 const Listen = require("../models/Listen");
+const Like = require("../models/Like");
+const ListenCreation = require("../models/ListenCreation");
+const TrackRanking = require("../models/TrackRanking");
 const Notification = require("../models/Notification");
 const Review = require("../models/Reviews");
 const UserProfile = require("../models/UserProfile");
 const { createCatalogAlbum } = require("../routes/utils/albumCatalog");
 const { approveAlbumSubmission } = require("../routes/utils/approval");
 const { applyModerationCommand } = require("../routes/utils/moderationCommands");
+const { removeAccountData } = require("../lib/accountDeletion");
 const { deleteOwnedReview, mutateReviewLike } = require("../routes/utils/reviewInteractions");
 const {
   clearNotifications,
   fanOutFollowedReview,
+  followedReviewRecipients,
   markRead,
   readPage,
   recordFollow,
@@ -36,7 +41,7 @@ test.before(async () => {
   if (!enabled) return;
   replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(replSet.getUri(), { dbName: "rescened_notifications" });
-  await Promise.all([AlbumCatalog, AlbumSubmission, Board, BoardItem, BoardListen, Follow, Listen, Notification, Review, UserProfile]
+  await Promise.all([AlbumCatalog, AlbumSubmission, Board, BoardItem, BoardListen, Follow, Listen, Like, ListenCreation, TrackRanking, Notification, Review, UserProfile]
     .map((Model) => Model.syncIndexes()));
 });
 
@@ -221,7 +226,7 @@ test("followed reviews reach followers with the album on a board, once, and leav
   const first = await fanOutFollowedReview(review, { logger: quietLogger() });
   const retry = await fanOutFollowedReview(review, { logger: quietLogger() });
   assert.equal(first.notified, 2);
-  assert.equal(retry.notified, 2);
+  assert.equal(retry.notified, 0, "a committed delivery is not replayed");
   const rows = await Notification.find({ type: "followed_review", reviewId: review._id }).lean();
   assert.deepEqual(rows.map((row) => row.recipientUserId).sort(), ["listened-follower", "saved-follower"]);
   assert.ok(rows.every((row) => row.actorUserId === reviewer));
@@ -280,4 +285,177 @@ test("pages are stable across equal timestamps and read state changes only on re
   assert.equal(await markRead(recipientUserId, { all: true }), 32);
   assert.equal(await clearNotifications(recipientUserId, { notificationIds: ids.slice(0, 5) }), 5);
   assert.equal(await clearNotifications(recipientUserId, { all: true }), 30);
+});
+
+function gate() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function reviewedShelf(prefix) {
+  const album = await createAlbum(prefix);
+  const userId = `${prefix}-author`;
+  const followerId = `${prefix}-follower`;
+  await follow(followerId, userId, new Date());
+  await saveAlbum(followerId, album);
+  const review = await Review.create({ userId, albumCatalogId: album._id, rating: 4, reviewText: prefix });
+  return { album, userId, followerId, review };
+}
+
+test("delivery and its durable receipt roll back together and retry only once", { skip: !enabled }, async (t) => {
+  const { review, followerId } = await reviewedShelf("receipt-rollback");
+  const original = Notification.bulkWrite;
+  t.mock.method(Notification, "bulkWrite", async function (...args) {
+    await original.apply(this, args);
+    throw new Error("fail after notifications were written");
+  });
+  await assert.rejects(fanOutFollowedReview(review), /fail after notifications/);
+  assert.equal(await Notification.countDocuments({ reviewId: review._id }), 0);
+  assert.equal((await Review.findById(review._id).select("+followedReviewFanoutAt")).followedReviewFanoutAt, undefined);
+  t.mock.restoreAll();
+
+  await Promise.all([fanOutFollowedReview(review), fanOutFollowedReview(review)]);
+  assert.equal(await Notification.countDocuments({ reviewId: review._id }), 1);
+  assert.ok((await Review.findById(review._id).select("+followedReviewFanoutAt")).followedReviewFanoutAt);
+  assert.equal((await Review.findById(review._id).lean()).followedReviewFanoutAt, undefined, "receipt is private");
+  await clearNotifications(followerId, { all: true });
+  assert.equal((await fanOutFollowedReview(review)).notified, 0);
+  assert.equal(await Notification.countDocuments({ reviewId: review._id }), 0, "clearing cannot re-enable delivery");
+});
+
+test("retry eligibility cannot expand a review's recipient cap, including an empty delivery", { skip: !enabled }, async () => {
+  const { album, userId, review } = await reviewedShelf("stable-cap");
+  await fanOutFollowedReview(review, { cap: 1 });
+  await follow("stable-cap-new-follower", userId, new Date(Date.now() + 1000));
+  await saveAlbum("stable-cap-new-follower", album);
+  await fanOutFollowedReview(review, { cap: 1 });
+  assert.equal(await Notification.countDocuments({ reviewId: review._id }), 1);
+
+  const empty = await Review.create({ userId: "empty-audience", albumCatalogId: album._id, rating: 4, reviewText: "Empty" });
+  assert.equal((await fanOutFollowedReview(empty)).notified, 0);
+  await follow("stable-cap-new-follower", "empty-audience", new Date());
+  assert.equal((await fanOutFollowedReview(empty)).notified, 0);
+  assert.equal(await Notification.countDocuments({ reviewId: empty._id }), 0);
+});
+
+test("follower eligibility scanning is bounded even when most followers are ineligible", { skip: !enabled }, async () => {
+  const { album, userId, review } = await reviewedShelf("bounded-scan");
+  await follow("bounded-newer-a", userId, new Date(Date.now() + 1000));
+  await follow("bounded-newer-b", userId, new Date(Date.now() + 2000));
+  const result = await followedReviewRecipients({ reviewerId: userId, albumCatalogId: album._id, scanLimit: 2 });
+  assert.deepEqual(result, { recipients: [], skipped: 0, scanned: 2, scanLimited: true });
+  const logger = quietLogger();
+  await fanOutFollowedReview(review, { scanLimit: 2, logger });
+  assert.equal(logger.warnings.length, 1);
+  assert.match(logger.warnings[0][0], /follower scan hit its limit/);
+  assert.equal(logger.warnings[0][1].scanned, 2);
+});
+
+test("fan-out cannot insert after a review deletion's notification sweep", { skip: !enabled }, async (t) => {
+  const { userId, review } = await reviewedShelf("delete-overlap");
+  const swept = gate();
+  const resumeDelete = gate();
+  const claimAttempted = gate();
+  const originalDelete = Review.deleteOne;
+  const originalClaim = Review.findOneAndUpdate;
+  t.mock.method(Review, "deleteOne", async function (...args) {
+    swept.resolve();
+    await resumeDelete.promise;
+    return originalDelete.apply(this, args);
+  });
+  t.mock.method(Review, "findOneAndUpdate", function (...args) {
+    if (args[1]?.$set?.followedReviewFanoutAt) claimAttempted.resolve();
+    return originalClaim.apply(this, args);
+  });
+  const deletion = deleteOwnedReview(review.reviewId, userId);
+  await swept.promise;
+  const delivery = fanOutFollowedReview(review);
+  try {
+    // Old delivery completed here without claiming the review; the fixed
+    // delivery waits for the deletion's write claim to finish.
+    await Promise.race([claimAttempted.promise, delivery]);
+  } finally { resumeDelete.resolve(); }
+  await Promise.all([deletion, delivery]);
+  assert.equal(await Review.exists({ _id: review._id }), null);
+  assert.equal(await Notification.countDocuments({ reviewId: review._id }), 0);
+});
+
+test("account cleanup winning after recipient selection cannot restore an author's identity", { skip: !enabled }, async (t) => {
+  const { userId, review } = await reviewedShelf("account-overlap");
+  const original = BoardItem.distinct;
+  t.mock.method(BoardItem, "distinct", async function (...args) {
+    const recipients = await original.apply(this, args);
+    const session = await mongoose.startSession();
+    try { await session.withTransaction(() => removeAccountData(userId, session)); }
+    finally { await session.endSession(); }
+    return recipients;
+  });
+  await fanOutFollowedReview(review);
+  assert.equal((await Review.findById(review._id)).userId, Review.DELETED_AUTHOR_ID);
+  assert.equal(await Notification.countDocuments({ actorUserId: userId }), 0);
+  assert.equal(await Notification.countDocuments({ reviewId: review._id }), 0);
+});
+
+test("account cleanup waits for an in-flight delivery then removes its notifications", { skip: !enabled }, async (t) => {
+  const { userId, review } = await reviewedShelf("account-after-claim");
+  const original = Notification.bulkWrite;
+  const claimed = gate();
+  const resume = gate();
+  t.mock.method(Notification, "bulkWrite", async function (...args) {
+    claimed.resolve();
+    await resume.promise;
+    return original.apply(this, args);
+  });
+  const delivery = fanOutFollowedReview(review);
+  await claimed.promise;
+  const session = await mongoose.startSession();
+  const deletion = session.withTransaction(() => removeAccountData(userId, session));
+  resume.resolve();
+  try { await Promise.all([delivery, deletion]); }
+  finally { await session.endSession(); }
+  assert.equal((await Review.findById(review._id)).userId, Review.DELETED_AUTHOR_ID);
+  assert.equal(await Notification.countDocuments({ actorUserId: userId }), 0);
+});
+
+test("a retried moderation command conflicts instead of deciding on a newer revision", { skip: !enabled }, async (t) => {
+  const submission = await createSubmission("First Revision", "revision-owner");
+  const ready = gate();
+  const resume = gate();
+  const original = AlbumSubmission.findOneAndUpdate;
+  let paused = false;
+  t.mock.method(AlbumSubmission, "findOneAndUpdate", async function (...args) {
+    if (!paused && args[1]?.$set?.status === "rejected") {
+      paused = true;
+      ready.resolve();
+      await resume.promise;
+    }
+    return original.apply(this, args);
+  });
+  const rejection = applyModerationCommand({ submissionId: submission.submissionId, actorUserId: "stale-moderator", action: "reject", body: { reason: "Old revision is wrong" } });
+  const conflict = assert.rejects(rejection, (error) => error.status === 409 && error.code === "STATE_CONFLICT");
+  await ready.promise;
+  try {
+    await applyModerationCommand({ submissionId: submission.submissionId, actorUserId: "other-moderator", action: "request_changes", body: { reason: "Please revise" } });
+    const clerkPath = require.resolve("@clerk/express");
+    const routePath = require.resolve("../routes/suggestions");
+    const oldClerk = require.cache[clerkPath];
+    require.cache[clerkPath] = { id: clerkPath, filename: clerkPath, loaded: true, exports: { getAuth: () => ({ userId: "revision-owner" }), clerkClient: {} } };
+    delete require.cache[routePath];
+    const router = require(routePath);
+    t.after(() => { if (oldClerk) require.cache[clerkPath] = oldClerk; else delete require.cache[clerkPath]; delete require.cache[routePath]; });
+    const layer = router.stack.find((item) => item.route?.path === "/:submissionId/revise" && item.route.methods.post);
+    const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+    await layer.route.stack.at(-1).handle({ userId: "revision-owner", params: { submissionId: submission.submissionId }, body: {
+      proposedMetadata: { title: "Corrected Revision", artistCredits: [{ name: "Notification Artist" }], releaseType: "album", releaseDate: "2026" },
+      supportingSources: [{ type: "other", url: "https://example.com/evidence" }], externalReferences: [],
+    } }, res);
+    assert.equal(res.statusCode, 200);
+  } finally { resume.resolve(); }
+  await conflict;
+  const persisted = await AlbumSubmission.findById(submission._id);
+  assert.equal(persisted.currentRevision, 2);
+  assert.equal(persisted.status, "pending");
+  assert.equal(persisted.moderationHistory.some((event) => event.action === "rejected"), false);
+  assert.equal(await Notification.countDocuments({ submissionId: submission._id, submissionStatus: "rejected" }), 0);
 });

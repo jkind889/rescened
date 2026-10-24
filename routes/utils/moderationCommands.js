@@ -30,6 +30,9 @@ async function applyModerationCommand({ submissionId, actorUserId, action, body 
   if (!NEXT_STATUS[action]) throw new ModerationValidationError("moderation action is invalid");
   let session;
   let updated = null;
+  // withTransaction may retry against a newer snapshot. Keep the command tied
+  // to the revision it first observed, like the approval path does.
+  let expectedRevision;
   try {
     if (typeof mongoose.startSession !== "function") throw new ModerationUnavailableError();
     session = await mongoose.startSession();
@@ -38,6 +41,10 @@ async function applyModerationCommand({ submissionId, actorUserId, action, body 
       updated = null;
       const current = await withSession(AlbumSubmission.findOne({ submissionId }), session);
       if (!current) throw new ModerationConflictError("Suggestion not found", "SUGGESTION_NOT_FOUND");
+      if (expectedRevision === undefined) expectedRevision = current.currentRevision;
+      if (current.currentRevision !== expectedRevision) {
+        throw new ModerationConflictError("Suggestion changed while it was being moderated", "STATE_CONFLICT");
+      }
       if (current.status !== "pending") {
         throw new ModerationConflictError("Only pending suggestions can be moderated", "INVALID_SUBMISSION_STATE");
       }
@@ -54,7 +61,7 @@ async function applyModerationCommand({ submissionId, actorUserId, action, body 
         set.duplicateOfSubmissionId = target._id;
       }
       const next = await AlbumSubmission.findOneAndUpdate(
-        { submissionId, status: "pending", currentRevision: current.currentRevision },
+        { submissionId, status: "pending", currentRevision: expectedRevision },
         {
           $set: set,
           // Rejected and duplicate suggestions close; needs-changes stays open.

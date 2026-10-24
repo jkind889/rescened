@@ -17,9 +17,10 @@ const LOCKED_TYPES = Object.freeze(["suggestion_status"]);
 const REVIEW_TYPES = Object.freeze(["review_like", "followed_review"]);
 const PAGE_SIZE = 30;
 const MAX_IDS_PER_REQUEST = 100;
-// Bounds the work one review creation can trigger inside the request. If the
-// warning fires in practice, move the fan-out to the worker instead of raising it.
+// Bound both writes and eligibility work in the creation request. Move fan-out
+// to a worker if these limits are reached regularly.
 const FOLLOWED_REVIEW_CAP = 500;
+const FOLLOWER_SCAN_LIMIT = 5000;
 const FOLLOWER_BATCH_SIZE = 1000;
 const NOTIFICATION_ID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MODERATION_ACTOR = Object.freeze({ userId: null, username: "Rescened moderators", imageUrl: "", isSystem: true });
@@ -153,8 +154,8 @@ async function followersWithAlbum(followerIds, albumCatalogId) {
   return new Set([...saved, ...linked.map((row) => row._id)]);
 }
 
-async function followedReviewRecipients({ reviewerId, albumCatalogId, cap = FOLLOWED_REVIEW_CAP }) {
-  const state = { recipients: [], skipped: 0 };
+async function followedReviewRecipients({ reviewerId, albumCatalogId, cap = FOLLOWED_REVIEW_CAP, scanLimit = FOLLOWER_SCAN_LIMIT }) {
+  const state = { recipients: [], skipped: 0, scanned: 0, scanLimited: false };
   let batch = [];
   const flush = async () => {
     const ids = batch.filter((id) => id && id !== reviewerId);
@@ -168,9 +169,12 @@ async function followedReviewRecipients({ reviewerId, albumCatalogId, cap = FOLL
   };
   const follows = Follow.find({ followingId: reviewerId }, { followerId: 1 })
     .sort({ createdAt: -1, _id: -1 })
+    .limit(scanLimit + 1)
     .lean()
     .cursor({ batchSize: FOLLOWER_BATCH_SIZE });
   for await (const follow of follows) {
+    if (state.scanned === scanLimit) { state.scanLimited = true; break; }
+    state.scanned += 1;
     batch.push(follow.followerId);
     if (batch.length >= FOLLOWER_BATCH_SIZE) await flush();
   }
@@ -178,27 +182,34 @@ async function followedReviewRecipients({ reviewerId, albumCatalogId, cap = FOLL
   return state;
 }
 
-function onlyDuplicateKeyErrors(error) {
-  const errors = error?.writeErrors || error?.result?.getWriteErrors?.() || [];
-  return error?.code === 11000 || (errors.length > 0 && errors.every((item) => (item.code ?? item.err?.code) === 11000));
-}
-
-// Best-effort fan-out after a review is created. Upserts make a retried
-// creation harmless. Recipients only ever learn about their own boards.
-async function fanOutFollowedReview(review, { cap = FOLLOWED_REVIEW_CAP, logger = console } = {}) {
+// Best-effort after creation, but delivery itself is atomic. Claiming the same
+// review document as deletion/account cleanup serializes those operations.
+// The receipt survives notification clearing and freezes delivery on retries.
+async function fanOutFollowedReview(review, { cap = FOLLOWED_REVIEW_CAP, scanLimit = FOLLOWER_SCAN_LIMIT, logger = console } = {}) {
   const source = plain(review);
   const reviewerId = source?.userId;
   if (!source?._id || !reviewerId || Review.isDeletedAuthor(reviewerId)) return { notified: 0, skipped: 0 };
+  const claim = { _id: source._id, userId: reviewerId, followedReviewFanoutAt: { $exists: false } };
+  // Skip completed deliveries before doing any eligibility work. Recheck under
+  // a write claim below because deletion or another delivery can win meanwhile.
+  if (!(await Review.exists(claim))) return { notified: 0, skipped: 0 };
   const albumCatalogId = source.albumCatalogId?._id || source.albumCatalogId;
-  const { recipients, skipped } = await followedReviewRecipients({ reviewerId, albumCatalogId, cap });
+  const { recipients, skipped, scanned, scanLimited } = await followedReviewRecipients({ reviewerId, albumCatalogId, cap, scanLimit });
   if (skipped > 0) {
     logger.warn("[notifications] followed_review fan-out hit its cap", {
       reviewId: source.reviewId, cap, notified: recipients.length, skipped,
     });
   }
-  if (!recipients.length) return { notified: 0, skipped };
-  try {
-    await Notification.bulkWrite(recipients.map((recipientUserId) => {
+  if (scanLimited) logger.warn("[notifications] followed_review follower scan hit its limit", { reviewId: source.reviewId, scanLimit, scanned });
+  // Deferred require avoids the review-like helper's dependency on this module.
+  const { runReviewTransaction } = require("./reviewInteractions");
+  return runReviewTransaction("notification", async (session) => {
+    const current = await Review.findOneAndUpdate(claim, {
+      $inc: { interactionRevision: 1 },
+      $set: { followedReviewFanoutAt: new Date() },
+    }, { returnDocument: "after", session });
+    if (!current) return { notified: 0, skipped };
+    if (recipients.length) await Notification.bulkWrite(recipients.map((recipientUserId) => {
       const key = { recipientUserId, type: "followed_review", reviewId: source._id };
       return {
         updateOne: {
@@ -207,18 +218,9 @@ async function fanOutFollowedReview(review, { cap = FOLLOWED_REVIEW_CAP, logger 
           upsert: true,
         },
       };
-    }), { ordered: false });
-  } catch (error) {
-    // A concurrent retry of the same creation already inserted those rows.
-    if (!onlyDuplicateKeyErrors(error)) throw error;
-  }
-  // Review deletion removes these rows in its transaction, but a deletion that
-  // committed while the fan-out ran would miss the rows written after it.
-  if (!(await Review.exists({ _id: source._id }))) {
-    await Notification.deleteMany({ type: "followed_review", reviewId: source._id });
-    return { notified: 0, skipped };
-  }
-  return { notified: recipients.length, skipped };
+    }), { session });
+    return { notified: recipients.length, skipped };
+  });
 }
 
 // Reads
@@ -370,6 +372,7 @@ async function unreadCount(recipientUserId) {
 
 module.exports = {
   FOLLOWED_REVIEW_CAP,
+  FOLLOWER_SCAN_LIMIT,
   LOCKED_TYPES,
   MODERATION_ACTOR,
   MUTABLE_TYPES,
