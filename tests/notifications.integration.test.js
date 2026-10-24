@@ -203,3 +203,58 @@ test("approval writes exactly one notification across retries and concurrent app
   const [serialized] = await serializeNotifications(rows, new Map());
   assert.equal(serialized.subject.albumId, results[0].album.albumId);
 });
+
+test("followed reviews reach followers with the album on a board, once, and leave with the review", { skip: !enabled }, async () => {
+  const album = await createAlbum("Shared Shelf");
+  const reviewer = "fan-reviewer";
+  await follow("saved-follower", reviewer, new Date("2026-10-01"));
+  await follow("listened-follower", reviewer, new Date("2026-10-02"));
+  await follow("unrelated-follower", reviewer, new Date("2026-10-03"));
+  await follow("muted-follower", reviewer, new Date("2026-10-04"));
+  await saveAlbum("saved-follower", album);
+  await linkListen("listened-follower", album);
+  await saveAlbum("muted-follower", album);
+  await saveAlbum("not-a-follower", album);
+  await UserProfile.create({ userId: "muted-follower", notificationPreferences: { followed_review: false } });
+
+  const review = await Review.create({ userId: reviewer, albumCatalogId: album._id, rating: 5, reviewText: "Shared" });
+  const first = await fanOutFollowedReview(review, { logger: quietLogger() });
+  const retry = await fanOutFollowedReview(review, { logger: quietLogger() });
+  assert.equal(first.notified, 2);
+  assert.equal(retry.notified, 2);
+  const rows = await Notification.find({ type: "followed_review", reviewId: review._id }).lean();
+  assert.deepEqual(rows.map((row) => row.recipientUserId).sort(), ["listened-follower", "saved-follower"]);
+  assert.ok(rows.every((row) => row.actorUserId === reviewer));
+
+  await deleteOwnedReview(review.reviewId, reviewer);
+  assert.equal(await Notification.countDocuments({ reviewId: review._id }), 0);
+});
+
+test("the fan-out cap keeps the most recent follows and logs the skip", { skip: !enabled }, async () => {
+  const album = await createAlbum("Capped Shelf");
+  const reviewer = "capped-reviewer";
+  for (const [index, follower] of ["oldest", "middle", "newest"].entries()) {
+    await follow(`cap-${follower}`, reviewer, new Date(Date.UTC(2026, 9, 1 + index)));
+    await saveAlbum(`cap-${follower}`, album);
+  }
+  const review = await Review.create({ userId: reviewer, albumCatalogId: album._id, rating: 3, reviewText: "Capped" });
+  const logger = quietLogger();
+  const result = await fanOutFollowedReview(review, { cap: 2, logger });
+  assert.deepEqual(result, { notified: 2, skipped: 1 });
+  const recipients = (await Notification.find({ type: "followed_review", reviewId: review._id }).lean()).map((row) => row.recipientUserId);
+  assert.deepEqual(recipients.sort(), ["cap-middle", "cap-newest"]);
+  assert.equal(logger.warnings.length, 1);
+  assert.equal(logger.warnings[0][1].reviewId, review.reviewId);
+  assert.equal(logger.warnings[0][1].skipped, 1);
+});
+
+test("a fan-out for a review deleted mid-run leaves no rows behind", { skip: !enabled }, async () => {
+  const album = await createAlbum("Vanishing Review");
+  await follow("vanish-follower", "vanish-reviewer", new Date());
+  await saveAlbum("vanish-follower", album);
+  const review = await Review.create({ userId: "vanish-reviewer", albumCatalogId: album._id, rating: 2, reviewText: "Gone" });
+  await Review.deleteOne({ _id: review._id });
+  const result = await fanOutFollowedReview(review, { logger: quietLogger() });
+  assert.equal(result.notified, 0);
+  assert.equal(await Notification.countDocuments({ reviewId: review._id }), 0);
+});
