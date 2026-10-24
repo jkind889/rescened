@@ -37,6 +37,17 @@ const boardSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // "manual" lists albumOrder first, then later albums by savedAt. See
+    // docs/BOARD_ORDERING.md. "ranked" display requires manual order.
+    orderMode: { type: String, enum: ["added", "manual"], default: "added" },
+    displayStyle: { type: String, enum: ["grid", "ranked"], default: "grid" },
+    // Internal AlbumCatalog _id values; never serialized. Responses list the
+    // albums in this order by their public albumId.
+    albumOrder: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "AlbumCatalog" }],
+      default: undefined,
+      validate: { validator: (value) => !value || value.length <= 100, message: "A board orders at most 100 albums" },
+    },
     interactionRevision: { type: Number, default: 0, select: false },
   },
   { timestamps: true },

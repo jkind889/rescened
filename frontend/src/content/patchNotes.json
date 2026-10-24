@@ -1,5 +1,18 @@
 [
   {
+    "id": "ordered-boards",
+    "date": "2026-10-23",
+    "title": "Put your boards in your own order",
+    "summary": "Arrange the albums on a board however you like, or turn it into a numbered ranking.",
+    "changes": [
+      "Switch a board's Order from Date added to Custom order, then drag albums or use the arrow buttons to move them, and save.",
+      "Turn on Show as a ranked list to number a board's albums. Visitors see the numbers too, and the board card says Ranked list.",
+      "Board covers and previews follow your order, so a top ten shows your top four.",
+      "New albums go to the bottom of a board in custom order.",
+      "Custom order works on boards of up to 100 albums. If a board grows past 100, it keeps its order for the first 100, and later albums follow by date added."
+    ]
+  },
+  {
     "id": "notification-types",
     "date": "2026-10-23",
     "title": "More useful notifications",

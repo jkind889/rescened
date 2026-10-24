@@ -80,7 +80,7 @@ async function socialStats(userId, viewerId) {
   return { followerCount, followingCount, ...reviews, isFollowing: Boolean(isFollowing), isCurrentUser: viewerId === userId };
 }
 async function formatBoard(board) {
-  return libraryBoard(board, true);
+  return libraryBoard(board, { albums: true });
 }
 function formatItem(item) {
   const source = plain(item); const album = source.albumCatalogId;

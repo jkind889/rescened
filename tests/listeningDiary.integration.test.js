@@ -209,7 +209,7 @@ integration("detaching a last listen removes its cover unless explicitly saved, 
   assert.equal((await savedAlbums(owner)).length, 1);
   assert.equal((await request("DELETE", `/boards/${board.boardId}/listens/${listen.listenId}`)).status, 200);
   await setMembership(owner, secondBoard.boardId, listen.listenId, false);
-  const detail = await formatBoard(secondBoard, true);
+  const detail = await formatBoard(secondBoard, { albums: true });
   assert.equal(detail.itemCount, 1);
   assert.equal(detail.albums[0].explicitlySaved, true);
   assert.equal(detail.listenCount, 0);
@@ -253,7 +253,7 @@ integration("date correction updates diary ordering and summaries without rewrit
   const response = await request("PATCH", `/diary/${listen.listenId}`, { body: { listenedOn: "2010-05-01", timeZone: "America/New_York" } });
   assert.equal(response.status, 200);
   assert.equal(response.body.listenedOn, "2010-05-01");
-  assert.equal((await formatBoard(board, true)).albums[0].latestListenedOn, "2010-05-01");
+  assert.equal((await formatBoard(board, { albums: true })).albums[0].latestListenedOn, "2010-05-01");
   for (const body of [
     { listenedOn: "2025-02-29", timeZone: "UTC" },
     { listenedOn: "9999-01-01", timeZone: "UTC" },
@@ -334,7 +334,7 @@ integration("pagination is deterministic for ties, binds filters, and resolves c
   assert.equal(filtered.listens.length, 4);
   await AlbumCatalog.updateOne({ _id: album._id }, { $set: { title: "Corrected title" } });
   assert.equal((await listListens(owner)).listens[0].album.title, "Corrected title");
-  assert.equal((await formatBoard(board, true)).albums[0].title, "Corrected title");
+  assert.equal((await formatBoard(board, { albums: true })).albums[0].title, "Corrected title");
   const missing = await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Gone", artistDisplayName: "Artist", catalogSource: "manual" });
   await log({ albumId: missing.albumId, listenedOn: "2020-01-03", boardIds: [board.boardId] });
   await AlbumCatalog.deleteOne({ _id: missing._id });

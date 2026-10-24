@@ -148,6 +148,7 @@ export function Boards() {
               {board.description && <p className="board-card-description">{board.description}</p>}
               <p>
                 {board.itemCount} album{board.itemCount === 1 ? "" : "s"} · {board.listenCount || 0} listen{board.listenCount === 1 ? "" : "s"}
+                {board.displayStyle === "ranked" ? " · Ranked list" : ""}
                 {board.isDefault ? " · Default" : ""}
               </p>
             </Link>

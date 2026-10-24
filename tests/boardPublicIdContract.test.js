@@ -315,9 +315,12 @@ test("profile pins resolve a board UUID to the internal relation and serialize a
 });
 
 test("board descriptions are optional, normalized, bounded, and patchable on their own", async (t) => {
-  const sourceBoard = { ...board(), description: "", save: async () => {} };
+  const sourceBoard = { ...board(), description: "" };
   let created;
   t.mock.method(Board, "findOne", async () => sourceBoard);
+  t.mock.method(Board, "findOneAndUpdate", async () => sourceBoard);
+  t.mock.method(Board, "updateOne", async (_filter, update) => { Object.assign(sourceBoard, update.$set); return {}; });
+  t.mock.method(mongoose, "startSession", async () => ({ withTransaction: async (fn) => fn(), endSession: async () => {} }));
   t.mock.method(Board, "create", async (doc) => { created = doc; return { ...board(), ...doc }; });
   t.mock.method(BoardItem, "find", () => chainQuery([]));
   const router = loadRoute(t, boardRoutePath);
@@ -351,7 +354,7 @@ test("board descriptions are optional, normalized, bounded, and patchable on the
   const empty = await invokeLastHandler(router, "/:boardId", "patch", { userId: "owner", params: { boardId: BOARD_ID }, body: {} });
   assert.equal(empty.status, 400);
   assert.equal(empty.body.code, "INVALID_DIARY_REQUEST");
-  assert.match(empty.body.error, /title or description/);
+  assert.match(empty.body.error, /title, description, or order setting/);
   const blankTitle = await invokeLastHandler(router, "/:boardId", "patch", { userId: "owner", params: { boardId: BOARD_ID }, body: { title: " ", description: "ok" } });
   assert.equal(blankTitle.status, 400);
 });
@@ -410,4 +413,74 @@ test("profile diary calendars follow profile privacy before reading listens", as
   const invalidMonth = await invokeLastHandler(router, "/:userId/diary/calendar", "get", { params: { userId: "listener" }, query: { month: "October" } });
   assert.equal(invalidMonth.status, 400);
   assert.equal(invalidMonth.body.code, "INVALID_DIARY_REQUEST");
+});
+
+test("a manual board lists and previews albums in its saved order without exposing the order's catalog IDs", async (t) => {
+  const first = catalogAlbum();
+  const second = { ...catalogAlbum(), albumId: "33333333-3333-4333-8333-333333333333", title: "Second" };
+  const third = { ...catalogAlbum(), albumId: "44444444-4444-4444-8444-444444444444", title: "Listen only" };
+  const sourceBoard = board({ orderMode: "manual", displayStyle: "ranked", albumOrder: [first._id, second._id], interactionRevision: 7 });
+  const item = (album, savedAt) => ({ _id: new mongoose.Types.ObjectId(), userId: "owner", boardId: sourceBoard._id, albumCatalogId: album, savedAt: new Date(savedAt) });
+  t.mock.method(Board, "findOne", async () => sourceBoard);
+  t.mock.method(BoardItem, "find", () => chainQuery([item(second, "2026-09-02"), item(first, "2026-09-01")]));
+  const router = loadRoute(t, boardRoutePath);
+  // A listen-only album that is not in albumOrder follows the ordered albums.
+  t.mock.method(BoardListen, "aggregate", async () => [{
+    _id: { board: sourceBoard._id, album: third._id, user: "owner" },
+    savedAt: new Date("2026-08-01"), listenCount: 1, latestListenedOn: "2026-08-01", album: third,
+  }]);
+
+  const response = await invokeLastHandler(router, "/:boardId", "get", { userId: "owner", params: { boardId: BOARD_ID } });
+  assert.equal(response.status, 200);
+  // Date order would put the newer save, second, first.
+  assert.deepEqual(response.body.albums.map((album) => album.albumId), [first.albumId, second.albumId, third.albumId]);
+  assert.deepEqual(response.body.previewAlbums.map((album) => album.albumId), [first.albumId, second.albumId, third.albumId]);
+  assert.equal(response.body.orderMode, "manual");
+  assert.equal(response.body.displayStyle, "ranked");
+  assert.equal(response.body.orderedCount, 3);
+  assert.equal(response.body.revision, 7);
+  assert.equal(Object.hasOwn(response.body, "albumOrder"), false);
+  const serialized = JSON.stringify(response.body);
+  for (const id of [sourceBoard._id, first._id, second._id, third._id]) assert.equal(serialized.includes(String(id)), false);
+
+  const { formatBoard } = require("../routes/utils/boardLibrary");
+  const publicBoard = await formatBoard(sourceBoard, { albums: true });
+  assert.equal(Object.hasOwn(publicBoard, "revision"), false, "only the owner's reads carry the reorder token");
+});
+
+test("board order writes validate their bodies before claiming the board", async (t) => {
+  const claim = t.mock.method(Board, "findOneAndUpdate", async () => board());
+  t.mock.method(mongoose, "startSession", async () => ({ withTransaction: async (fn) => fn(), endSession: async () => {} }));
+  const router = loadRoute(t, boardRoutePath);
+
+  for (const requestBody of [{}, { albumIds: [ALBUM_ID, ALBUM_ID], revision: 1 }, { albumIds: [ALBUM_ID], revision: "1" }, { albumIds: [ALBUM_ID], revision: 1, albumOrder: [] }]) {
+    const rejected = await invokeLastHandler(router, "/:boardId/order", "put", { userId: "owner", params: { boardId: BOARD_ID }, body: requestBody });
+    assert.equal(rejected.status, 400, JSON.stringify(requestBody));
+    assert.equal(rejected.body.code, "INVALID_BOARD_ORDER");
+  }
+  const internal = await invokeLastHandler(router, "/:boardId/order", "put", { userId: "owner", params: { boardId: String(new mongoose.Types.ObjectId()) }, body: { albumIds: [], revision: 0 } });
+  assert.equal(internal.status, 404);
+  for (const requestBody of [{ orderMode: "custom" }, { displayStyle: "ranked" }, { albumOrder: [] }]) {
+    const rejected = await invokeLastHandler(router, "/:boardId", "patch", { userId: "owner", params: { boardId: BOARD_ID }, body: requestBody });
+    assert.equal(rejected.status, 400, JSON.stringify(requestBody));
+  }
+  // Only the ranked-without-manual check needs the board, and it fails before any write.
+  assert.equal(claim.mock.callCount(), 1);
+});
+
+test("a reorder at a stale revision returns 409 BOARD_CHANGED without writing", async (t) => {
+  const sourceBoard = board({ orderMode: "manual" });
+  const claims = [];
+  t.mock.method(Board, "findOneAndUpdate", async (filter) => { claims.push(filter); return null; });
+  t.mock.method(Board, "exists", () => ({ session: async () => ({ _id: sourceBoard._id }) }));
+  const write = t.mock.method(Board, "updateOne", async () => ({}));
+  t.mock.method(mongoose, "startSession", async () => ({ withTransaction: async (fn) => fn(), endSession: async () => {} }));
+  const router = loadRoute(t, boardRoutePath);
+
+  const stale = await invokeLastHandler(router, "/:boardId/order", "put", { userId: "owner", params: { boardId: BOARD_ID }, body: { albumIds: [ALBUM_ID], revision: 4 } });
+  assert.deepEqual(stale, { status: 409, body: { error: "This board changed somewhere else. Refresh and try again.", code: "BOARD_CHANGED" } });
+  assert.deepEqual(claims, [{ userId: "owner", boardId: BOARD_ID, interactionRevision: 4 }]);
+  await invokeLastHandler(router, "/:boardId/order", "put", { userId: "owner", params: { boardId: BOARD_ID }, body: { albumIds: [ALBUM_ID], revision: 0 } });
+  assert.deepEqual(claims[1].interactionRevision, { $in: [0, null] }, "a never-claimed board has no stored revision");
+  assert.equal(write.mock.callCount(), 0);
 });
