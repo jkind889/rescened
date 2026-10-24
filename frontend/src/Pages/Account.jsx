@@ -1,5 +1,5 @@
 import { API_BASE_URL } from "../config/api";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import {
   RedirectToSignIn,
@@ -17,6 +17,7 @@ import ShareButton from "../Components/ShareButton";
 import DiaryCalendar from "../features/diary/DiaryCalendar";
 import ProfileRankings from "../features/rankings/ProfileRankings";
 import ProfileStats from "../features/stats/ProfileStats";
+import { ListenQueueEditor, UpNextList } from "../features/queue/ListenQueue";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import { REVIEW_SORTS, REVIEW_SORT_OPTIONS } from "../utils/reviewSorts";
 
@@ -125,6 +126,8 @@ export function Account() {
     isPrivate: false,
     favoriteAlbums: [],
     listeningNextAlbum: null,
+    upNext: [],
+    queueCount: 0,
     pinnedReview: null,
     pinnedBoard: null,
     followerCount: 0,
@@ -170,6 +173,8 @@ export function Account() {
           isPrivate: false,
           favoriteAlbums: [],
           listeningNextAlbum: null,
+          upNext: [],
+          queueCount: 0,
           pinnedReview: null,
           pinnedBoard: null,
           followerCount: 0,
@@ -309,6 +314,8 @@ export function Account() {
           isPrivate: Boolean(profileData.isPrivate),
           favoriteAlbums: Array.isArray(profileData.favoriteAlbums) ? profileData.favoriteAlbums : [],
           listeningNextAlbum: profileData.listeningNextAlbum || null,
+          upNext: Array.isArray(profileData.upNext) ? profileData.upNext : [],
+          queueCount: Number(profileData.queueCount) || 0,
           pinnedReview: profileData.pinnedReview || null,
           pinnedBoard: profileData.pinnedBoard || null,
           followerCount: Number(profileData.followerCount) || 0,
@@ -336,6 +343,8 @@ export function Account() {
             isPrivate: false,
             favoriteAlbums: [],
             listeningNextAlbum: null,
+            upNext: [],
+            queueCount: 0,
             pinnedReview: null,
             pinnedBoard: null,
             followerCount: 0,
@@ -642,6 +651,15 @@ export function Account() {
     { label: "Following", value: profile.followingCount },
   ];
 
+  const syncQueueSummary = useCallback((queue) => {
+    setProfile((current) => ({
+      ...current,
+      listeningNextAlbum: queue.albums[0] || null,
+      upNext: queue.albums.slice(0, 3),
+      queueCount: queue.count,
+    }));
+  }, []);
+
   function renderOverview() {
     const pinnedBoardPath = profile.pinnedBoard?.boardId
       ? isPublicProfile
@@ -660,16 +678,16 @@ export function Account() {
               <Link className="profile-pin-card profile-listening-next-card" to={`/album/${profile.listeningNextAlbum.albumId}`}>
                 <AlbumCover src={profile.listeningNextAlbum.cover} title={profile.listeningNextAlbum.title} />
                 <div>
-                  <span>Listening Next</span>
+                  <span>Up Next{profile.queueCount > 1 ? ` · 1 of ${profile.queueCount}` : ""}</span>
                   <h3>{profile.listeningNextAlbum.title || "Untitled album"}</h3>
                   <p>{getArtistName(profile.listeningNextAlbum)}</p>
                 </div>
               </Link>
             ) : (
               <div className="profile-pin-card profile-pin-empty">
-                <span>Listening Next</span>
+                <span>Up Next</span>
                 <h3>No album queued</h3>
-                <p>{canManageProfile ? "Choose an album from edit profile." : "This listener has not picked one yet."}</p>
+                <p>{canManageProfile ? "Add albums to your queue from any album page." : "This listener has not queued anything yet."}</p>
               </div>
             )}
 
@@ -708,6 +726,17 @@ export function Account() {
             )}
           </div>
         </section>
+
+        {(canManageProfile || profile.queueCount > 0) && (
+          <section className="profile-panel profile-wide-panel" id="up-next">
+            <div className="profile-section-header">
+              <h2>{canManageProfile ? "Your Queue" : "Up Next"}</h2>
+            </div>
+            {canManageProfile
+              ? <ListenQueueEditor onQueueChange={syncQueueSummary} />
+              : <UpNextList key={profileUserId} userId={profileUserId} preview={profile.upNext} count={profile.queueCount} />}
+          </section>
+        )}
 
         <section className="profile-panel profile-wide-panel">
           <div className="profile-section-header">

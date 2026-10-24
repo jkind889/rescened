@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@clerk/react";
 import { getApiErrorMessage } from "../utils/apiErrors";
+import { AddToQueueButton } from "../features/queue/QueueActions";
 
 // Suggests a random saved album the viewer has not logged or reviewed yet.
 // Without boardId it draws from every board the viewer owns.
@@ -53,6 +54,7 @@ export function PickAlbum({ boardId = "" }) {
           </span>
         </Link>
       )}
+      {album && <AddToQueueButton albumId={album.albumId} className="pick-album-queue" />}
       {message && <p className="pick-album-message" role="status">{message}</p>}
     </div>
   );

@@ -16,7 +16,8 @@ const { getListenActivity } = require("./utils/listenActivity");
 const { suggestPeople } = require("./utils/peopleSuggestions");
 const { getRankingActivity, listUserRankings } = require("./utils/trackRankings");
 const { listeningStats } = require("./utils/listeningStats");
-const { notificationMutationRateLimit, profileStatsRateLimit } = require("./utils/rateLimit");
+const { notificationMutationRateLimit, profileStatsRateLimit, queueMutationRateLimit } = require("./utils/rateLimit");
+const { addToQueue, queuePreview, readQueue, removeFromQueue, reorderQueue } = require("./utils/listenQueue");
 const { normalizePreferencesPatch, recordFollow, serializePreferences } = require("./utils/notifications");
 
 const router = express.Router();
@@ -47,7 +48,6 @@ function spotifyProfile(value) {
 async function getProfile(userId) {
   return UserProfile.findOne({ userId })
     .populate("favoriteAlbums.albumCatalogId")
-    .populate("listeningNextAlbum.albumCatalogId")
     .populate({ path: "pinnedReviewId", populate: { path: "albumCatalogId" } })
     .populate("pinnedBoardId");
 }
@@ -100,11 +100,11 @@ async function formatReview(review) {
 async function formatProfile(profile) {
   const source = plain(profile); const userMap = await authors([source.userId]);
   const favoriteAlbums = [...(source.favoriteAlbums || [])].sort((a, b) => a.rank - b.rank).map((item) => normalizeCatalogAlbum(item.albumCatalogId)).filter(Boolean);
-  const listeningNextAlbum = source.listeningNextAlbum?.albumCatalogId ? normalizeCatalogAlbum(source.listeningNextAlbum.albumCatalogId) : null;
+  const { upNext, queueCount } = await queuePreview(source);
   let pinnedReview = null;
   if (source.pinnedReviewId && typeof source.pinnedReviewId === "object") pinnedReview = await formatReview(source.pinnedReviewId);
   const pinnedBoard = source.pinnedBoardId && typeof source.pinnedBoardId === "object" ? await formatBoard(source.pinnedBoardId) : null;
-  return { userId: source.userId, username: userMap.get(source.userId)?.username || DEFAULT_AUTHOR, imageUrl: userMap.get(source.userId)?.imageUrl || "", bio: source.bio || "", spotifyProfileUrl: source.spotifyProfileUrl || "", isPrivate: Boolean(source.isPrivate), favoriteAlbums, listeningNextAlbum, pinnedReview, pinnedBoard };
+  return { userId: source.userId, username: userMap.get(source.userId)?.username || DEFAULT_AUTHOR, imageUrl: userMap.get(source.userId)?.imageUrl || "", bio: source.bio || "", spotifyProfileUrl: source.spotifyProfileUrl || "", isPrivate: Boolean(source.isPrivate), favoriteAlbums, listeningNextAlbum: upNext[0] || null, upNext, queueCount, pinnedReview, pinnedBoard };
 }
 async function formatPrivateProfile(profile) {
   const source = plain(profile);
@@ -119,6 +119,8 @@ async function formatPrivateProfile(profile) {
     isPrivate: true,
     favoriteAlbums: [],
     listeningNextAlbum: null,
+    upNext: [],
+    queueCount: 0,
     pinnedReview: null,
     pinnedBoard: null,
   };
@@ -142,6 +144,25 @@ router.get("/me/stats", auth, profileStatsRateLimit, async (req, res) => {
   try { res.json(await listeningStats(req.userId, req.query)); }
   catch (error) { sendStatsError(res, error); }
 });
+function sendQueueError(res, error, fallback) {
+  res.status(error.status || 500).json({ error: error.status ? error.message : fallback, ...(error.status && error.code ? { code: error.code } : {}) });
+}
+router.get("/me/queue", auth, async (req, res) => {
+  try { res.json(await readQueue(req.userId, { includeRevision: true })); }
+  catch (error) { sendQueueError(res, error, "Failed to fetch queue"); }
+});
+router.post("/me/queue", auth, queueMutationRateLimit, async (req, res) => {
+  try { res.json(await addToQueue(req.userId, req.body)); }
+  catch (error) { sendQueueError(res, error, "Failed to update queue"); }
+});
+router.put("/me/queue", auth, queueMutationRateLimit, async (req, res) => {
+  try { res.json(await reorderQueue(req.userId, req.body)); }
+  catch (error) { sendQueueError(res, error, "Failed to update queue"); }
+});
+router.delete("/me/queue/:albumId", auth, queueMutationRateLimit, async (req, res) => {
+  try { res.json(await removeFromQueue(req.userId, req.params.albumId)); }
+  catch (error) { sendQueueError(res, error, "Failed to update queue"); }
+});
 router.get("/me/activity", auth, async (req, res) => { try { res.json(await activity(req.userId, true, req.userId)); } catch { res.status(500).json({ error: "Failed to fetch activity" }); } });
 router.get("/me/network", auth, async (req, res) => {
   try {
@@ -161,13 +182,12 @@ router.put("/me", auth, async (req, res) => {
     if (profileUrl === null) return res.status(400).json({ error: "Spotify profile must be an https://open.spotify.com/user/... URL" });
     if (favoriteIds.length > MAX_FAVORITES) return res.status(400).json({ error: "Choose up to five favorite albums" });
     const favorites = await Promise.all(favoriteIds.map(async (albumId, rank) => ({ albumCatalogId: (await findAlbumByPublicId(albumId))._id, rank })));
-    const nextAlbum = req.body.listeningNextAlbumId ? { albumCatalogId: (await findAlbumByPublicId(req.body.listeningNextAlbumId))._id } : null;
     const pinnedReviewId = String(req.body.pinnedReviewId || "").trim(); const pinnedBoardId = String(req.body.pinnedBoardId || "").trim();
     if (pinnedReviewId && !isReviewId(pinnedReviewId)) return res.status(400).json({ error: "Pinned review must belong to your profile", code: "INVALID_PINNED_REVIEW" });
     const boardId = pinnedBoardId ? publicBoardId(pinnedBoardId) : "";
     const pinnedBoard = boardId ? await Board.findOne({ boardId, userId: req.userId }) : null;
     if (pinnedBoardId && !pinnedBoard) return res.status(400).json({ error: "Pinned board must belong to your profile" });
-    const update = { bio, spotifyProfileUrl: profileUrl, favoriteAlbums: favorites, listeningNextAlbum: nextAlbum, pinnedReviewId: null, pinnedBoardId: pinnedBoard?._id || null };
+    const update = { bio, spotifyProfileUrl: profileUrl, favoriteAlbums: favorites, pinnedReviewId: null, pinnedBoardId: pinnedBoard?._id || null };
     let profile;
     if (pinnedBoardId) {
       await transaction("BOARD", async (session) => {
@@ -187,7 +207,7 @@ router.put("/me", auth, async (req, res) => {
     res.json({ ...(await formatProfile(profile)), ...(await socialStats(req.userId, req.userId)) });
   } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to update profile", ...(error.code ? { code: error.code } : {}) }); }
 });
-router.patch("/me", auth, async (req, res) => { try { if (typeof req.body.isPrivate !== "boolean") return res.status(400).json({ error: "isPrivate must be true or false" }); const profile = await UserProfile.findOneAndUpdate({ userId: req.userId }, { $set: { userId: req.userId, isPrivate: req.body.isPrivate } }, { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }).populate("favoriteAlbums.albumCatalogId").populate("listeningNextAlbum.albumCatalogId").populate({ path: "pinnedReviewId", populate: { path: "albumCatalogId" } }).populate("pinnedBoardId"); res.json({ ...(await formatProfile(profile)), ...(await socialStats(req.userId, req.userId)) }); } catch { res.status(500).json({ error: "Failed to update profile" }); } });
+router.patch("/me", auth, async (req, res) => { try { if (typeof req.body.isPrivate !== "boolean") return res.status(400).json({ error: "isPrivate must be true or false" }); const profile = await UserProfile.findOneAndUpdate({ userId: req.userId }, { $set: { userId: req.userId, isPrivate: req.body.isPrivate } }, { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }).populate("favoriteAlbums.albumCatalogId").populate({ path: "pinnedReviewId", populate: { path: "albumCatalogId" } }).populate("pinnedBoardId"); res.json({ ...(await formatProfile(profile)), ...(await socialStats(req.userId, req.userId)) }); } catch { res.status(500).json({ error: "Failed to update profile" }); } });
 
 router.get("/me/notification-preferences", auth, async (req, res) => {
   try { res.json(serializePreferences(await UserProfile.findOne({ userId: req.userId }, { notificationPreferences: 1 }).lean())); } catch { res.status(500).json({ error: "Failed to fetch notification preferences" }); }
@@ -242,6 +262,13 @@ router.get("/:userId/stats", profileStatsRateLimit, async (req, res) => {
     if (access.status !== 200) return res.status(access.status).json(access.body);
     res.json(await listeningStats(req.params.userId, req.query));
   } catch (error) { sendStatsError(res, error); }
+});
+router.get("/:userId/queue", async (req, res) => {
+  try {
+    const access = await profileAccess(req.params.userId, viewer(req));
+    if (access.status !== 200) return res.status(access.status).json(access.body);
+    res.json(await readQueue(req.params.userId));
+  } catch (error) { sendQueueError(res, error, "Failed to fetch queue"); }
 });
 router.get("/:userId/rankings", async (req, res) => {
   try {

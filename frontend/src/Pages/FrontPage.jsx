@@ -11,6 +11,7 @@ import {
     SignalPanel,
 } from "../features/home/SignalPanels";
 import { ListeningLog } from "../features/home/ListeningLog";
+import { ListenQueueEditor } from "../features/queue/ListenQueue";
 import { fetchJson, settledArray, uniqueAlbums } from "../features/home/signals";
 import "../features/home/home.css";
 
@@ -119,6 +120,12 @@ export function FrontPage() {
                         </EmptySignal>
                     )}
                 </SignalPanel>
+
+                {isSignedIn && (
+                    <SignalPanel id="listen-queue-title" title="Listen next">
+                        <ListenQueueEditor />
+                    </SignalPanel>
+                )}
 
                 {isSignedIn && (
                     <SignalPanel id="review-queue-title" title="Waiting for your review">

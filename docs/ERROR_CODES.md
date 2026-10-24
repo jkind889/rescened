@@ -93,6 +93,16 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | --- | --- | --- |
 | `INVALID_STATS_REQUEST` | `400` | A stats request used an unsupported field, a `period` other than `2y` or a calendar year inside the two-year window, or an `automatic` value other than `include` or `exclude`. See [the stats guide](LISTENING_STATS.md). |
 
+### Listen queue
+
+`GET /profile/me/queue` and the queue mutations require Clerk authentication; the mutations share the `queueMutation` limit. `GET /profile/:userId/queue` follows profile privacy (`403` with `isPrivate: true`). A malformed `albumId` returns `400 INVALID_ALBUM_ID`, and an unknown album on add returns `404 ALBUM_NOT_FOUND`. See [the listen queue guide](LISTEN_QUEUE.md).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `INVALID_QUEUE_REQUEST` | `400` | An add body is not `{ albumId, position? }` with `position` `top` or `bottom`, or a reorder body is not `{ albumIds, revision }` with at most 15 distinct album IDs and a non-negative integer revision. |
+| `QUEUE_FULL` | `409` | Adding a new album to a queue that already holds 15. Moving an album that is already queued still works. |
+| `QUEUE_CHANGED` | `409` | A reorder carried a stale `revision` or did not list exactly the queue's current albums, or an add or remove kept losing to concurrent writes. Refetch the queue and retry the action. |
+
 ### Track rankings
 
 `GET /track-rankings/album/:albumId` is public; `PUT` and `DELETE` require Clerk authentication and share the `trackRankingMutation` limit. An unknown album returns the existing code-less `404`, and a malformed `albumId` the code-less `400`. See [track rankings](TRACK_RANKINGS.md) for the request and response contract.
@@ -187,6 +197,7 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Like mutation | `PUT /likes/album/:albumId`, `PUT /likes/review/:reviewId` | authenticated user | 120 attempts per 10 minutes |
 | Track ranking mutation | `PUT` and `DELETE /track-rankings/album/:albumId` | authenticated user | 60 attempts per 10 minutes |
 | Profile stats | `GET /profile/me/stats`, `GET /profile/:userId/stats` | signed-in user, or IP when anonymous | 60 requests per 10 minutes |
+| Queue mutation | `POST`/`PUT /profile/me/queue`, `DELETE /profile/me/queue/:albumId` | authenticated user | 60 attempts per 10 minutes |
 | Suggestion create | `POST /suggestions`, `POST /suggestions/corrections` | authenticated user | 6 attempts per 10 minutes |
 | Suggestion mutation | `POST /suggestions/:submissionId/revise`, `POST /suggestions/:submissionId/withdraw` | authenticated user | 20 attempts per 10 minutes |
 | Genre suggestion | `POST /suggestions/genres` | authenticated user | 20 attempts per hour |
