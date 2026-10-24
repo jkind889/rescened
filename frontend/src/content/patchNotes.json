@@ -1,5 +1,19 @@
 [
   {
+    "id": "listen-next-queue",
+    "date": "2026-10-23",
+    "title": "A queue for what you play next",
+    "summary": "Line up to 15 albums you want to hear next, in the order you want to hear them.",
+    "changes": [
+      "Use Add to queue on any album page to put it at the end of your queue, or Listen next to put it first.",
+      "Reorder your queue by dragging or with the arrow buttons on your home page or profile, then save the new order.",
+      "Logging a listen takes that album off your queue automatically, including listens logged from Last.fm.",
+      "Pick something for me on your boards can now add its pick to your queue. An album already in your queue keeps its place.",
+      "Your profile shows what’s up next, and visitors can see your whole queue. Private profiles keep it to you.",
+      "The single Listening Next album from Edit Profile becomes the first album in your queue."
+    ]
+  },
+  {
     "id": "community-genres",
     "date": "2026-10-14",
     "title": "Genres, shaped by the community",

@@ -7,6 +7,7 @@ import AlbumReviewFeed from "./AlbumReviewFeed";
 import LikeButton from "./LikeButton";
 import TrackRanking from "./TrackRanking";
 import ShareButton from "./ShareButton";
+import { AlbumQueueAction } from "../features/queue/QueueActions";
 import "./Community/GenreSuggestion.css";
 import AsyncState from "./Loading/AsyncState";
 import { SignInButton, useAuth } from "@clerk/react";
@@ -108,6 +109,7 @@ export function AlbumDetail()
     const [boards, setBoards] = useState([]);
     const [activeTab, setActiveTab] = useState("artist");
     const [isListenModalOpen, setIsListenModalOpen] = useState(false);
+    const [queueRefreshKey, setQueueRefreshKey] = useState(0);
     const [listenMessage, setListenMessage] = useState("");
     const [boardListenId, setBoardListenId] = useState("");
     const [listens, setListens] = useState([]);
@@ -914,6 +916,9 @@ export function AlbumDetail()
                                 <small>{albumLike.likedByViewer ? "Liked" : "Like"}</small>
                             </div>
                         </div>
+                        {canUseAuthenticatedActions
+                            ? <AlbumQueueAction key={album.albumId} albumId={album.albumId} refreshKey={queueRefreshKey} />
+                            : renderSignInAction("Add to queue")}
                         {canUseAuthenticatedActions ? (
                             <button className="album-side-action" type="button" onClick={openBoardModal} disabled={isBoardStateLoading}>
                                 Boards…<small>{isBoardStateLoading ? "Checking…" : isSaved ? "Saved · Manage boards" : "Save or add a listen"}</small>
@@ -1217,6 +1222,8 @@ export function AlbumDetail()
                         <button className="review-modal-close" type="button" onClick={() => setIsListenModalOpen(false)} aria-label="Close listen form">×</button>
                         <ListenForm key={albumId} album={album} onSubmitted={(listen) => {
                             setIsListenModalOpen(false);
+                            // Logging a listen removes the album from the queue server-side.
+                            setQueueRefreshKey((key) => key + 1);
                             if (activeAlbumIdRef.current === listen.albumId) setListenMessage(`Listen logged for ${listen.listenedOn}.`);
                         }} />
                     </div>

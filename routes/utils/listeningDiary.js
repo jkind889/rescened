@@ -12,6 +12,7 @@ const { normalizeCatalogAlbum } = require("./albumCatalog");
 const { fail, uuid, fields, calendarDate, listeningDate, creationInput, isCalendarDate } = require("./diaryValidation");
 const { transaction, claimBoard, touchBoard, claimListen } = require("./boardMutations");
 const { ownedBoard } = require("./boardLibrary");
+const { removeListenedAlbum } = require("./listenQueue");
 
 const developmentCursorSecret = crypto.randomBytes(32);
 function cursorKey() {
@@ -75,6 +76,7 @@ async function createAutomaticListen({ userId, album, listenedOn, session }) {
   if (!isCalendarDate(listenedOn)) throw fail(400, "INVALID_LISTEN_DATE", "listenedOn must be a calendar date");
   const [listen] = await Listen.create([{ userId, albumCatalogId: album._id, listenedOn, source: "automatic" }], { session });
   await UserProfile.updateOne({ userId }, { $setOnInsert: { userId } }, { upsert: true, session });
+  await removeListenedAlbum(userId, album._id, session);
   return listen;
 }
 
@@ -100,6 +102,7 @@ async function createListen(userId, body, key) {
       await touchBoard(board, session);
     }
     await UserProfile.updateOne({ userId }, { $setOnInsert: { userId } }, { upsert: true, session });
+    await removeListenedAlbum(userId, album._id, session);
     return { created: true, listen: serializeListen(listen, album) };
   });
 }
