@@ -83,7 +83,7 @@ router.get("/:boardId", auth, async (req, res) => {
   try {
     const board = await ownedBoard(req.userId, req.params.boardId);
     if (!board) return res.status(404).json({ error: "Board not found" });
-    res.json(await formatBoard(board, true));
+    res.json(await formatBoard(board, { albums: true, revision: true }));
   } catch (error) { sendError(res, error, "Failed to fetch board"); }
 });
 
@@ -118,7 +118,7 @@ router.post("/:boardId/albums", auth, albumSaveRateLimit, async (req, res) => {
     const input = body(req, ["albumId"]);
     const album = await findAlbumByPublicId(input.albumId);
     const board = await saveAlbum(req.userId, target(req), album._id);
-    const formatted = await formatBoard(board, true);
+    const formatted = await formatBoard(board, { albums: true });
     const { albums, ...summary } = formatted;
     res.status(201).json({ board: summary, album: albums.find((item) => item.albumId === album.albumId) || null });
   } catch (error) { sendError(res, error, "Failed to save album to board"); }

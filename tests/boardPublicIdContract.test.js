@@ -411,3 +411,36 @@ test("profile diary calendars follow profile privacy before reading listens", as
   assert.equal(invalidMonth.status, 400);
   assert.equal(invalidMonth.body.code, "INVALID_DIARY_REQUEST");
 });
+
+test("a manual board lists and previews albums in its saved order without exposing the order's catalog IDs", async (t) => {
+  const first = catalogAlbum();
+  const second = { ...catalogAlbum(), albumId: "33333333-3333-4333-8333-333333333333", title: "Second" };
+  const third = { ...catalogAlbum(), albumId: "44444444-4444-4444-8444-444444444444", title: "Listen only" };
+  const sourceBoard = board({ orderMode: "manual", displayStyle: "ranked", albumOrder: [first._id, second._id], interactionRevision: 7 });
+  const item = (album, savedAt) => ({ _id: new mongoose.Types.ObjectId(), userId: "owner", boardId: sourceBoard._id, albumCatalogId: album, savedAt: new Date(savedAt) });
+  t.mock.method(Board, "findOne", async () => sourceBoard);
+  t.mock.method(BoardItem, "find", () => chainQuery([item(second, "2026-09-02"), item(first, "2026-09-01")]));
+  const router = loadRoute(t, boardRoutePath);
+  // A listen-only album that is not in albumOrder follows the ordered albums.
+  t.mock.method(BoardListen, "aggregate", async () => [{
+    _id: { board: sourceBoard._id, album: third._id, user: "owner" },
+    savedAt: new Date("2026-08-01"), listenCount: 1, latestListenedOn: "2026-08-01", album: third,
+  }]);
+
+  const response = await invokeLastHandler(router, "/:boardId", "get", { userId: "owner", params: { boardId: BOARD_ID } });
+  assert.equal(response.status, 200);
+  // Date order would put the newer save, second, first.
+  assert.deepEqual(response.body.albums.map((album) => album.albumId), [first.albumId, second.albumId, third.albumId]);
+  assert.deepEqual(response.body.previewAlbums.map((album) => album.albumId), [first.albumId, second.albumId, third.albumId]);
+  assert.equal(response.body.orderMode, "manual");
+  assert.equal(response.body.displayStyle, "ranked");
+  assert.equal(response.body.orderedCount, 3);
+  assert.equal(response.body.revision, 7);
+  assert.equal(Object.hasOwn(response.body, "albumOrder"), false);
+  const serialized = JSON.stringify(response.body);
+  for (const id of [sourceBoard._id, first._id, second._id, third._id]) assert.equal(serialized.includes(String(id)), false);
+
+  const { formatBoard } = require("../routes/utils/boardLibrary");
+  const publicBoard = await formatBoard(sourceBoard, { albums: true });
+  assert.equal(Object.hasOwn(publicBoard, "revision"), false, "only the owner's reads carry the reorder token");
+});
