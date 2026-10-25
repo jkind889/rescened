@@ -9608,6 +9608,10 @@ label.moderation-candidate-choice {
   grid-column: 1 / -1;
 }
 
+.album-more-actions {
+  position: relative;
+}
+
 .album-more-actions summary {
   display: flex;
   align-items: center;
@@ -9629,8 +9633,14 @@ label.moderation-candidate-choice {
 }
 
 .album-more-actions-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 10;
   display: grid;
   border: 1px solid var(--app-line);
+  background: var(--app-bg);
 }
 
 .album-more-actions-panel .album-side-action {
