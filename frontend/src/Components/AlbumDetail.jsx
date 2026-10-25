@@ -7,6 +7,7 @@ import AlbumReviewFeed from "./AlbumReviewFeed";
 import LikeButton from "./LikeButton";
 import TrackRanking from "./TrackRanking";
 import ShareButton from "./ShareButton";
+import AlbumMoreActions from "./AlbumMoreActions";
 import { AlbumQueueAction } from "../features/queue/QueueActions";
 import "./Community/GenreSuggestion.css";
 import AsyncState from "./Loading/AsyncState";
@@ -817,9 +818,9 @@ export function AlbumDetail()
         }
     }
 
-    const renderSignInAction = (label, icon = null) => (
+    const renderSignInAction = (label, icon = null, onClick = undefined) => (
         <SignInButton mode="modal">
-            <button className="album-side-action" type="button">
+            <button className="album-side-action" type="button" onClick={onClick}>
                 {icon && <span aria-hidden="true">{icon}</span>}
                 {label}
             </button>
@@ -1145,40 +1146,45 @@ export function AlbumDetail()
                 </div>
                 <aside className="album-detail-sidebar">
                     <div className="album-side-actions" aria-label="Album actions">
-                        <div className="album-listen-like-group" role="group" aria-label="Listens and likes">
+                        <div className="album-primary-actions" role="group" aria-label="Listen and review">
                             {canUseAuthenticatedActions ? (
                                 <button className="album-side-action" type="button" onClick={() => setIsListenModalOpen(true)}>
                                     <span aria-hidden="true">＋</span>Log listen
                                 </button>
                             ) : renderSignInAction("Log listen", "＋")}
-                            <div className="album-side-action album-like-action">
+                            {canUseAuthenticatedActions ? (
+                                <button className="album-side-action" type="button" onClick={() => {
+                                    setReviewActionMessage("");
+                                    setIsReviewModalOpen(true);
+                                }}>
+                                    <span aria-hidden="true">★</span>Write review
+                                </button>
+                            ) : renderSignInAction("Write review", "★")}
+                        </div>
+                        <div className="album-secondary-actions" role="group" aria-label="Like, boards and queue">
+                            <div className="album-like-action">
                                 <LikeButton liked={albumLike.likedByViewer} count={albumLike.likeCount} label="album" message={likeMessage} onToggle={toggleAlbumLike} />
                                 <small>{albumLike.likedByViewer ? "Liked" : "Like"}</small>
                             </div>
+                            {canUseAuthenticatedActions ? (
+                                <button className="album-side-action" type="button" onClick={openBoardModal} disabled={isBoardStateLoading}>
+                                    Boards…<small>{isBoardStateLoading ? "Checking…" : isSaved ? "Saved · Manage boards" : "Save or add a listen"}</small>
+                                </button>
+                            ) : renderSignInAction("Boards…")}
+                            {canUseAuthenticatedActions
+                                ? <AlbumQueueAction key={album.albumId} albumId={album.albumId} refreshKey={queueRefreshKey} />
+                                : <div className="album-queue-action">{renderSignInAction("Add to queue")}</div>}
                         </div>
-                        {canUseAuthenticatedActions
-                            ? <AlbumQueueAction key={album.albumId} albumId={album.albumId} refreshKey={queueRefreshKey} />
-                            : renderSignInAction("Add to queue")}
-                        {canUseAuthenticatedActions ? (
-                            <button className="album-side-action" type="button" onClick={openBoardModal} disabled={isBoardStateLoading}>
-                                Boards…<small>{isBoardStateLoading ? "Checking…" : isSaved ? "Saved · Manage boards" : "Save or add a listen"}</small>
-                            </button>
-                        ) : renderSignInAction("Boards…")}
-                        {canUseAuthenticatedActions ? (
-                            <button className="album-side-action" type="button" onClick={() => {
-                                setReviewActionMessage("");
-                                setIsReviewModalOpen(true);
-                            }}>
-                                <span aria-hidden="true">★</span>
-                                Write review
-                            </button>
-                        ) : renderSignInAction("Write review", "★")}
-                        {canUseAuthenticatedActions ? (
-                            <Link className="album-side-action" to={`/suggestions/corrections/${album.albumId}`}>
-                                Suggest a correction
-                            </Link>
-                        ) : renderSignInAction("Suggest a correction")}
-                        <ShareButton className="album-side-action" path={`/album/${album.albumId}`} title={`${album.title} on Rescened`} label="Share album" />
+                        <AlbumMoreActions key={album.albumId}>
+                            {(closeAndFocus) => <>
+                                <ShareButton className="album-side-action" path={`/album/${album.albumId}`} title={`${album.title} on Rescened`} label="Share album" />
+                                {canUseAuthenticatedActions ? (
+                                    <Link className="album-side-action" to={`/suggestions/corrections/${album.albumId}`}>
+                                        Suggest a correction
+                                    </Link>
+                                ) : renderSignInAction("Suggest a correction", null, closeAndFocus)}
+                            </>}
+                        </AlbumMoreActions>
                         {listenMessage && <p className="board-save-message" role="status">{listenMessage}</p>}
                         {boardSaveMessage && <p className="board-save-message" role="status">{boardSaveMessage}</p>}
                     </div>

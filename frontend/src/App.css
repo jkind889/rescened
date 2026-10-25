@@ -9527,21 +9527,124 @@ label.moderation-candidate-choice {
   }
 }
 
-.album-side-actions .album-listen-like-group {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-  grid-column: 1 / -1;
-  border-bottom: 1px solid var(--app-line);
+/* Album actions: primary buttons, compact collection controls, then More. */
+.album-side-actions {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.65rem;
+  overflow: visible;
+  border: 0;
 }
 
-.album-listen-like-group .album-side-action {
+.album-side-actions .album-side-action {
   min-width: 0;
-  min-height: 86px;
-  border-bottom: 0;
+  min-height: 44px;
+  padding: 0.55rem 0.65rem;
+  border: 0;
+  background: transparent;
+  font-size: 0.8rem;
 }
 
-.album-listen-like-group > :first-child {
+.album-primary-actions {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.album-primary-actions .album-side-action {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 48px;
+  border: 1px solid var(--app-accent);
+  background: var(--app-accent);
+  color: var(--app-bg);
+  font-weight: 600;
+}
+
+.album-primary-actions .album-side-action span {
+  color: inherit;
+  font-size: 1rem;
+}
+
+.album-primary-actions .album-side-action:hover {
+  background: var(--app-bg);
+  color: var(--app-accent);
+}
+
+.album-secondary-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  border: 1px solid var(--app-line);
+}
+
+.album-secondary-actions > .album-like-action {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.2rem;
+  padding: 0.4rem;
   border-right: 1px solid var(--app-line);
+}
+
+.album-secondary-actions .like-button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.album-secondary-actions .like-message {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.album-secondary-actions > .album-queue-action {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--app-line);
+}
+
+.album-secondary-actions .album-queue-action .album-side-action {
+  min-height: 48px;
+}
+
+.album-secondary-actions .album-queue-action > :only-child {
+  grid-column: 1 / -1;
+}
+
+.album-more-actions summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 0 0.65rem;
+  color: var(--app-muted);
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.8rem;
+}
+
+.album-more-actions summary::-webkit-details-marker {
+  display: none;
+}
+
+.album-more-actions[open] summary {
+  color: var(--app-text);
+}
+
+.album-more-actions-panel {
+  display: grid;
+  border: 1px solid var(--app-line);
+}
+
+.album-more-actions-panel .album-side-action {
+  justify-items: start;
+  text-align: left;
+}
+
+.album-more-actions-panel .album-side-action + .album-side-action {
+  border-top: 1px solid var(--app-line);
+}
+
+.album-side-actions :is(button, a, summary):focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: -3px;
 }
 
 .album-side-actions small {
