@@ -61,7 +61,7 @@ Creating a listen for a queued album removes it from the queue, inside the trans
 
 ## Frontend
 
-- **Album page:** "Add to queue" (no position) and "Listen next" (top). When the album is queued, the actions show its position, remove it, or move it to the top. Logging a listen from the page refreshes the actions.
+- **Album page:** Log listen and Write review are the primary actions beneath the cover. Like, Boards, and queue controls share a compact secondary group. More reveals Share album and Suggest a correction; Escape closes it and returns focus to More, while leaving the group closes it without moving focus. The controls retain at least 44px touch targets and the existing sign-in behavior. "Add to queue" (no position) and "Listen next" (top). When the album is queued, the actions show its position, remove it, or move it to the top. Logging a listen from the page refreshes the actions.
 - **Pick results** (Boards and board pages): "Add to queue" adds the picked album to the bottom without a position, so an album that is already queued keeps its place.
 - **Home and own profile:** the queue editor. It supports drag reordering, ↑/↓ buttons, and Save / Discard for the new order. Removal applies immediately and is disabled while an unsaved order is pending. On the profile, the "Up Next" pin card follows the editor's changes.
 - **Public profiles:** an "Up next" pin card and a read-only list of the first three, with "See all" when there are more.
