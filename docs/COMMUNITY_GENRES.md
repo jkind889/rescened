@@ -326,8 +326,8 @@ Correction approval now writes provenance as dotted `fieldProvenance.<field>` pa
 The frontend treats an `album.genres` array on album detail as the signal that genres are enabled. When the field is absent, no genre UI appears. Shared logic (previews, payloads, and decision bodies) is in `frontend/src/features/community/genres.js`, and the styles are in `Components/Community/GenreSuggestion.css`.
 
 - **Album page:**
-  - Genres show as chips under the title line, with the primary genre filled. Each chip links to `/genre/:slug`.
-  - Signed-in users get a "Suggest genres" action; signed-out users get the sign-in prompt.
+  - The Genres tab contains the genre chips (primary genre filled), the suggestion action, and any pending/revision notice. Each chip links to `/genre/:slug`; untagged albums show “No genres yet.” The tab is absent when genres are disabled.
+  - Signed-in users get a "Suggest genres" action inside that tab; signed-out users get the sign-in prompt. The album tab bar supports Left/Right, Home/End, and Tab keyboard navigation, including on the album reviews route.
   - If the viewer has an open genre suggestion for the album (`GET /suggestions/genres/open`), the action is hidden. A note links to the suggestion, or to "Revise it" when a moderator asked for changes.
 - **Suggestion form:** `/suggestions/genres/:albumId`, and `/suggestions/:submissionId/revise` for a genre suggestion, both use `GenreSuggestionForm`. A contributor can:
   - mark current genres for removal
