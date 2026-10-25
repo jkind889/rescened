@@ -15,7 +15,6 @@ export default function PatchNotes() {
       <header className="patch-notes-header">
         <p className="patch-notes-kicker">The latest at Rescened</p>
         <h1 id="patch-notes-title">Patch notes</h1>
-        <p>New features, thoughtful improvements, and little fixes. All in one place.</p>
       </header>
 
       {releases.length === 0 ? (

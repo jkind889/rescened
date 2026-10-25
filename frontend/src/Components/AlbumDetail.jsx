@@ -7,6 +7,7 @@ import AlbumReviewFeed from "./AlbumReviewFeed";
 import LikeButton from "./LikeButton";
 import TrackRanking from "./TrackRanking";
 import ShareButton from "./ShareButton";
+import AlbumMoreActions from "./AlbumMoreActions";
 import { AlbumQueueAction } from "../features/queue/QueueActions";
 import "./Community/GenreSuggestion.css";
 import AsyncState from "./Loading/AsyncState";
@@ -636,6 +637,21 @@ export function AlbumDetail()
 
         return firstDisc - secondDisc || firstTrack - secondTrack;
     });
+    const albumTabs = ["artist", "release", "format", "tracks", ...(sortedTracks.length > 0 ? ["ranking"] : []), ...(genresEnabled ? ["genres"] : [])];
+    const selectedTab = albumTabs.includes(activeTab) ? activeTab : "artist";
+    function handleTabKeyDown(event) {
+        const index = albumTabs.indexOf(selectedTab);
+        const nextIndex = {
+            ArrowRight: (index + 1) % albumTabs.length,
+            ArrowLeft: (index - 1 + albumTabs.length) % albumTabs.length,
+            Home: 0,
+            End: albumTabs.length - 1,
+        }[event.key];
+        if (nextIndex === undefined) return;
+        event.preventDefault();
+        setActiveTab(albumTabs[nextIndex]);
+        event.currentTarget.parentElement.querySelectorAll('[role="tab"]')[nextIndex].focus();
+    }
     const hasMultipleDiscs = sortedTracks.some((track) => Number(track.discNumber) > 1);
     const discCount = new Set(sortedTracks.map((track) => Number(track.discNumber) || 1)).size;
     // Only report a runtime when every track has a duration; a partial sum would understate it.
@@ -802,9 +818,9 @@ export function AlbumDetail()
         }
     }
 
-    const renderSignInAction = (label, icon = null) => (
+    const renderSignInAction = (label, icon = null, onClick = undefined) => (
         <SignInButton mode="modal">
-            <button className="album-side-action" type="button">
+            <button className="album-side-action" type="button" onClick={onClick}>
                 {icon && <span aria-hidden="true">{icon}</span>}
                 {label}
             </button>
@@ -891,61 +907,284 @@ export function AlbumDetail()
 
         <section className="album-detail-page">
             <div className="album-detail-shell">
-                <aside className="album-detail-sidebar">
-                    <div className="album-poster-card">
-                        {albumArt ? (
-                            <img
-                                className="album-poster-image"
-                                src={albumArt}
-                                alt={`${album.title} cover`}
-                            />
-                        ) : (
-                            <div className="album-poster-fallback">No cover art</div>
-                        )}
+                <div className="album-poster-card">
+                    {albumArt ? (
+                        <img
+                            className="album-poster-image"
+                            src={albumArt}
+                            alt={`${album.title} cover`}
+                        />
+                    ) : (
+                        <div className="album-poster-fallback">No cover art</div>
+                    )}
+                </div>
+
+                <div className="album-detail-main">
+                    <div className="album-title-block">
+                        <p className="album-detail-kicker">{album.releaseType}</p>
+                        <h1>{album.title}</h1>
+                        <div className="album-meta-line">
+                            <span>{album.releaseYear || "Unknown year"}</span>
+                            <span>{artistNames.join(", ")}</span>
+                            {album.label && <span>{album.label}</span>}
+                            {sortedTracks.length > 0 && <span>{sortedTracks.length} track{sortedTracks.length === 1 ? "" : "s"}{runtimeLabel ? ` · ${runtimeLabel}` : ""}</span>}
+                        </div>
                     </div>
 
+                    <div className="album-tabs" role="tablist" aria-label="Album sections">
+                        {albumTabs.map((tab) => (
+                            <button
+                                key={tab}
+                                type="button"
+                                role="tab"
+                                id={`album-tab-${tab}`}
+                                aria-selected={selectedTab === tab}
+                                aria-controls="album-section-panel"
+                                tabIndex={selectedTab === tab ? 0 : -1}
+                                onKeyDown={handleTabKeyDown}
+                                className={selectedTab === tab ? "album-tab album-tab-active" : "album-tab"}
+                                onClick={() => setActiveTab(tab)}
+                            >
+                                {tab}
+                            </button>
+                        ))}
+                    </div>
+
+                    <section className="album-info-panel" id="album-section-panel" role="tabpanel" aria-labelledby={`album-tab-${selectedTab}`} tabIndex={0}>
+                        {selectedTab === "genres" && genresEnabled && (
+                            <div className="album-genres-panel">
+                                {album.genres.length > 0 ? (
+                                    <ul className="album-genre-list" aria-label="Genres">
+                                        {album.genres.map((genre, index) => (
+                                            <li key={genre.genreId}>
+                                                <Link className={`album-genre-badge ${index === 0 ? "album-genre-badge-primary" : "album-genre-badge-secondary"}`} to={`/genre/${genre.slug}`}>
+                                                    {genre.name}
+                                                </Link>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : <p className="album-empty-copy">No genres yet.</p>}
+                                {openGenreSuggestion && (
+                                    <p className="album-genre-pending">
+                                        {openGenreSuggestion.status === "needs_changes"
+                                            ? <>A moderator asked for changes to your genre suggestion. <Link to={`/suggestions/${openGenreSuggestion.submissionId}/revise`}>Revise it</Link></>
+                                            : <>Your genre suggestion is waiting for review. <Link to={`/suggestions/${openGenreSuggestion.submissionId}`}>View it</Link></>}
+                                    </p>
+                                )}
+                                <div className="album-genre-actions">
+                                    {canUseAuthenticatedActions ? (
+                                        openGenreSuggestion ? null : (
+                                            <Link className="album-side-action" to={`/suggestions/genres/${album.albumId}`}>
+                                                Suggest genres
+                                            </Link>
+                                        )
+                                    ) : renderSignInAction("Suggest genres")}
+                                </div>
+                            </div>
+                        )}
+                        {selectedTab === "artist" && (
+                            <dl className="album-facts">
+                                <div>
+                                    <dt>Artist</dt>
+                                    <dd>{artistNames.join(", ")}</dd>
+                                </div>
+                                {album.label && (
+                                    <div>
+                                        <dt>Label</dt>
+                                        <dd>{album.label}</dd>
+                                    </div>
+                                )}
+                            </dl>
+                        )}
+
+                        {selectedTab === "release" && (
+                            <dl className="album-facts">
+                                <div>
+                                    <dt>Release</dt>
+                                    <dd>{releaseDateLabel || album.releaseYear || "Unknown"}</dd>
+                                </div>
+                                <div>
+                                    <dt>Year</dt>
+                                    <dd>{album.releaseYear || "Unknown"}</dd>
+                                </div>
+                                {album.label && (
+                                    <div>
+                                        <dt>Label</dt>
+                                        <dd>{album.label}</dd>
+                                    </div>
+                                )}
+                            </dl>
+                        )}
+
+                        {selectedTab === "format" && (
+                            <dl className="album-facts">
+                                <div>
+                                    <dt>Format</dt>
+                                    <dd>{album.releaseType || "Album"}</dd>
+                                </div>
+                                <div>
+                                    <dt>Tracks</dt>
+                                    <dd>{sortedTracks.length || "Unknown"}</dd>
+                                </div>
+                                <div>
+                                    <dt>Runtime</dt>
+                                    <dd>{runtimeLabel || "Unknown"}</dd>
+                                </div>
+                                {discCount > 1 && (
+                                    <div>
+                                        <dt>Discs</dt>
+                                        <dd>{discCount}</dd>
+                                    </div>
+                                )}
+                            </dl>
+                        )}
+
+                        {(selectedTab === "tracks" || (selectedTab === "ranking" && sortedTracks.length === 0)) && (
+                            <div className="album-tracklist album-tracklist-tab">
+                                {sortedTracks.length > 0 ? (
+                                    <>
+                                        <ol>
+                                            {(hasMoreTracks ? previewTracks : sortedTracks).map((track, index) => {
+                                            const trackNumber = Number(track.trackNumber) || index + 1;
+                                            const discNumber = Number(track.discNumber) || 1;
+                                            const trackLabel = hasMultipleDiscs
+                                                ? `${discNumber}.${trackNumber}`
+                                                : trackNumber;
+
+                                            return (
+                                                <li key={track.trackId || `${discNumber}-${trackNumber}-${track.title}`}>
+                                                    <span className="album-track-number">{trackLabel}</span>
+                                                    <span className="album-track-title">
+                                                        {track.title || "Untitled Track"}
+                                                        {fanFavorite?.trackId === track.trackId && <span className="album-fan-favorite-badge" title={`Ranked #1 across ${fanFavorite.rankingCount} rankings`}>Fan favorite</span>}
+                                                    </span>
+                                                    <span className="album-track-duration">{formatTrackDuration(track.durationMs)}</span>
+                                                </li>
+                                            );
+                                        })}
+                                        </ol>
+                                        {hasMoreTracks && <span className="album-more-link">Showing first {previewTracks.length} tracks</span>}
+                                    </>
+                                ) : (
+                                    <p className="album-empty-copy">
+                                        {album.isPartial
+                                            ? "Track details are temporarily unavailable."
+                                            : "No tracks available."}
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
+                        {selectedTab === "ranking" && sortedTracks.length > 0 && (
+                            <TrackRanking
+                                key={albumId}
+                                albumId={albumId}
+                                tracks={sortedTracks}
+                                getTrackLabel={(track) => (hasMultipleDiscs
+                                    ? `Track ${Number(track.discNumber) || 1}.${Number(track.trackNumber) || 1}`
+                                    : `Track ${Number(track.trackNumber) || 1}`)}
+                                formatDuration={formatTrackDuration}
+                            />
+                        )}
+                    </section>
+
+                    {isReviewsRoute ? (
+                        <section className="album-reviews-section">
+                            <div className="album-section-heading">
+                                <h2>{REVIEW_SORTS[reviewSort].heading}</h2>
+                                <select aria-label="Review order" value={reviewSort} onChange={(event) => navigate(`/album/${albumId}/reviews?sort=${event.target.value}`)} disabled={isReviewsLoading}>
+                                    {REVIEW_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                </select>
+                                <Link className="album-more-link" to={`/album/${albumId}`}>Back to album</Link>
+                            </div>
+                            <AlbumReviewFeed
+                                reviews={selectedReviews}
+                                currentUserId={userId}
+                                onRemoveReview={removeReview}
+                                onToggleReviewLike={toggleReviewLike}
+                                likeMessage={likeMessage}
+                                deletingReviewId={deletingReviewId}
+                                deleteErrors={deleteErrors}
+                            />
+                            {nextReviewCursor && <button className="album-more-link" type="button" onClick={loadMoreReviews} disabled={isLoadingMoreReviews}>{isLoadingMoreReviews ? "Loading…" : "Load more reviews"}</button>}
+                            {!isReviewsLoading && !nextReviewCursor && selectedReviews.length > 0 && <p className="review-list-empty">You’re all caught up.</p>}
+                        </section>
+                    ) : (
+                        <section className="album-review-previews">
+                            <div className="album-review-column">
+                                <div className="album-section-heading">
+                                    <h2>Popular Reviews</h2>
+                                    {popularPreviewHasMore && <Link className="album-more-link" to={`/album/${albumId}/reviews?sort=popular`}>More</Link>}
+                                </div>
+                                <AlbumReviewFeed
+                                    reviews={popularReviewPreviews.slice(0, 2)}
+                                    currentUserId={userId}
+                                    onRemoveReview={removeReview}
+                                    onToggleReviewLike={toggleReviewLike}
+                                    likeMessage={likeMessage}
+                                    deletingReviewId={deletingReviewId}
+                                    deleteErrors={deleteErrors}
+                                />
+                            </div>
+                            <div className="album-review-column">
+                                <div className="album-section-heading">
+                                    <h2>Recent Reviews</h2>
+                                    {recentPreviewHasMore && <Link className="album-more-link" to={`/album/${albumId}/reviews?sort=recent`}>More</Link>}
+                                </div>
+                                <AlbumReviewFeed
+                                    reviews={recentReviewPreviews.slice(0, 2)}
+                                    currentUserId={userId}
+                                    onRemoveReview={removeReview}
+                                    onToggleReviewLike={toggleReviewLike}
+                                    likeMessage={likeMessage}
+                                    deletingReviewId={deletingReviewId}
+                                    deleteErrors={deleteErrors}
+                                />
+                            </div>
+                        </section>
+                    )}
+                </div>
+                <aside className="album-detail-sidebar">
                     <div className="album-side-actions" aria-label="Album actions">
-                        <div className="album-listen-like-group" role="group" aria-label="Listens and likes">
+                        <div className="album-primary-actions" role="group" aria-label="Listen and review">
                             {canUseAuthenticatedActions ? (
                                 <button className="album-side-action" type="button" onClick={() => setIsListenModalOpen(true)}>
                                     <span aria-hidden="true">＋</span>Log listen
                                 </button>
                             ) : renderSignInAction("Log listen", "＋")}
-                            <div className="album-side-action album-like-action">
+                            {canUseAuthenticatedActions ? (
+                                <button className="album-side-action" type="button" onClick={() => {
+                                    setReviewActionMessage("");
+                                    setIsReviewModalOpen(true);
+                                }}>
+                                    <span aria-hidden="true">★</span>Write review
+                                </button>
+                            ) : renderSignInAction("Write review", "★")}
+                        </div>
+                        <div className="album-secondary-actions" role="group" aria-label="Like, boards and queue">
+                            <div className="album-like-action">
                                 <LikeButton liked={albumLike.likedByViewer} count={albumLike.likeCount} label="album" message={likeMessage} onToggle={toggleAlbumLike} />
                                 <small>{albumLike.likedByViewer ? "Liked" : "Like"}</small>
                             </div>
+                            {canUseAuthenticatedActions ? (
+                                <button className="album-side-action" type="button" onClick={openBoardModal} disabled={isBoardStateLoading}>
+                                    Boards…<small>{isBoardStateLoading ? "Checking…" : isSaved ? "Saved · Manage boards" : "Save or add a listen"}</small>
+                                </button>
+                            ) : renderSignInAction("Boards…")}
+                            {canUseAuthenticatedActions
+                                ? <AlbumQueueAction key={album.albumId} albumId={album.albumId} refreshKey={queueRefreshKey} />
+                                : <div className="album-queue-action">{renderSignInAction("Add to queue")}</div>}
                         </div>
-                        {canUseAuthenticatedActions
-                            ? <AlbumQueueAction key={album.albumId} albumId={album.albumId} refreshKey={queueRefreshKey} />
-                            : renderSignInAction("Add to queue")}
-                        {canUseAuthenticatedActions ? (
-                            <button className="album-side-action" type="button" onClick={openBoardModal} disabled={isBoardStateLoading}>
-                                Boards…<small>{isBoardStateLoading ? "Checking…" : isSaved ? "Saved · Manage boards" : "Save or add a listen"}</small>
-                            </button>
-                        ) : renderSignInAction("Boards…")}
-                        {canUseAuthenticatedActions ? (
-                            <button className="album-side-action" type="button" onClick={() => {
-                                setReviewActionMessage("");
-                                setIsReviewModalOpen(true);
-                            }}>
-                                <span aria-hidden="true">★</span>
-                                Write review
-                            </button>
-                        ) : renderSignInAction("Write review", "★")}
-                        {canUseAuthenticatedActions ? (
-                            <Link className="album-side-action" to={`/suggestions/corrections/${album.albumId}`}>
-                                Suggest a correction
-                            </Link>
-                        ) : renderSignInAction("Suggest a correction")}
-                        {genresEnabled && (canUseAuthenticatedActions ? (
-                            openGenreSuggestion ? null : (
-                                <Link className="album-side-action" to={`/suggestions/genres/${album.albumId}`}>
-                                    Suggest genres
-                                </Link>
-                            )
-                        ) : renderSignInAction("Suggest genres"))}
-                        <ShareButton className="album-side-action" path={`/album/${album.albumId}`} title={`${album.title} on Rescened`} label="Share album" />
+                        <AlbumMoreActions key={album.albumId}>
+                            {(closeAndFocus) => <>
+                                <ShareButton className="album-side-action" path={`/album/${album.albumId}`} title={`${album.title} on Rescened`} label="Share album" />
+                                {canUseAuthenticatedActions ? (
+                                    <Link className="album-side-action" to={`/suggestions/corrections/${album.albumId}`}>
+                                        Suggest a correction
+                                    </Link>
+                                ) : renderSignInAction("Suggest a correction", null, closeAndFocus)}
+                            </>}
+                        </AlbumMoreActions>
                         {listenMessage && <p className="board-save-message" role="status">{listenMessage}</p>}
                         {boardSaveMessage && <p className="board-save-message" role="status">{boardSaveMessage}</p>}
                     </div>
@@ -1007,214 +1246,6 @@ export function AlbumDetail()
                     )}
                 </aside>
 
-                <div className="album-detail-main">
-                    <div className="album-title-block">
-                        <p className="album-detail-kicker">{album.releaseType}</p>
-                        <h1>{album.title}</h1>
-                        <div className="album-meta-line">
-                            <span>{album.releaseYear || "Unknown year"}</span>
-                            <span>{artistNames.join(", ")}</span>
-                            {album.label && <span>{album.label}</span>}
-                            {sortedTracks.length > 0 && <span>{sortedTracks.length} track{sortedTracks.length === 1 ? "" : "s"}{runtimeLabel ? ` · ${runtimeLabel}` : ""}</span>}
-                        </div>
-                        {album.genres?.length > 0 && (
-                            <ul className="album-genre-list" aria-label="Genres">
-                                {album.genres.map((genre, index) => (
-                                    <li key={genre.genreId}>
-                                        <Link className={`album-genre-badge ${index === 0 ? "album-genre-badge-primary" : "album-genre-badge-secondary"}`} to={`/genre/${genre.slug}`}>
-                                            {genre.name}
-                                        </Link>
-                                    </li>
-                                ))}
-                            </ul>
-                        )}
-                        {openGenreSuggestion && (
-                            <p className="album-genre-pending">
-                                {openGenreSuggestion.status === "needs_changes"
-                                    ? <>A moderator asked for changes to your genre suggestion. <Link to={`/suggestions/${openGenreSuggestion.submissionId}/revise`}>Revise it</Link></>
-                                    : <>Your genre suggestion is waiting for review. <Link to={`/suggestions/${openGenreSuggestion.submissionId}`}>View it</Link></>}
-                            </p>
-                        )}
-                    </div>
-
-                    <nav className="album-tabs" aria-label="Album sections">
-                        {["artist", "release", "format", "tracks", ...(sortedTracks.length > 0 ? ["ranking"] : [])].map((tab) => (
-                            <button
-                                key={tab}
-                                type="button"
-                                className={activeTab === tab ? "album-tab album-tab-active" : "album-tab"}
-                                onClick={() => setActiveTab(tab)}
-                            >
-                                {tab}
-                            </button>
-                        ))}
-                    </nav>
-
-                    {!isReviewsRoute && (
-                        <section className="album-info-panel">
-                            {activeTab === "artist" && (
-                                <dl className="album-facts">
-                                    <div>
-                                        <dt>Artist</dt>
-                                        <dd>{artistNames.join(", ")}</dd>
-                                    </div>
-                                    {album.label && (
-                                        <div>
-                                            <dt>Label</dt>
-                                            <dd>{album.label}</dd>
-                                        </div>
-                                    )}
-                                </dl>
-                            )}
-
-                            {activeTab === "release" && (
-                                <dl className="album-facts">
-                                    <div>
-                                        <dt>Release</dt>
-                                        <dd>{releaseDateLabel || album.releaseYear || "Unknown"}</dd>
-                                    </div>
-                                    <div>
-                                        <dt>Year</dt>
-                                        <dd>{album.releaseYear || "Unknown"}</dd>
-                                    </div>
-                                    {album.label && (
-                                        <div>
-                                            <dt>Label</dt>
-                                            <dd>{album.label}</dd>
-                                        </div>
-                                    )}
-                                </dl>
-                            )}
-
-                            {activeTab === "format" && (
-                                <dl className="album-facts">
-                                    <div>
-                                        <dt>Format</dt>
-                                        <dd>{album.releaseType || "Album"}</dd>
-                                    </div>
-                                    <div>
-                                        <dt>Tracks</dt>
-                                        <dd>{sortedTracks.length || "Unknown"}</dd>
-                                    </div>
-                                    <div>
-                                        <dt>Runtime</dt>
-                                        <dd>{runtimeLabel || "Unknown"}</dd>
-                                    </div>
-                                    {discCount > 1 && (
-                                        <div>
-                                            <dt>Discs</dt>
-                                            <dd>{discCount}</dd>
-                                        </div>
-                                    )}
-                                </dl>
-                            )}
-
-                            {(activeTab === "tracks" || (activeTab === "ranking" && sortedTracks.length === 0)) && (
-                                <div className="album-tracklist album-tracklist-tab">
-                                    {sortedTracks.length > 0 ? (
-                                        <>
-                                            <ol>
-                                                {(hasMoreTracks ? previewTracks : sortedTracks).map((track, index) => {
-                                                const trackNumber = Number(track.trackNumber) || index + 1;
-                                                const discNumber = Number(track.discNumber) || 1;
-                                                const trackLabel = hasMultipleDiscs
-                                                    ? `${discNumber}.${trackNumber}`
-                                                    : trackNumber;
-
-                                                return (
-                                                    <li key={track.trackId || `${discNumber}-${trackNumber}-${track.title}`}>
-                                                        <span className="album-track-number">{trackLabel}</span>
-                                                        <span className="album-track-title">
-                                                            {track.title || "Untitled Track"}
-                                                            {fanFavorite?.trackId === track.trackId && <span className="album-fan-favorite-badge" title={`Ranked #1 across ${fanFavorite.rankingCount} rankings`}>Fan favorite</span>}
-                                                        </span>
-                                                        <span className="album-track-duration">{formatTrackDuration(track.durationMs)}</span>
-                                                    </li>
-                                                );
-                                            })}
-                                            </ol>
-                                            {hasMoreTracks && <span className="album-more-link">Showing first {previewTracks.length} tracks</span>}
-                                        </>
-                                    ) : (
-                                        <p className="album-empty-copy">
-                                            {album.isPartial
-                                                ? "Track details are temporarily unavailable."
-                                                : "No tracks available."}
-                                        </p>
-                                    )}
-                                </div>
-                            )}
-
-                            {activeTab === "ranking" && sortedTracks.length > 0 && (
-                                <TrackRanking
-                                    key={albumId}
-                                    albumId={albumId}
-                                    tracks={sortedTracks}
-                                    getTrackLabel={(track) => (hasMultipleDiscs
-                                        ? `Track ${Number(track.discNumber) || 1}.${Number(track.trackNumber) || 1}`
-                                        : `Track ${Number(track.trackNumber) || 1}`)}
-                                    formatDuration={formatTrackDuration}
-                                />
-                            )}
-                        </section>
-                    )}
-
-                    {isReviewsRoute ? (
-                        <section className="album-reviews-section">
-                            <div className="album-section-heading">
-                                <h2>{REVIEW_SORTS[reviewSort].heading}</h2>
-                                <select aria-label="Review order" value={reviewSort} onChange={(event) => navigate(`/album/${albumId}/reviews?sort=${event.target.value}`)} disabled={isReviewsLoading}>
-                                    {REVIEW_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                                </select>
-                                <Link className="album-more-link" to={`/album/${albumId}`}>Back to album</Link>
-                            </div>
-                            <AlbumReviewFeed
-                                reviews={selectedReviews}
-                                currentUserId={userId}
-                                onRemoveReview={removeReview}
-                                onToggleReviewLike={toggleReviewLike}
-                                likeMessage={likeMessage}
-                                deletingReviewId={deletingReviewId}
-                                deleteErrors={deleteErrors}
-                            />
-                            {nextReviewCursor && <button className="album-more-link" type="button" onClick={loadMoreReviews} disabled={isLoadingMoreReviews}>{isLoadingMoreReviews ? "Loading…" : "Load more reviews"}</button>}
-                            {!isReviewsLoading && !nextReviewCursor && selectedReviews.length > 0 && <p className="review-list-empty">You’re all caught up.</p>}
-                        </section>
-                    ) : (
-                        <section className="album-review-previews">
-                            <div className="album-review-column">
-                                <div className="album-section-heading">
-                                    <h2>Popular Reviews</h2>
-                                    {popularPreviewHasMore && <Link className="album-more-link" to={`/album/${albumId}/reviews?sort=popular`}>More</Link>}
-                                </div>
-                                <AlbumReviewFeed
-                                    reviews={popularReviewPreviews.slice(0, 2)}
-                                    currentUserId={userId}
-                                    onRemoveReview={removeReview}
-                                    onToggleReviewLike={toggleReviewLike}
-                                    likeMessage={likeMessage}
-                                    deletingReviewId={deletingReviewId}
-                                    deleteErrors={deleteErrors}
-                                />
-                            </div>
-                            <div className="album-review-column">
-                                <div className="album-section-heading">
-                                    <h2>Recent Reviews</h2>
-                                    {recentPreviewHasMore && <Link className="album-more-link" to={`/album/${albumId}/reviews?sort=recent`}>More</Link>}
-                                </div>
-                                <AlbumReviewFeed
-                                    reviews={recentReviewPreviews.slice(0, 2)}
-                                    currentUserId={userId}
-                                    onRemoveReview={removeReview}
-                                    onToggleReviewLike={toggleReviewLike}
-                                    likeMessage={likeMessage}
-                                    deletingReviewId={deletingReviewId}
-                                    deleteErrors={deleteErrors}
-                                />
-                            </div>
-                        </section>
-                    )}
-                </div>
             </div>
             {isListenModalOpen && (
                 <div className="review-modal-backdrop">
