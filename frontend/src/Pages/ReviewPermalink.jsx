@@ -5,6 +5,7 @@ import { useAuth } from "@clerk/react";
 import AsyncState from "../Components/Loading/AsyncState";
 import LikeButton from "../Components/LikeButton";
 import ShareButton from "../Components/ShareButton";
+import ReviewComments from "../features/comments/ReviewComments";
 import { getApiErrorMessage } from "../utils/apiErrors";
 
 function formatDate(value) {
@@ -124,6 +125,7 @@ export function ReviewPermalink() {
           </div>
         </div>
       </article>
+      <ReviewComments reviewId={review.reviewId} />
     </section>
   );
 }

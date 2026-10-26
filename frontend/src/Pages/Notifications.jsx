@@ -9,6 +9,8 @@ const PREFERENCE_OPTIONS = [
   { type: "review_like", label: "Likes on your reviews" },
   { type: "follow", label: "New followers" },
   { type: "followed_review", label: "Reviews from people you follow", detail: "Only for albums on one of your boards." },
+  { type: "review_comment", label: "Comments on your reviews" },
+  { type: "comment_reply", label: "Replies to your comments" },
   { type: "suggestion_status", label: "Updates on your suggestions", detail: "Always on, so you know when a suggestion needs changes." },
 ];
 
@@ -65,6 +67,18 @@ function describeNotification(notification) {
       title: `${actorName} reviewed an album on your boards`,
       detail: subject ? albumLine(subject.album) : "This review is no longer available",
       path: subject?.review?.reviewId ? `/review/${subject.review.reviewId}` : "",
+    };
+  }
+
+  if (notification.type === "review_comment" || notification.type === "comment_reply") {
+    const commentPath = subject?.review?.reviewId
+      ? `/review/${subject.review.reviewId}#comment-${subject.comment?.commentId || ""}`
+      : "";
+    return {
+      label: notification.type === "review_comment" ? "Comment" : "Reply",
+      title: notification.type === "review_comment" ? `${actorName} commented on your review` : `${actorName} replied to your comment`,
+      detail: subject ? subject.comment?.excerpt || albumLine(subject.album) : "This comment is no longer available",
+      path: commentPath,
     };
   }
 
@@ -387,7 +401,7 @@ export function Notifications() {
         loadingMessage="Loading notifications..."
         errorTitle="Notifications unavailable"
         emptyTitle="No notifications yet"
-        emptyBody="Likes, follows, reviews from your circle, and suggestion updates will appear here."
+        emptyBody="Likes, follows, comments, reviews from your circle, and suggestion updates will appear here."
       >
         <div className="notifications-list">
           {notifications.map((notification) => (

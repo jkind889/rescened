@@ -568,6 +568,9 @@ export function ModerationSuggestions() {
           <button className="community-secondary-button" onClick={() => navigate("/moderation/genres")} type="button">
             Genres
           </button>
+          <button className="community-secondary-button" onClick={() => navigate("/moderation/comment-reports")} type="button">
+            Comment reports
+          </button>
           <button className="community-secondary-button" onClick={() => navigate("/suggestions")} type="button">
             My suggestions
           </button>

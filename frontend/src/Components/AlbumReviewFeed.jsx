@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import LikeButton from "./LikeButton";
 import ShareButton from "./ShareButton";
+import CommentCountLink from "../features/comments/CommentCountLink";
 
 const DEFAULT_USERNAME = "rescened user";
 
@@ -83,6 +84,7 @@ function AlbumReviewCard({
                         message={likeMessage}
                         onToggle={() => onToggleReviewLike?.(review)}
                     />
+                    <CommentCountLink reviewId={review.reviewId} count={review.commentCount} />
                     {review.reviewId && <ShareButton className="review-share-button" path={`/review/${review.reviewId}`} title={`${username}'s review on Rescened`} />}
                 </div>
 
