@@ -54,6 +54,13 @@ function stubAccountModels(calls, { failOn } = {}) {
       };
     }
   }
+  const AccountFence = require("../models/AccountFence");
+  const originalFence = AccountFence.findOneAndUpdate;
+  restores.push(() => { AccountFence.findOneAndUpdate = originalFence; });
+  AccountFence.findOneAndUpdate = async (filter, update, options) => {
+    calls.push(["AccountFence.findOneAndUpdate", filter, Boolean(options?.session)]);
+    return { deleted: true };
+  };
   const Board = require(names.Board);
   const originalDistinct = Board.distinct;
   restores.push(() => { Board.distinct = originalDistinct; });
@@ -286,6 +293,7 @@ test("Clerk user deletion webhook rejects unsigned requests and accepts a valid 
     const user = "user_deleted";
     const userOrBoard = { $or: [{ userId: user }, { boardId: { $in: ["board-1"] } }] };
     assert.deepEqual(accountCalls, [
+      ["AccountFence.findOneAndUpdate", { _id: require("../lib/accountFence").accountKey(user) }, true],
       ["Board.distinct", true],
       ["BoardListen.deleteMany", userOrBoard, true],
       ["Listen.deleteMany", { userId: user }, true],
@@ -330,7 +338,7 @@ test("account cleanup aborts and reports unavailable when an account-data write 
       connections.cleanupUserData("user_deleted", { sessionFactory: () => session }),
       (error) => error.status === 503 && error.code === "LASTFM_CLEANUP_UNAVAILABLE",
     );
-    assert.deepEqual(calls.map(([name]) => name), ["Board.distinct", "BoardListen.deleteMany", "Listen.deleteMany"]);
+    assert.deepEqual(calls.map(([name]) => name), ["AccountFence.findOneAndUpdate", "Board.distinct", "BoardListen.deleteMany", "Listen.deleteMany"]);
     assert.equal(session.committed, false);
     assert.equal(session.aborted, true);
   } finally {

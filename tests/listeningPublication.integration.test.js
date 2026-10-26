@@ -13,6 +13,9 @@ const { mappingKey, normalize } = require("../lib/listening/common");
 const { enqueueJob, runWorkerOnce } = require("../lib/listening/worker");
 const { listDetections, revalidateDetection, setTimeZone } = require("../lib/listening/detectionView");
 const { resolvePlay, setAutoDiary } = require("../lib/listening/publication");
+// Register cleanup models before connecting; otherwise their background index
+// builds can race the account-deletion transaction in this suite.
+require("../lib/accountDeletion");
 const { cleanupUserData } = require("../lib/listening/connections");
 const { createListen, deleteListen, updateListen } = require("../routes/utils/listeningDiary");
 
@@ -56,7 +59,7 @@ const plays = async () => (await Detection.find().sort({ startedAt: 1 }).lean())
 async function setup() {
   replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(replSet.getUri(), { dbName: "rescened_listening_publication" });
-  await Promise.all([AlbumCatalog, Listen, UserProfile, ...Object.values(Listening), ...Object.values(Baselines), ...Object.values(Automatic)].map((Model) => Model.init()));
+  await Promise.all(Object.values(mongoose.models).map((Model) => Model.init()));
 }
 async function teardown() {
   if (mongoose.connection.readyState === 1) { await mongoose.connection.dropDatabase(); await mongoose.disconnect(); }

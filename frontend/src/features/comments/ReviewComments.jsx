@@ -14,6 +14,7 @@ import {
   fetchReplies,
   fetchThread,
   linkSegments,
+  hasReplyContent,
   postComment,
   removeComment,
   reportComment,
@@ -316,7 +317,7 @@ export function ReviewComments({ reviewId }) {
           return (
             <li key={comment.commentId}>
               <CommentItem comment={comment} {...handlers} />
-              {(comment.replies?.length > 0 || replying?.threadId === comment.commentId) && (
+              {hasReplyContent(comment, replying?.threadId) && (
                 <ol className="review-comment-replies">
                   {comment.replies.map((reply) => <li key={reply.commentId}><CommentItem comment={reply} {...handlers} /></li>)}
                   {hidden > 0 && comment.repliesCursor && (

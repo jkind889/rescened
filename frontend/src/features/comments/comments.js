@@ -66,20 +66,31 @@ export function appendReplies(thread, parentId, page) {
 
 // A new comment goes at the end even when older ones are not loaded yet; it
 // stays last as they load, since pages merge by commentId around it.
-export function addComment(thread, created) {
+export function addComment(thread, response) {
+  const { commentCount, threadReplyCount, ...created } = response;
   const comment = { ...created, isLocal: true };
-  const counted = { ...thread, commentCount: (Number(thread.commentCount) || 0) + 1 };
+  const exists = thread.comments.some((item) => item.commentId === comment.commentId
+    || (item.replies || []).some((reply) => reply.commentId === comment.commentId));
+  // Older API instances may omit totals during a rolling deployment.
+  const counted = { ...thread, commentCount: Number.isInteger(commentCount)
+    ? commentCount : (Number(thread.commentCount) || 0) + (exists ? 0 : 1) };
   if (!comment.parentCommentId) {
-    if (thread.comments.some((item) => item.commentId === comment.commentId)) return thread;
+    if (thread.comments.some((item) => item.commentId === comment.commentId)) return counted;
     return { ...counted, comments: [...thread.comments, { replies: [], replyCount: 0, repliesCursor: null, ...comment }] };
   }
-  let added = false;
-  const next = mapThreads(counted, (item) => {
-    if (item.commentId !== comment.parentCommentId || (item.replies || []).some((reply) => reply.commentId === comment.commentId)) return item;
-    added = true;
-    return { ...item, replies: [...(item.replies || []), comment], replyCount: (Number(item.replyCount) || 0) + 1 };
+  return mapThreads(counted, (item) => {
+    if (item.commentId !== comment.parentCommentId) return item;
+    const replies = item.replies || [];
+    return {
+      ...item,
+      replies: replies.some((reply) => reply.commentId === comment.commentId) ? replies : [...replies, comment],
+      replyCount: Number.isInteger(threadReplyCount) ? threadReplyCount : (Number(item.replyCount) || 0) + (exists ? 0 : 1),
+    };
   });
-  return added ? next : thread;
+}
+
+export function hasReplyContent(comment, replyingThreadId) {
+  return Boolean(comment.replies?.length || comment.repliesCursor || replyingThreadId === comment.commentId);
 }
 
 export function updateComment(thread, comment) {

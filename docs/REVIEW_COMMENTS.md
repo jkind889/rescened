@@ -43,7 +43,7 @@ Bodies are plain text, 1 to 500 characters after normalization. Line endings bec
 | --- | --- | --- | --- |
 | `GET` | `/reviews/review/:reviewId/comments?cursor=` | Optional | 20 top-level comments, oldest first. Each has its first 3 replies, `replyCount`, and `repliesCursor` when more remain. The response adds `commentCount`, `commentsEnabled`, and, when signed in, `viewer: { profileIsPrivate }`. |
 | `GET` | `/reviews/review/:reviewId/comments/:commentId/replies?cursor=` | Optional | The next 20 replies of one top-level comment. |
-| `POST` | `/reviews/review/:reviewId/comments` | Required | `{ body, parentCommentId? }` plus an `Idempotency-Key` UUID header. Returns `201` with the comment, or `200` with the existing one for a retried key or a duplicate. |
+| `POST` | `/reviews/review/:reviewId/comments` | Required | `{ body, parentCommentId? }` plus an `Idempotency-Key` UUID header. Returns `201` with the comment, or `200` with the existing one for a retried key or a duplicate. Both include authoritative `commentCount` and, for replies, `threadReplyCount`. |
 | `PATCH` | `/reviews/comments/:commentId` | Author | `{ body }`. Sets `editedAt`. Only while visible. |
 | `DELETE` | `/reviews/comments/:commentId` | Author | Returns `{ commentId, status }`: `deleted_by_author` when it left a tombstone, `deleted` when it was removed outright. |
 | `POST` | `/reviews/comments/:commentId/report` | Required | `{ reason, note? }`, where `reason` is `spam`, `harassment`, `off_topic`, or `other` and `note` is up to 300 characters. `201` for a new report, `200` for a repeat. Not allowed on your own comment. |
@@ -61,12 +61,12 @@ Bodies are plain text, 1 to 500 characters after normalization. Line endings bec
 
 Every write except an edit runs in a transaction. Standalone MongoDB returns `503 COMMENT_WRITE_UNAVAILABLE` with nothing written; there is no fallback.
 
-- **Create** claims the review's `interactionRevision` (so a concurrent review deletion conflicts), claims the visible comment being answered and its thread, checks for a duplicate, inserts the comment, and writes its notifications. A deleted review returns `404 REVIEW_NOT_FOUND`; a parent that is gone, not visible, or on another review returns `404 COMMENT_NOT_FOUND`.
+- **Create** first claims the author's account lifecycle record and refuses a deleted account with `403 COMMENT_FORBIDDEN`, then claims the review's `interactionRevision` (so a concurrent review deletion conflicts), claims the visible comment being answered and its thread, checks for a duplicate, inserts the comment, and writes its notifications. A deleted review returns `404 REVIEW_NOT_FOUND`; a parent that is gone, not visible, or on another review returns `404 COMMENT_NOT_FOUND`.
 - **Idempotency and duplicates.** A retried `Idempotency-Key` returns the first comment. The same author posting the same normalized text in the same place (same review and parent) within 10 minutes also gets the existing comment, with no new notification.
 - **Edit** is one conditional write that claims the comment's revision only while it is visible, so an edit that loses to a moderator removal returns `409 COMMENT_STATE_CONFLICT`.
 - **Delete.** A top-level comment with replies becomes a tombstone; anything else is deleted with its reports, events, and notifications. When a reply is deleted and its thread's author-deleted tombstone has no replies left, the tombstone goes too. A moderator-removed comment stays for the audit trail, hidden while it has no visible replies.
 - **Review deletion** removes the review's comments, reports, moderation events, and comment notifications inside `deleteOwnedReview`'s transaction.
-- **Account deletion** (`removeAccountData`) deletes the user's replies, turns their top-level comments that others replied to into anonymous tombstones with no text, deletes the rest, removes reports they filed, and clears `replyToUserId` on replies that named them. Unlike reviews, comment text is never kept under an anonymous author.
+- **Account deletion** (`removeAccountData`) deletes the user's replies, turns their top-level comments that others replied to into anonymous tombstones with no text, deletes the rest, removes reports they filed, and clears `replyToUserId` on replies that named them. Unlike reviews, comment text is never kept under an anonymous author. Cleanup and comment/report creation write the same `AccountFence` record, so in-flight writes cannot survive deletion. Its SHA-256 account key, deletion marker, and revision remain after cleanup; it stores no raw user ID, profile, or comment content and is never public. These records are created lazily; no backfill is required.
 
 ## Notifications
 
@@ -75,7 +75,7 @@ Comment notifications use the types and mute settings from [the notifications gu
 ## Frontend
 
 - `frontend/src/features/comments/ReviewComments.jsx` renders the thread on `ReviewPermalink`: replies indented once, "Show N more replies", inline reply and edit composers, Delete for authors, and Report with a reason form for everyone else. Links to `#comment-<commentId>` scroll to that comment, or to the thread when it is not loaded.
-- Composers keep a local draft per review and per thread (`rescened:comment-draft:v1:`), and reuse their `Idempotency-Key` while the text is unchanged, so a retry after a lost response cannot post twice. Comments posted on the page stay last while older pages load in.
+- Composers keep a local draft per review and per thread (`rescened:comment-draft:v1:`), and reuse their `Idempotency-Key` while the text is unchanged, so a retry after a lost response cannot post twice. Comments posted on the page stay last while older pages load in. Counts reconcile from the server even when a duplicate was outside the loaded preview or the original response was lost. Reply pagination remains available after all loaded replies are deleted.
 - `CommentCountLink` shows the count next to the like button on album, profile, activity, own-review, and dispatch cards; the home and community dispatch lists show it as text.
 - `/moderation/comment-reports` (`Pages/CommentReports.jsx`) is the moderator queue, linked from the suggestion queue. Both actions require a reason, and Remove asks for confirmation because there is no restore yet.
 

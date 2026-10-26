@@ -6,6 +6,8 @@ const express = require("express");
 const mongoose = require("mongoose");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
 
+const AccountFence = require("../models/AccountFence");
+const { accountKey } = require("../lib/accountFence");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const CommentModerationEvent = require("../models/CommentModerationEvent");
 const CommentReport = require("../models/CommentReport");
@@ -23,7 +25,7 @@ const { readThread } = require("../lib/reviewComments/read");
 const enabled = process.env.RUN_MONGO_INTEGRATION === "true";
 const integration = (name, fn) => test(name, { skip: !enabled }, fn);
 const clerkPath = require.resolve("@clerk/express");
-const models = [AlbumCatalog, CommentModerationEvent, CommentReport, Notification, Review, ReviewComment, UserProfile];
+const models = [AccountFence, AlbumCatalog, CommentModerationEvent, CommentReport, Notification, Review, ReviewComment, UserProfile];
 let replSet;
 let server;
 let baseUrl;
@@ -73,6 +75,7 @@ test.before(async () => {
   app.use(express.json());
   app.use("/reviews", require("../routes/reviews"));
   app.use("/reviews", require("../routes/reviewComments"));
+  app.use("/profile", require("../routes/profile"));
   server = app.listen(0);
   await once(server, "listening");
   baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -312,4 +315,101 @@ integration("comment creation over its limit returns 429 with Retry-After", asyn
   assert.equal(last.body.code, "RATE_LIMITED");
   assert.ok(Number(last.headers.get("retry-after")) > 0);
   assert.equal(await ReviewComment.countDocuments({ userId: "user_flood" }), 20);
+});
+
+
+integration("account deletion fences first-time comment creation and later retries", async () => {
+  const review = await createReview("user_fence_review_owner");
+  const userId = `user_leaving_${crypto.randomUUID()}`;
+  const key = crypto.randomUUID();
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    await removeAccountData(userId, session);
+    // Admission/authentication may have happened before deletion; the first
+    // database write must still contend with the account's deletion marker.
+    const pending = createComment({ reviewId: review.reviewId, userId, creationKey: key, body: "Must not survive", parentCommentId: null });
+    const rejected = assert.rejects(pending, { status: 403, code: "COMMENT_FORBIDDEN" });
+    await session.commitTransaction();
+    await rejected;
+    await assert.rejects(comment(review, userId, "Delayed request"), { status: 403 });
+    assert.equal(await ReviewComment.countDocuments({ userId }), 0);
+    assert.equal(await Notification.countDocuments({ actorUserId: userId }), 0);
+    const marker = await AccountFence.findById(accountKey(userId)).lean();
+    assert.equal(marker.deleted, true);
+    assert.equal(JSON.stringify(marker).includes(userId), false);
+  } finally {
+    if (session.inTransaction()) await session.abortTransaction();
+    await session.endSession();
+  }
+});
+
+integration("first-time concurrent posts across reviews share one account fence", async () => {
+  const reviews = await Promise.all([createReview(), createReview()]);
+  const userId = `user_first_${crypto.randomUUID()}`;
+  const results = await Promise.all(Array.from({ length: 6 }, (_, index) => comment(reviews[index % 2], userId, `Concurrent ${index}`)));
+  assert.equal(results.length, 6);
+  assert.equal(await ReviewComment.countDocuments({ userId }), 6);
+  assert.equal(await AccountFence.countDocuments({ _id: accountKey(userId) }), 1);
+});
+
+integration("account deletion removes a winning post and blocks reports after deletion", async () => {
+  const review = await createReview("user_fence_owner_2");
+  const userId = `user_prior_${crypto.randomUUID()}`;
+  const { comment: posted } = await comment(review, userId, "Committed before cleanup");
+  const { comment: target } = await comment(review, "user_report_target", "Report target");
+  const session = await mongoose.startSession();
+  try { await session.withTransaction(() => removeAccountData(userId, session)); } finally { await session.endSession(); }
+  assert.equal(await ReviewComment.exists({ _id: posted._id }), null);
+  assert.equal(await Notification.countDocuments({ actorUserId: userId }), 0);
+  await assert.rejects(reportComment({ commentId: target.commentId, reporterUserId: userId, reason: "spam", note: "" }), { status: 403 });
+  assert.equal(await CommentReport.countDocuments({ reporterUserId: userId }), 0);
+});
+
+integration("rolling back account deletion does not disable later comment creation", async () => {
+  const userId = `user_rollback_${crypto.randomUUID()}`;
+  const review = await createReview();
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try { await removeAccountData(userId, session); await session.abortTransaction(); } finally { await session.endSession(); }
+  assert.equal((await comment(review, userId, "Still active")).created, true);
+});
+
+integration("profile activity carries the same live comment total as review detail", async () => {
+  const userId = `user_activity_${crypto.randomUUID()}`;
+  const review = await createReview(userId);
+  const { comment: top } = await comment(review, "user_activity_a", "Top");
+  await comment(review, "user_activity_b", "Reply", top.commentId);
+  const { comment: removed } = await comment(review, "user_activity_c", "Hidden");
+  await removeComment({ commentId: removed.commentId, actorUserId: "user_mod", reason: "spam" });
+  for (const path of ["/profile/me/activity", `/profile/${userId}/activity`]) {
+    const page = await request("GET", path, { userId });
+    assert.equal(page.status, 200);
+    assert.equal(page.body.find((row) => row.reviewId === review.reviewId).commentCount, 2);
+  }
+  assert.equal((await request("GET", `/reviews/review/${review.reviewId}`)).body.commentCount, 2);
+});
+
+integration("creation and duplicate responses supply real totals and existing thread previews", async () => {
+  const review = await createReview();
+  const { comment: top } = await comment(review, "user_duplicate_top", "Existing top");
+  for (let index = 0; index < 4; index += 1) await comment(review, "user_duplicate_reply", `Reply ${index}`, top.commentId);
+  const path = `/reviews/review/${review.reviewId}/comments`;
+  const duplicate = await request("POST", path, { userId: "user_duplicate_reply", key: crypto.randomUUID(), body: { body: "Reply 3", parentCommentId: top.commentId } });
+  assert.equal(duplicate.status, 200);
+  assert.equal(duplicate.body.commentCount, 5);
+  assert.equal(duplicate.body.threadReplyCount, 4);
+  const key = crypto.randomUUID();
+  const options = { userId: "user_duplicate_reply", key, body: { body: "New reply", parentCommentId: top.commentId } };
+  const created = await request("POST", path, options);
+  const retried = await request("POST", path, options);
+  assert.equal(created.status, 201);
+  assert.equal(retried.status, 200);
+  assert.equal(retried.body.commentCount, 6);
+  assert.equal(retried.body.threadReplyCount, 5);
+  assert.equal(retried.body.commentId, created.body.commentId);
+  const existingTop = await request("POST", path, { userId: "user_duplicate_top", key: crypto.randomUUID(), body: { body: "Existing top" } });
+  assert.equal(existingTop.body.replyCount, 5);
+  assert.equal(existingTop.body.replies.length, 3);
+  assert.ok(existingTop.body.repliesCursor);
 });

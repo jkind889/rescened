@@ -44,7 +44,7 @@ test("thread updates add, merge, edit, and remove comments without duplicates", 
   assert.deepEqual(thread.comments.at(-1).replies, []);
   thread = addComment(thread, { commentId: "a2", parentCommentId: "a", status: "visible" });
   assert.equal(thread.comments[0].replyCount, 3);
-  assert.equal(addComment(thread, { commentId: "a2", parentCommentId: "a" }), thread, "a repeated add changes nothing");
+  assert.deepEqual(addComment(thread, { commentId: "a2", parentCommentId: "a" }), thread, "a repeated add changes nothing");
 
   thread = appendReplies(thread, "a", { replies: [{ commentId: "a1b" }, { commentId: "a2" }], nextCursor: null });
   assert.deepEqual(thread.comments[0].replies.map((reply) => reply.commentId), ["a1", "a1b", "a2"]);
@@ -88,4 +88,38 @@ test("draft keys are scoped to the viewer, review, and thread", async () => {
   assert.equal(commentDraftKey("", "r"), "");
   assert.notEqual(commentDraftKey("u", "r"), commentDraftKey("u", "r", "t"));
   assert.notEqual(commentDraftKey("u", "r"), commentDraftKey("v", "r"));
+});
+
+
+test("deleting every preview reply keeps the remaining reply page accessible", async () => {
+  const { removeComment, hasReplyContent } = await helpers;
+  let thread = sampleThread();
+  thread = removeComment(thread, "a1", "deleted");
+  assert.equal(thread.comments[0].replies.length, 0);
+  assert.equal(thread.comments[0].replyCount, 1);
+  assert.equal(hasReplyContent(thread.comments[0]), true, "the cursor must keep Show more reachable");
+});
+
+test("duplicate replies outside the preview reconcile server totals without hiding older replies", async () => {
+  const { addComment, appendReplies } = await helpers;
+  const thread = sampleThread();
+  const response = { commentId: "a2", parentCommentId: "a", status: "visible", commentCount: 4, threadReplyCount: 2 };
+  const added = addComment(thread, response);
+  assert.equal(added.commentCount, 4);
+  assert.equal(added.comments[0].replyCount, 2);
+  assert.deepEqual(added.comments[0].replies.map((reply) => reply.commentId), ["a1", "a2"]);
+  assert.equal(added.comments[0].repliesCursor, "ra");
+  assert.equal("commentCount" in added.comments[0].replies[1], false, "response totals are not comment fields");
+  const loaded = appendReplies(added, "a", { replies: [response], nextCursor: null });
+  assert.equal(loaded.comments[0].replies.length, 2);
+  assert.equal(addComment(loaded, response).commentCount, 4);
+});
+
+test("a lost creation response reconciles a retry even though the server returns an existing reply", async () => {
+  const { addComment } = await helpers;
+  const thread = sampleThread();
+  const recovered = addComment(thread, { commentId: "a3", parentCommentId: "a", status: "visible", commentCount: 5, threadReplyCount: 3 });
+  assert.equal(recovered.commentCount, 5);
+  assert.equal(recovered.comments[0].replyCount, 3);
+  assert.equal(addComment(recovered, { commentId: "a3", parentCommentId: "a", status: "visible", commentCount: 5, threadReplyCount: 3 }).commentCount, 5);
 });

@@ -341,6 +341,7 @@ test("profile review activity uses the public review ID for both activity identi
   t.mock.method(BoardItem, "find", () => chainQuery([]));
   t.mock.method(Listen, "aggregate", async () => []);
   t.mock.method(TrackRanking, "aggregate", async () => []);
+  t.mock.method(ReviewComment, "aggregate", async () => [{ _id: internalReviewId, count: 6 }]);
   const router = loadRoute(t, profileRoutePath);
 
   const response = await invokeLastHandler(router, "/me/activity", "get", { userId: "owner" });
@@ -348,6 +349,7 @@ test("profile review activity uses the public review ID for both activity identi
   assert.equal(response.status, 200);
   assert.equal(activity.id, REVIEW_ID);
   assert.equal(activity.reviewId, REVIEW_ID);
+  assert.equal(activity.commentCount, 6);
   assert.equal(Object.hasOwn(activity, "_id"), false);
   assert.equal(JSON.stringify(activity).includes(String(internalReviewId)), false);
 });

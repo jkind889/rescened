@@ -12,6 +12,7 @@ const {
   commentReportRateLimit,
 } = require("./utils/rateLimit");
 const {
+  REPLY_PREVIEW_SIZE,
   assertCommentId,
   creationKey,
   isReviewCommentsEnabled,
@@ -54,12 +55,19 @@ async function findReview(publicId) {
   return review;
 }
 
-// A new top-level comment starts an empty thread; an edit leaves the client's
-// thread state alone, so it carries no thread fields.
+// Creation retries can return an existing top-level thread. Include its real
+// reply preview; an edit leaves the client's thread state alone.
 async function serializeOne(row, { newThread = false } = {}) {
   const parent = row.parentCommentId ? await ReviewComment.findById(row.parentCommentId, { commentId: 1 }).lean() : null;
   const authors = await commentAuthors([row.userId, row.replyToUserId]);
-  const thread = newThread && !row.parentCommentId ? { replyCount: 0, replies: [], repliesCursor: null } : null;
+  let thread = null;
+  if (newThread && !row.parentCommentId) {
+    const [page, replyCount] = await Promise.all([
+      readReplies({ _id: row.reviewId }, row, null, commentAuthors, { limit: REPLY_PREVIEW_SIZE }),
+      ReviewComment.countDocuments({ parentCommentId: row._id, status: "visible" }),
+    ]);
+    thread = { replyCount, replies: page.replies, repliesCursor: page.nextCursor };
+  }
   return serializeComment(row, { authors, parentPublicId: parent?.commentId || null, thread });
 }
 
@@ -96,9 +104,19 @@ router.post("/review/:reviewId/comments", auth, commentsEnabled, commentCreateRa
   try {
     const input = parseCreateBody(req.body);
     const key = creationKey(req.get?.("Idempotency-Key"));
-    const { reviewId } = await findReview(req.params.reviewId);
+    const review = await findReview(req.params.reviewId);
+    const { reviewId } = review;
     const { comment, created } = await createComment({ reviewId, userId: req.userId, creationKey: key, ...input });
-    res.status(created ? 201 : 200).json(await serializeOne(comment, { newThread: true }));
+    const [serialized, counts, threadReplyCount] = await Promise.all([
+      serializeOne(comment, { newThread: true }),
+      commentCounts([review._id]),
+      comment.parentCommentId ? ReviewComment.countDocuments({ parentCommentId: comment.parentCommentId, status: "visible" }) : null,
+    ]);
+    res.status(created ? 201 : 200).json({
+      ...serialized,
+      commentCount: counts.get(String(review._id)) || 0,
+      ...(threadReplyCount === null ? {} : { threadReplyCount }),
+    });
   } catch (error) { sendError(res, error, "Failed to post comment"); }
 });
 
