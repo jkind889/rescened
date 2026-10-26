@@ -5,6 +5,8 @@ const { once } = require("node:events");
 const express = require("express");
 const mongoose = require("mongoose");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
+// Initialize the lifecycle collection before a transaction first writes it.
+const AccountFence = require("../models/AccountFence");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
 const Board = require("../models/Board");
@@ -27,7 +29,7 @@ const { mutateReviewLike } = require("../routes/utils/reviewInteractions");
 
 const enabled = process.env.RUN_MONGO_INTEGRATION === "true";
 const models = [
-  AlbumCatalog, AlbumSubmission, Board, BoardItem, BoardListen, Follow, Like, Listen, ListenCreation, Notification, Review, TrackRanking, UserProfile,
+  AccountFence, AlbumCatalog, AlbumSubmission, Board, BoardItem, BoardListen, Follow, Like, Listen, ListenCreation, Notification, Review, TrackRanking, UserProfile,
   ...Object.values(Listening), ...Object.values(Automatic),
 ];
 let replSet;

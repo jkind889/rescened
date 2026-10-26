@@ -41,13 +41,37 @@ export function linkSegments(text) {
 function mergeById(current, incoming) {
   const local = current.filter((item) => item.isLocal);
   const localIds = new Set(local.map((item) => item.commentId));
-  const loaded = current.filter((item) => !item.isLocal);
+  const focused = new Map(current.filter((item) => item.isFocused).map((item) => [item.commentId, item]));
+  const loaded = current.filter((item) => !item.isLocal && !item.isFocused);
   const seen = new Set(loaded.map((item) => item.commentId));
-  return [...loaded, ...incoming.filter((item) => !seen.has(item.commentId) && !localIds.has(item.commentId)), ...local];
+  const next = incoming.filter((item) => !seen.has(item.commentId) && !localIds.has(item.commentId)).map((item) => {
+    const context = focused.get(item.commentId);
+    if (!context) return item;
+    focused.delete(item.commentId);
+    // The ordinary page determines position, while context may already have
+    // loaded more replies than the page preview. Preserve that state/cursor.
+    return { ...item, ...context, isFocused: false,
+      ...(context.replies ? { replies: mergeById(context.replies, item.replies || []) } : {}) };
+  });
+  return [...loaded, ...next, ...focused.values(), ...local];
 }
 
 function mapThreads(thread, fn) {
   return { ...thread, comments: thread.comments.map(fn) };
+}
+
+// Focus context is supplemental, so normal pagination must not skip older
+// rows or add the focused thread/reply twice when it eventually reaches them.
+export function includeFocusedThread(page) {
+  const { focusedThread, ...thread } = page;
+  if (!focusedThread) return thread;
+  const { focusedReply, ...root } = focusedThread;
+  const replies = focusedReply ? [...root.replies, { ...focusedReply, isFocused: true }] : root.replies;
+  const current = thread.comments.find((item) => item.commentId === root.commentId);
+  if (!current) return { ...thread, comments: [...thread.comments, { ...root, replies, isFocused: true }] };
+  return mapThreads(thread, (item) => item !== current ? item : {
+    ...item, replies: mergeById(item.replies || [], replies),
+  });
 }
 
 export function appendThreadPage(thread, page) {
@@ -145,8 +169,11 @@ async function request(path, { token, method = "GET", body, idempotencyKey, sign
 const reviewPath = (reviewId) => `/reviews/review/${encodeURIComponent(reviewId)}/comments`;
 const commentPath = (commentId) => `/reviews/comments/${encodeURIComponent(commentId)}`;
 
-export function fetchThread(reviewId, { token, cursor, signal } = {}) {
-  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+export function fetchThread(reviewId, { token, cursor, focus, signal } = {}) {
+  const params = new URLSearchParams();
+  if (cursor) params.set("cursor", cursor);
+  if (focus) params.set("focus", focus);
+  const query = params.size ? `?${params}` : "";
   return request(`${reviewPath(reviewId)}${query}`, { token, signal, fallback: "Comments are unavailable right now." });
 }
 

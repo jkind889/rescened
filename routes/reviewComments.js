@@ -22,7 +22,7 @@ const {
   parseReportBody,
   reviewNotFound,
 } = require("../lib/reviewComments/common");
-const { commentCounts, readReplies, readThread, serializeComment } = require("../lib/reviewComments/read");
+const { readFocusedThread, commentCounts, readReplies, readThread, serializeComment } = require("../lib/reviewComments/read");
 const { createComment, deleteComment, editComment, reportComment } = require("../lib/reviewComments/commands");
 
 // Mounted at /reviews next to the review routes.
@@ -75,13 +75,16 @@ router.get("/review/:reviewId/comments", async (req, res) => {
   try {
     const review = await findReview(req.params.reviewId);
     const viewerId = viewer(req);
-    const [thread, counts, profile] = await Promise.all([
+    const focusId = req.query?.focus ? assertCommentId(req.query.focus) : null;
+    const [thread, counts, profile, focusedThread] = await Promise.all([
       readThread(review, req.query?.cursor, commentAuthors),
       commentCounts([review._id]),
       viewerId ? UserProfile.findOne({ userId: viewerId }, { isPrivate: 1 }).lean() : null,
+      focusId ? readFocusedThread(review, focusId, commentAuthors) : null,
     ]);
     res.json({
       ...thread,
+      ...(focusId ? { focusedThread } : {}),
       commentCount: counts.get(String(review._id)) || 0,
       commentsEnabled: isReviewCommentsEnabled(),
       // Lets the composer say that comments, and the commenter's name, are public.
