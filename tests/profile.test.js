@@ -9,6 +9,7 @@ const AlbumCatalog = require("../models/AlbumCatalog");
 const Like = require("../models/Like");
 const Listen = require("../models/Listen");
 const TrackRanking = require("../models/TrackRanking");
+const ReviewComment = require("../models/ReviewComment");
 
 const clerkPath = require.resolve("@clerk/express");
 const profilePath = require.resolve("../routes/profile");
@@ -72,6 +73,8 @@ function installNetworkRoute(t, options = {}) {
     // exercised against MongoDB by the integration suite, not simulated here.
     return rows;
   });
+
+  t.mock.method(ReviewComment, "aggregate", async () => options.commentCounts ?? []);
 
   t.mock.method(Listen, "aggregate", async () => {
     if (options.listenError) throw options.listenError;
@@ -150,6 +153,7 @@ test("network returns followed-user review activities with current catalog metad
   const route = installNetworkRoute(t, {
     follows: ["user_alex", "user_sam", "user_without_reviews"].map((followingId) => ({ followingId })),
     rows: [alex, sam],
+    commentCounts: [{ _id: alex._id, count: 2 }],
     users: [
       { id: "user_alex", username: "alex", imageUrl: "https://example.test/alex.jpg" },
       { id: "user_sam", username: "sam", imageUrl: "https://example.test/sam.jpg" },
@@ -184,8 +188,10 @@ test("network returns followed-user review activities with current catalog metad
     reviewText: alex.reviewText,
     likeCount: 3,
     likedByViewer: true,
+    commentCount: 2,
   });
   assert.equal(result.body[1].actor.username, "sam");
+  assert.equal(result.body[1].commentCount, 0);
   assert.equal(result.body[1].likeCount, 0);
   assert.equal(result.body[1].likedByViewer, false);
   assert.equal(result.body[1].album.albumId, ALBUM_ID);

@@ -33,7 +33,7 @@ async function callLast(router, method, path, body) {
 }
 
 test("preferences default on, including for profiles written before preferences existed", () => {
-  const all = { review_like: true, follow: true, followed_review: true, suggestion_status: true };
+  const all = { review_like: true, follow: true, followed_review: true, review_comment: true, comment_reply: true, suggestion_status: true };
   assert.deepEqual(serializePreferences(null), { preferences: all, locked: ["suggestion_status"] });
   assert.deepEqual(serializePreferences({ notificationPreferences: { follow: false } }).preferences, { ...all, follow: false });
 });

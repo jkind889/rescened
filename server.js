@@ -52,6 +52,7 @@ app.use("/auth", authRoutes);
 app.use("/search", searchRoutes);
 app.use("/albums", albumRoutes);
 app.use("/reviews", reviewRoutes);
+app.use("/reviews", require("./routes/reviewComments"));
 app.use("/profile", profileRoutes)
 app.use("/boards", boardRoutes)
 app.use("/diary", require("./routes/diary"));
@@ -65,6 +66,7 @@ app.use("/connections/lastfm", require("./routes/lastfmConnections"));
 app.use("/moderation/album-mappings", require("./routes/albumMappings"));
 app.use("/moderation/album-baselines", require("./routes/albumBaselines"));
 app.use("/moderation/genres", require("./routes/genreModeration"));
+app.use("/moderation/comment-reports", require("./routes/commentModeration"));
 
 async function startServer({
   connect = mongoose.connect.bind(mongoose),

@@ -2,7 +2,8 @@ const crypto = require("node:crypto");
 const mongoose = require("mongoose");
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const NOTIFICATION_TYPES = ["review_like", "follow", "suggestion_status", "followed_review"];
+const NOTIFICATION_TYPES = ["review_like", "follow", "suggestion_status", "followed_review", "review_comment", "comment_reply"];
+const COMMENT_NOTIFICATION_TYPES = ["review_comment", "comment_reply"];
 const SUGGESTION_NOTIFICATION_STATUSES = ["approved", "needs_changes", "rejected", "duplicate"];
 // Moderation notifications name this fixed actor instead of the moderator, so
 // the moderator stays private and their account deletion never matches it.
@@ -26,6 +27,9 @@ const notificationSchema = new mongoose.Schema(
     actorUserId: { type: String, required: true },
     type: { type: String, enum: NOTIFICATION_TYPES, required: true },
     reviewId: { type: mongoose.Schema.Types.ObjectId, ref: "Review" },
+    // review_comment and comment_reply only: the new comment. reviewId is set
+    // too, so review deletion removes comment notifications with the rest.
+    commentId: { type: mongoose.Schema.Types.ObjectId, ref: "ReviewComment" },
     // suggestion_status only: the suggestion, the revision that was moderated,
     // and the status it moved to. Together with the recipient they are the
     // dedup key, so a retried moderation command inserts nothing.
@@ -61,8 +65,17 @@ notificationSchema.index(
   { unique: true, partialFilterExpression: { type: "followed_review" } },
 );
 
+// Comment notifications dedupe on (recipient, comment, type). Only comment
+// types set commentId. Comment deletion and moderator removal delete by commentId.
+notificationSchema.index(
+  { recipientUserId: 1, commentId: 1, type: 1 },
+  { unique: true, partialFilterExpression: { commentId: { $exists: true } } },
+);
+notificationSchema.index({ commentId: 1 }, { partialFilterExpression: { commentId: { $exists: true } } });
+
 const Notification = mongoose.model("Notification", notificationSchema);
 Notification.NOTIFICATION_TYPES = NOTIFICATION_TYPES;
+Notification.COMMENT_NOTIFICATION_TYPES = COMMENT_NOTIFICATION_TYPES;
 Notification.SUGGESTION_NOTIFICATION_STATUSES = SUGGESTION_NOTIFICATION_STATUSES;
 Notification.MODERATION_ACTOR_ID = MODERATION_ACTOR_ID;
 

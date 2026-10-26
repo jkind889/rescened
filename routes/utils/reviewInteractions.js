@@ -6,6 +6,7 @@ const Review = require("../../models/Reviews");
 const UserProfile = require("../../models/UserProfile");
 const { isTransactionUnavailable } = require("./transactions");
 const { recordReviewLike } = require("./notifications");
+const { removeReviewComments } = require("../../lib/reviewComments/cascade");
 
 const REVIEW_ID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ACTION_CODES = {
@@ -103,6 +104,7 @@ async function deleteOwnedReview(reviewId, userId) {
     if (!review) return { deleted: false };
 
     await Like.deleteMany({ targetType: "review", reviewId: review._id }, { session });
+    await removeReviewComments(review._id, session);
     await Notification.deleteMany({ type: { $in: ["review_like", "followed_review"] }, reviewId: review._id }, { session });
     await UserProfile.updateMany({ pinnedReviewId: review._id }, { $set: { pinnedReviewId: null } }, { session });
     const result = await Review.deleteOne({ _id: review._id, userId }, { session });

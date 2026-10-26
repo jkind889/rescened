@@ -38,6 +38,7 @@ function stubAccountModels(calls, { failOn } = {}) {
     Board: "../models/Board", BoardItem: "../models/BoardItem", BoardListen: "../models/BoardListen", Follow: "../models/Follow",
     Like: "../models/Like", Listen: "../models/Listen", ListenCreation: "../models/ListenCreation",
     Notification: "../models/Notification", Review: "../models/Reviews", TrackRanking: "../models/TrackRanking", UserProfile: "../models/UserProfile",
+    CommentReport: "../models/CommentReport", ReviewComment: "../models/ReviewComment",
   };
   const restores = [];
   for (const [name, path] of Object.entries(names)) {
@@ -57,6 +58,13 @@ function stubAccountModels(calls, { failOn } = {}) {
   const originalDistinct = Board.distinct;
   restores.push(() => { Board.distinct = originalDistinct; });
   Board.distinct = () => ({ session: async (session) => { calls.push(["Board.distinct", Boolean(session)]); return ["board-1"]; } });
+  const ReviewComment = require(names.ReviewComment);
+  const originalCommentFind = ReviewComment.find;
+  restores.push(() => { ReviewComment.find = originalCommentFind; });
+  ReviewComment.find = (filter, projection, options) => {
+    calls.push(["ReviewComment.find", filter, Boolean(options?.session)]);
+    return { lean: async () => [] };
+  };
   return () => restores.forEach((restore) => restore());
 }
 
@@ -287,6 +295,9 @@ test("Clerk user deletion webhook rejects unsigned requests and accepts a valid 
       ["Board.deleteMany", { userId: user }, true],
       ["Like.deleteMany", { userId: user }, true],
       ["TrackRanking.deleteMany", { userId: user }, true],
+      ["CommentReport.deleteMany", { reporterUserId: user }, true],
+      ["ReviewComment.updateMany", { replyToUserId: user }, true],
+      ["ReviewComment.find", { userId: user }, true],
       ["Follow.deleteMany", { $or: [{ followerId: user }, { followingId: user }] }, true],
       ["Notification.deleteMany", { $or: [{ recipientUserId: user }, { actorUserId: user }] }, true],
       ["UserProfile.deleteOne", { userId: user }, true],

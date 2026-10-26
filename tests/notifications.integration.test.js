@@ -136,7 +136,7 @@ function profileRoute(t, userId) {
 test("preferences upsert a missing profile, mute on write, and keep suggestion updates locked", { skip: !enabled }, async (t) => {
   const call = profileRoute(t, "pref-user");
   const initial = await call("get", "/me/notification-preferences");
-  assert.deepEqual(initial.body.preferences, { review_like: true, follow: true, followed_review: true, suggestion_status: true });
+  assert.deepEqual(initial.body.preferences, { review_like: true, follow: true, followed_review: true, review_comment: true, comment_reply: true, suggestion_status: true });
 
   await recordFollow({ recipientUserId: "pref-user", actorUserId: "early-follower" });
   const muted = await call("patch", "/me/notification-preferences", { follow: false });

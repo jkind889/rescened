@@ -7,6 +7,7 @@ const { normalizeCatalogAlbum } = require("./albumCatalog");
 const { persistedReviewId } = require("./reviewInteractions");
 const { getListenActivity } = require("./listenActivity");
 const { getRankingActivity } = require("./trackRankings");
+const { commentCounts } = require("../../lib/reviewComments/read");
 
 const NETWORK_ACTIVITY_LIMIT = 20;
 
@@ -85,6 +86,7 @@ async function getNetworkActivity(viewerId, getAuthors) {
     getListenActivity(visibleIds, NETWORK_ACTIVITY_LIMIT),
     getRankingActivity(visibleIds, NETWORK_ACTIVITY_LIMIT),
   ]);
+  const comments = await commentCounts(reviews.map((review) => review._id));
   const reviewActivities = reviews.map((review) => {
     const reviewId = persistedReviewId(review);
     return {
@@ -98,6 +100,7 @@ async function getNetworkActivity(viewerId, getAuthors) {
       reviewText: review.reviewText,
       likeCount: review.likeCount,
       likedByViewer: review.likedByViewer,
+      commentCount: comments.get(String(review._id)) || 0,
     };
   });
   // Stable ties preserve each query's internal ordering, with reviews first.

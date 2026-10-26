@@ -73,6 +73,24 @@ const RATE_LIMITS = {
     duration: 10 * 60,
     message: "Too many queue updates. Please try again soon.",
   },
+  commentCreate: {
+    keyPrefix: "rescened:comment-create",
+    points: 20,
+    duration: 10 * 60,
+    message: "Too many comments. Please try again soon.",
+  },
+  commentMutation: {
+    keyPrefix: "rescened:comment-mutation",
+    points: 60,
+    duration: 10 * 60,
+    message: "Too many comment updates. Please try again soon.",
+  },
+  commentReport: {
+    keyPrefix: "rescened:comment-report",
+    points: 10,
+    duration: 10 * 60,
+    message: "Too many reports. Please try again soon.",
+  },
   profileStats: {
     keyPrefix: "rescened:profile-stats",
     points: 60,
@@ -246,6 +264,9 @@ const reviewMutationLimiter = createRateLimiter(RATE_LIMITS.reviewMutation);
 const likeMutationLimiter = createRateLimiter(RATE_LIMITS.likeMutation);
 const trackRankingMutationLimiter = createRateLimiter(RATE_LIMITS.trackRankingMutation);
 const profileStatsLimiter = createRateLimiter(RATE_LIMITS.profileStats);
+const commentCreateLimiter = createRateLimiter(RATE_LIMITS.commentCreate);
+const commentMutationLimiter = createRateLimiter(RATE_LIMITS.commentMutation);
+const commentReportLimiter = createRateLimiter(RATE_LIMITS.commentReport);
 const boardMutationLimiter = createRateLimiter(RATE_LIMITS.boardMutation);
 const queueMutationLimiter = createRateLimiter(RATE_LIMITS.queueMutation);
 const submissionCreateLimiter = createRateLimiter(RATE_LIMITS.submissionCreate);
@@ -271,6 +292,18 @@ module.exports = {
     message: RATE_LIMITS.boardMutation.message,
   }),
   buildRateLimitPayload,
+  commentCreateRateLimit: createRateLimitMiddleware(commentCreateLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.commentCreate.message,
+  }),
+  commentMutationRateLimit: createRateLimitMiddleware(commentMutationLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.commentMutation.message,
+  }),
+  commentReportRateLimit: createRateLimitMiddleware(commentReportLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.commentReport.message,
+  }),
   consumeRateLimit,
   createRateLimitMiddleware,
   createRateLimiter,
