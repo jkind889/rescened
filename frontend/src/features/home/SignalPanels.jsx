@@ -70,6 +70,7 @@ export function DispatchList({ reviews }) {
                 const username = review.author?.username || "rescened user";
                 const albumId = getAlbumId(review);
                 const likeCount = Number(review.likeCount) || 0;
+                const commentCount = Number(review.commentCount) || 0;
 
                 return (
                     <article className="signal-dispatch" key={review.reviewId}>
@@ -83,6 +84,7 @@ export function DispatchList({ reviews }) {
                                     : <span>{username}</span>}
                                 <span>{formatRating(review.rating)}/5</span>
                                 <span>{likeCount} {likeCount === 1 ? "like" : "likes"}</span>
+                                {review.reviewId && <Link to={`/review/${review.reviewId}#comments`}>{commentCount} {commentCount === 1 ? "comment" : "comments"}</Link>}
                             </p>
                             <h3>
                                 <Link to={`/album/${albumId}`}>{review.title || "Untitled album"}</Link>

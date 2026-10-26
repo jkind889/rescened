@@ -14,6 +14,7 @@ import AsyncState from "../Components/Loading/AsyncState";
 import BoardPreview from "../Components/BoardPreview";
 import LastfmConnectionPanel from "../Components/LastfmConnectionPanel.jsx";
 import ShareButton from "../Components/ShareButton";
+import CommentCountLink from "../features/comments/CommentCountLink";
 import DiaryCalendar from "../features/diary/DiaryCalendar";
 import ProfileRankings from "../features/rankings/ProfileRankings";
 import ProfileStats from "../features/stats/ProfileStats";
@@ -1017,6 +1018,7 @@ export function Account() {
                       message={likeMessage}
                       onToggle={() => toggleReviewLike(activity)}
                     />
+                    <CommentCountLink reviewId={activity.reviewId} count={activity.commentCount} />
                   </div>
                 )}
               </div>
@@ -1149,6 +1151,7 @@ export function Account() {
             message={likeMessage}
             onToggle={() => toggleReviewLike(review)}
           />
+          <CommentCountLink reviewId={review.reviewId} count={review.commentCount} />
         </div>
         {canManageProfile && (
           <button

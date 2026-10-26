@@ -1,5 +1,19 @@
 [
   {
+    "id": "review-comments",
+    "date": "2026-10-25",
+    "title": "Talk about reviews",
+    "summary": "Comment on any review and reply to other people's comments, right on the review page.",
+    "changes": [
+      "Open a review to read its comments and add your own. Replies sit under the comment they answer, and replying to a reply names the person you're answering.",
+      "Review cards show how many comments a review has. Click the count to jump to the conversation.",
+      "Edit or delete your own comments. A deleted comment that has replies leaves a placeholder so the conversation still makes sense.",
+      "Get notified when someone comments on your review or replies to you. Both can be turned off in notification settings.",
+      "Report a comment that breaks the rules, and a moderator will review it.",
+      "Comments are public, including on private profiles, and show your name."
+    ]
+  },
+  {
     "id": "ordered-boards",
     "date": "2026-10-23",
     "title": "Put your boards in your own order",

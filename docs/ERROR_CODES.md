@@ -1,6 +1,6 @@
 # Rescened error and status code reference
 
-Last reviewed: 2026-10-23
+Last reviewed: 2026-10-25
 
 This is the central reference for application-defined codes emitted by the Rescened HTTP API, browser client, provider adapters, operator commands, and retained reports. Codes are case-sensitive: for example, `MUSICBRAINZ_HYDRATION_FAILED` and `musicbrainz_hydration_failed` belong to different workflows.
 
@@ -53,6 +53,8 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `POPULAR_REVIEWS_UNAVAILABLE` | `503` | Popular review-history pagination cannot obtain a MongoDB snapshot, snapshot reads are unsupported, or the page exceeds its database time budget. No live-ranking fallback is used. |
 | `DIARY_WRITE_UNAVAILABLE` | `503` | A diary or listen-membership mutation requires MongoDB transactions. No partial fallback writes are attempted. |
 | `BOARD_WRITE_UNAVAILABLE` | `503` | Board saves, album removals, board updates and reorders, deletion, or board pinning require MongoDB transactions. |
+| `COMMENTS_DISABLED` | `503` | Comment create, edit, delete, and report are disabled by `REVIEW_COMMENTS_ENABLED`. Threads stay readable. |
+| `COMMENT_WRITE_UNAVAILABLE` | `503` | A comment create, delete, report, or moderator command requires MongoDB transactions. Nothing is written. |
 
 ### Request validation and lookup
 
@@ -66,7 +68,7 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `INVALID_REVIEW_ID` | `400` | A review lookup or mutation received a malformed or client-supplied public UUID-v4 `reviewId`; Mongo ObjectIds are rejected. |
 | `INVALID_REVIEW_CURSOR` | `400` | A review-list pagination cursor could not be decrypted, does not match its list/sort or supported version, or refers to an expired popular-ranking snapshot. Reload the list from its first page. |
 | `INVALID_REVIEW_SORT` | `400` | A review list requested a sort other than `recent`, `popular`, `highest`, or `lowest`. |
-| `INVALID_IDEMPOTENCY_KEY` | `400` | A review or diary creation request omitted or supplied a malformed UUID-v4 `Idempotency-Key`. |
+| `INVALID_IDEMPOTENCY_KEY` | `400` | A review, review comment, or diary creation request omitted or supplied a malformed UUID-v4 `Idempotency-Key`. |
 | `INVALID_DIARY_REQUEST` | `400` | A diary/board mutation contains unsupported fields, a board update supplies no title, description, or order setting, or a diary filter, limit, calendar month (`YYYY-MM`), or board list is invalid. |
 | `INVALID_LISTEN_ID` | `400` | A listen identifier is not a public UUID-v4. |
 | `INVALID_ALBUM_ID` | `400` | A diary album identifier is not a public UUID-v4. |
@@ -81,7 +83,7 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `LISTEN_DELETED` | `409` | A creation retry refers to a listen that was subsequently deleted; the retained receipt prevents resurrection. |
 | `DIARY_REQUEST_FAILED` | `500` | An unexpected diary route failure; internal database details are not exposed. |
 | `INVALID_PINNED_REVIEW` | `400` | A requested pinned review is malformed or is not owned by the profile being updated. |
-| `REVIEW_NOT_FOUND` | `404` | A review lookup or review-like request targeted a review that no longer exists. |
+| `REVIEW_NOT_FOUND` | `404` | A review lookup, review-like, or comment request targeted a review that no longer exists or is hidden because its album no longer resolves. |
 | `SUGGESTION_NOT_FOUND` | `404` | A moderator-visible submission does not exist. Contributor detail and mutation routes currently preserve a code-less `404` to conceal ownership. |
 | `CATALOG_TARGET_NOT_FOUND` | `404` | A new correction references a public catalog album that does not exist. |
 | `CATALOG_ALBUM_NOT_FOUND` | `409` | An approval command supplies an `albumId` that does not resolve to a usable catalog album. |
@@ -152,6 +154,19 @@ At approval, `GENRE_RETIRED` and `GENRE_NOT_FOUND` are `409`: an added genre was
 
 Invalid genre suggestion bodies use `INVALID_SUBMISSION`, and missing albums use `CATALOG_TARGET_NOT_FOUND`, as for corrections. Marking a genre suggestion as a duplicate returns `400 INVALID_MODERATION_REQUEST`.
 
+### Review comments
+
+Comment mutations require Clerk authentication and `REVIEW_COMMENTS_ENABLED=true`. Create, edit and delete, and report each have their own limit (see below). Malformed review IDs return `400 INVALID_REVIEW_ID`, and a missing or hidden review returns `404 REVIEW_NOT_FOUND`. See [the review comments guide](REVIEW_COMMENTS.md).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `INVALID_COMMENT_REQUEST` | `400` | The body has an unknown or client-owned field, the text is empty or over 500 characters after normalization, a report reason is unknown or its note is over 300 characters, or a moderator command has no `reason`. |
+| `INVALID_COMMENT_ID` | `400` | A `commentId` or `parentCommentId` is not a UUID v4. |
+| `INVALID_COMMENT_CURSOR` | `400` | A thread or reply page cursor is malformed. Reload from the first page. |
+| `COMMENT_FORBIDDEN` | `403` | Editing or deleting someone else's comment (review authors included), or reporting your own. |
+| `COMMENT_NOT_FOUND` | `404` | The comment does not exist, or the comment being replied to or reported is no longer visible or belongs to another review. |
+| `COMMENT_STATE_CONFLICT` | `409` | Editing or deleting a comment a moderator removed, removing a comment that is no longer visible, or dismissing a comment with no open reports. Reload before retrying. |
+
 ### Notifications
 
 | Code | Status | Meaning |
@@ -212,7 +227,10 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Suggestion create | `POST /suggestions`, `POST /suggestions/corrections` | authenticated user | 6 attempts per 10 minutes |
 | Suggestion mutation | `POST /suggestions/:submissionId/revise`, `POST /suggestions/:submissionId/withdraw` | authenticated user | 20 attempts per 10 minutes |
 | Genre suggestion | `POST /suggestions/genres` | authenticated user | 20 attempts per hour |
-| Moderation mutation | Request-changes, reject, duplicate, and approve commands, and genre vocabulary commands | authenticated moderator | 120 attempts per 10 minutes |
+| Moderation mutation | Request-changes, reject, duplicate, and approve commands, genre vocabulary commands, and comment remove and dismiss | authenticated moderator | 120 attempts per 10 minutes |
+| Comment create | `POST /reviews/review/:reviewId/comments` | authenticated user | 20 attempts per 10 minutes |
+| Comment mutation | `PATCH` and `DELETE /reviews/comments/:commentId` | authenticated user | 60 attempts per 10 minutes |
+| Comment report | `POST /reviews/comments/:commentId/report` | authenticated user | 10 attempts per 10 minutes |
 | Notification mutation | `POST /notifications/read`, `POST /notifications/clear`, `PATCH /profile/me/notification-preferences` | authenticated user | 60 attempts per 10 minutes |
 
 The current implementation uses in-process memory. Counters reset on restart and are not shared between workers or instances. `TRUST_PROXY_HOPS` must match the real proxy chain so IP keys are neither collapsed onto the proxy nor client-spoofable. Unexpected limiter infrastructure errors currently log and fail open; ordinary exhausted buckets fail closed with `429 RATE_LIMITED`.

@@ -12,6 +12,7 @@ const roots = [
   "lib/listening",
   "lib/baselines",
   "lib/genres",
+  "lib/reviewComments",
   "scripts/lastfmStudy.js",
   "scripts/listeningWorker.js",
   "scripts/listeningMappingSeeds.js",

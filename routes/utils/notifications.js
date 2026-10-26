@@ -6,15 +6,18 @@ const BoardListen = require("../../models/BoardListen");
 const Follow = require("../../models/Follow");
 const Notification = require("../../models/Notification");
 const Review = require("../../models/Reviews");
+const ReviewComment = require("../../models/ReviewComment");
 const UserProfile = require("../../models/UserProfile");
 const { normalizeCatalogAlbum } = require("./albumCatalog");
 const { liveMembershipStages } = require("./boardLibrary");
+const { excerpt } = require("../../lib/reviewComments/common");
 
 const { MODERATION_ACTOR_ID } = Notification;
-const MUTABLE_TYPES = Object.freeze(["review_like", "follow", "followed_review"]);
+const MUTABLE_TYPES = Object.freeze(["review_like", "follow", "followed_review", "review_comment", "comment_reply"]);
 // Contributors must always learn when a suggestion needs changes.
 const LOCKED_TYPES = Object.freeze(["suggestion_status"]);
-const REVIEW_TYPES = Object.freeze(["review_like", "followed_review"]);
+const COMMENT_TYPES = Object.freeze(Notification.COMMENT_NOTIFICATION_TYPES);
+const REVIEW_TYPES = Object.freeze(["review_like", "followed_review", ...COMMENT_TYPES]);
 const PAGE_SIZE = 30;
 const MAX_IDS_PER_REQUEST = 100;
 // Bound both writes and eligibility work in the creation request. Move fan-out
@@ -132,6 +135,52 @@ async function recordSuggestionStatus({ submission, status, actorUserId, session
     { upsert: true, session },
   );
   return true;
+}
+
+// Anonymized authors and the moderation actor are never recipients.
+function isServerOnlyUser(userId) {
+  return Review.isDeletedAuthor(userId) || userId === ReviewComment.DELETED_AUTHOR_ID || userId === MODERATION_ACTOR_ID;
+}
+
+// Runs inside the comment creation transaction. A top-level comment notifies
+// the review's author; a reply notifies the thread's top-level author and, when
+// it answers a reply, that reply's author. Nobody is notified about their own
+// comment, and deleted authors or tombstoned threads are never recipients.
+async function recordCommentNotifications({ comment, review, thread, session }) {
+  if (!session) throw new Error("Comment notifications require a transaction session");
+  const source = plain(comment);
+  const actorUserId = source.userId;
+  const targets = new Map();
+  const add = (recipientUserId, type) => {
+    if (!recipientUserId || recipientUserId === actorUserId || isServerOnlyUser(recipientUserId)) return;
+    if (!targets.has(recipientUserId)) targets.set(recipientUserId, type);
+  };
+  if (!source.parentCommentId) add(plain(review)?.userId, "review_comment");
+  else {
+    const top = plain(thread);
+    if (top?.status === "visible") add(top.userId, "comment_reply");
+    add(source.replyToUserId, "comment_reply");
+  }
+  if (!targets.size) return 0;
+  const recipients = [...targets.keys()];
+  const muted = new Set();
+  for (const type of new Set(targets.values())) {
+    const ids = recipients.filter((id) => targets.get(id) === type);
+    (await mutedUserIds(ids, type, session)).forEach((id) => muted.add(id));
+  }
+  const rows = recipients.filter((id) => !muted.has(id));
+  if (!rows.length) return 0;
+  await Notification.bulkWrite(rows.map((recipientUserId) => {
+    const key = { recipientUserId, commentId: source._id, type: targets.get(recipientUserId) };
+    return {
+      updateOne: {
+        filter: key,
+        update: { $setOnInsert: { ...key, actorUserId, reviewId: source.reviewId, notificationId: crypto.randomUUID() } },
+        upsert: true,
+      },
+    };
+  }), { session });
+  return rows.length;
 }
 
 // Keeps followers in follow order (most recent first) and stops adding at the
@@ -281,6 +330,17 @@ async function reviewSubjects(rows) {
   }));
 }
 
+// The excerpt disappears once a comment is deleted or removed.
+async function commentSubjects(rows) {
+  const ids = [...new Set(rows.filter((row) => COMMENT_TYPES.includes(row.type)).map((row) => idKey(row.commentId)).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const comments = await ReviewComment.find({ _id: { $in: ids } }, { commentId: 1, status: 1, body: 1 }).lean();
+  return new Map(comments.map((comment) => [idKey(comment), {
+    commentId: comment.commentId,
+    excerpt: comment.status === "visible" ? excerpt(comment.body) : "",
+  }]));
+}
+
 async function suggestionSubjects(rows) {
   const ids = [...new Set(rows.filter((row) => row.type === "suggestion_status").map((row) => idKey(row.submissionId)).filter(Boolean))];
   if (!ids.length) return new Map();
@@ -299,7 +359,12 @@ async function suggestionSubjects(rows) {
   }));
 }
 
-function subjectFor(row, reviews, suggestions) {
+function subjectFor(row, reviews, suggestions, comments) {
+  if (COMMENT_TYPES.includes(row.type)) {
+    const review = reviews.get(idKey(row.reviewId));
+    const comment = comments.get(idKey(row.commentId));
+    return review && comment ? { ...review, comment } : null;
+  }
   if (REVIEW_TYPES.includes(row.type)) return reviews.get(idKey(row.reviewId)) || null;
   if (row.type === "suggestion_status") {
     const suggestion = suggestions.get(idKey(row.submissionId));
@@ -310,10 +375,10 @@ function subjectFor(row, reviews, suggestions) {
 
 // actors maps Clerk user IDs to { userId, username, imageUrl }.
 async function serializeNotifications(rows, actors) {
-  const [reviews, suggestions] = await Promise.all([reviewSubjects(rows), suggestionSubjects(rows)]);
+  const [reviews, suggestions, comments] = await Promise.all([reviewSubjects(rows), suggestionSubjects(rows), commentSubjects(rows)]);
   return rows.map((row) => {
     const isSystem = row.actorUserId === MODERATION_ACTOR_ID;
-    const subject = subjectFor(row, reviews, suggestions);
+    const subject = subjectFor(row, reviews, suggestions, comments);
     const review = REVIEW_TYPES.includes(row.type) && subject ? subject : null;
     return {
       notificationId: persistedNotificationId(row),
@@ -391,6 +456,7 @@ module.exports = {
   persistedNotificationId,
   readPage,
   recordFollow,
+  recordCommentNotifications,
   recordReviewLike,
   recordSuggestionStatus,
   serializeNotifications,

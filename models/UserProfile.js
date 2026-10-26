@@ -29,6 +29,8 @@ const notificationPreferencesSchema = new mongoose.Schema(
     review_like: { type: Boolean, default: true },
     follow: { type: Boolean, default: true },
     followed_review: { type: Boolean, default: true },
+    review_comment: { type: Boolean, default: true },
+    comment_reply: { type: Boolean, default: true },
   },
   { _id: false },
 );

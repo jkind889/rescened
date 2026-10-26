@@ -38,6 +38,7 @@ function stubAccountModels(calls, { failOn } = {}) {
     Board: "../models/Board", BoardItem: "../models/BoardItem", BoardListen: "../models/BoardListen", Follow: "../models/Follow",
     Like: "../models/Like", Listen: "../models/Listen", ListenCreation: "../models/ListenCreation",
     Notification: "../models/Notification", Review: "../models/Reviews", TrackRanking: "../models/TrackRanking", UserProfile: "../models/UserProfile",
+    CommentReport: "../models/CommentReport", ReviewComment: "../models/ReviewComment",
   };
   const restores = [];
   for (const [name, path] of Object.entries(names)) {
@@ -53,10 +54,24 @@ function stubAccountModels(calls, { failOn } = {}) {
       };
     }
   }
+  const AccountFence = require("../models/AccountFence");
+  const originalFence = AccountFence.findOneAndUpdate;
+  restores.push(() => { AccountFence.findOneAndUpdate = originalFence; });
+  AccountFence.findOneAndUpdate = async (filter, update, options) => {
+    calls.push(["AccountFence.findOneAndUpdate", filter, Boolean(options?.session)]);
+    return { deleted: true };
+  };
   const Board = require(names.Board);
   const originalDistinct = Board.distinct;
   restores.push(() => { Board.distinct = originalDistinct; });
   Board.distinct = () => ({ session: async (session) => { calls.push(["Board.distinct", Boolean(session)]); return ["board-1"]; } });
+  const ReviewComment = require(names.ReviewComment);
+  const originalCommentFind = ReviewComment.find;
+  restores.push(() => { ReviewComment.find = originalCommentFind; });
+  ReviewComment.find = (filter, projection, options) => {
+    calls.push(["ReviewComment.find", filter, Boolean(options?.session)]);
+    return { lean: async () => [] };
+  };
   return () => restores.forEach((restore) => restore());
 }
 
@@ -278,6 +293,7 @@ test("Clerk user deletion webhook rejects unsigned requests and accepts a valid 
     const user = "user_deleted";
     const userOrBoard = { $or: [{ userId: user }, { boardId: { $in: ["board-1"] } }] };
     assert.deepEqual(accountCalls, [
+      ["AccountFence.findOneAndUpdate", { _id: require("../lib/accountFence").accountKey(user) }, true],
       ["Board.distinct", true],
       ["BoardListen.deleteMany", userOrBoard, true],
       ["Listen.deleteMany", { userId: user }, true],
@@ -287,6 +303,9 @@ test("Clerk user deletion webhook rejects unsigned requests and accepts a valid 
       ["Board.deleteMany", { userId: user }, true],
       ["Like.deleteMany", { userId: user }, true],
       ["TrackRanking.deleteMany", { userId: user }, true],
+      ["CommentReport.deleteMany", { reporterUserId: user }, true],
+      ["ReviewComment.updateMany", { replyToUserId: user }, true],
+      ["ReviewComment.find", { userId: user }, true],
       ["Follow.deleteMany", { $or: [{ followerId: user }, { followingId: user }] }, true],
       ["Notification.deleteMany", { $or: [{ recipientUserId: user }, { actorUserId: user }] }, true],
       ["UserProfile.deleteOne", { userId: user }, true],
@@ -319,7 +338,7 @@ test("account cleanup aborts and reports unavailable when an account-data write 
       connections.cleanupUserData("user_deleted", { sessionFactory: () => session }),
       (error) => error.status === 503 && error.code === "LASTFM_CLEANUP_UNAVAILABLE",
     );
-    assert.deepEqual(calls.map(([name]) => name), ["Board.distinct", "BoardListen.deleteMany", "Listen.deleteMany"]);
+    assert.deepEqual(calls.map(([name]) => name), ["AccountFence.findOneAndUpdate", "Board.distinct", "BoardListen.deleteMany", "Listen.deleteMany"]);
     assert.equal(session.committed, false);
     assert.equal(session.aborted, true);
   } finally {

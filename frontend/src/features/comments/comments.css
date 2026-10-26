@@ -1,0 +1,364 @@
+/* Review comment threads and the comment count on review cards. */
+.review-comments {
+  display: grid;
+  gap: 1rem;
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--app-line);
+  scroll-margin-top: 5rem;
+}
+
+.review-comments h2 {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.review-comments h2 span {
+  color: var(--app-muted);
+  font-size: 0.9rem;
+  font-weight: 400;
+}
+
+.review-comment-list,
+.review-comment-replies {
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review-comment-replies {
+  margin: 0.85rem 0 0 2.75rem;
+  padding-left: 1rem;
+  border-left: 1px solid var(--app-line);
+}
+
+.review-comment {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  gap: 0.75rem;
+  scroll-margin-top: 5rem;
+}
+
+.review-comment:target .review-comment-main {
+  outline: 1px solid var(--app-accent);
+  outline-offset: 0.35rem;
+}
+
+.review-comment-avatar {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--app-line);
+  background: var(--app-surface);
+  color: var(--app-muted);
+  font-size: 0.8rem;
+  object-fit: cover;
+}
+
+.review-comment-main {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.review-comment-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: baseline;
+  margin: 0;
+  color: var(--app-muted);
+  font-size: 0.78rem;
+}
+
+.review-comment-meta a,
+.review-comment-meta > span:first-child {
+  color: var(--app-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.review-comment-meta a:hover {
+  color: var(--app-accent);
+}
+
+.review-comment-body {
+  margin: 0;
+  color: var(--app-text);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.review-comment-body a {
+  color: var(--app-accent);
+}
+
+.review-comment-mention {
+  color: var(--app-muted);
+}
+
+.review-comment-tombstone {
+  display: block;
+}
+
+.review-comment-tombstone p {
+  margin: 0;
+  color: var(--app-muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.review-comment-actions,
+.review-comment-composer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  align-items: center;
+}
+
+.review-comment-composer-actions {
+  justify-content: flex-end;
+}
+
+.review-comment-link {
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--app-muted);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.review-comment-link:hover:not(:disabled) {
+  color: var(--app-text);
+}
+
+.review-comment-link:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.review-comment-composer,
+.review-comment-report {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.review-comment-composer textarea,
+.review-comment-report textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--app-line);
+  border-radius: 0;
+  background: var(--app-bg);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 0.92rem;
+  resize: vertical;
+}
+
+.review-comment-composer textarea:focus,
+.review-comment-report textarea:focus {
+  border-color: var(--app-accent);
+  outline: none;
+}
+
+.review-comment-submit,
+.review-comment-more {
+  min-height: 34px;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--app-text);
+  border-radius: 0;
+  background: var(--app-text);
+  color: var(--app-bg);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  justify-self: start;
+}
+
+.review-comment-more {
+  border-color: var(--app-line);
+  background: var(--app-bg);
+  color: var(--app-text);
+}
+
+.review-comment-submit:disabled,
+.review-comment-more:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.review-comment-report fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 0.85rem;
+}
+
+.review-comment-report legend {
+  margin-bottom: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.review-comment-report label {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.review-comment-note,
+.review-comment-count,
+.review-comment-status {
+  margin: 0;
+  color: var(--app-muted);
+  font-size: 0.78rem;
+}
+
+.review-comment-error {
+  margin: 0;
+  color: var(--app-danger);
+  font-size: 0.82rem;
+}
+
+/* Comment count on review cards, sized like the like button beside it. */
+.review-comment-count-link {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  min-height: 34px;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--app-line);
+  background: var(--app-bg);
+  color: var(--app-muted);
+  font-size: 0.92rem;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+  transition: border-color 160ms ease, color 160ms ease;
+}
+
+.review-comment-count-link svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.review-comment-count-link:hover {
+  border-color: var(--app-accent);
+  color: var(--app-text);
+}
+
+@media (max-width: 640px) {
+  /* The stacked mobile header is taller. */
+  .review-comments,
+  .review-comment {
+    scroll-margin-top: 12rem;
+  }
+
+  .review-comment-replies {
+    margin-left: 1rem;
+    padding-left: 0.75rem;
+  }
+}
+
+/* Moderator comment report queue. */
+.comment-reports-page .community-page-title span {
+  color: var(--app-muted);
+  font-size: 0.6em;
+}
+
+.comment-report-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.comment-report-item {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem;
+}
+
+.comment-report-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: baseline;
+  color: var(--app-muted);
+  font-size: 0.8rem;
+}
+
+.comment-report-context a {
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+.comment-report-comment {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  border-left: 2px solid var(--app-danger);
+  background: var(--app-surface);
+}
+
+.comment-report-reports summary {
+  color: var(--app-text);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.comment-report-reports ul {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82rem;
+}
+
+.comment-report-reports li {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.comment-report-reports li span {
+  color: var(--app-muted);
+}
+
+.comment-report-reports li p {
+  margin: 0;
+  white-space: pre-line;
+}
+
+.comment-report-decision {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.comment-report-decision textarea {
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--app-line);
+  border-radius: 0;
+  background: var(--app-bg);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 0.9rem;
+  resize: vertical;
+}

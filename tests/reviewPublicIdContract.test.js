@@ -8,6 +8,7 @@ const Follow = require("../models/Follow");
 const Like = require("../models/Like");
 const Notification = require("../models/Notification");
 const Review = require("../models/Reviews");
+const ReviewComment = require("../models/ReviewComment");
 const Listen = require("../models/Listen");
 const TrackRanking = require("../models/TrackRanking");
 const UserProfile = require("../models/UserProfile");
@@ -117,6 +118,7 @@ test("review edits resolve UUIDs and serialize only the public review identifier
   });
   t.mock.method(AlbumCatalog, "find", async () => [album]);
   t.mock.method(Like, "find", async () => []);
+  t.mock.method(ReviewComment, "aggregate", async () => []);
   const router = loadRoute(t, reviewRoutePath);
 
   const response = await invokeLastHandler(router, "/review/user/:id", "patch", {
@@ -219,6 +221,42 @@ test("a dangling notification review reference remains empty instead of exposing
   assert.equal(JSON.stringify(result).includes(String(internalReviewId)), false);
 });
 
+test("comment notifications expose the public comment ID and an excerpt, never Mongo IDs", async (t) => {
+  const album = catalogAlbum();
+  const internalReviewId = new mongoose.Types.ObjectId();
+  const internalCommentId = new mongoose.Types.ObjectId();
+  const COMMENT_ID = "33333333-3333-4333-8333-333333333333";
+  const rows = ["visible", "removed_by_moderator"].map((status, index) => ({
+    _id: new mongoose.Types.ObjectId(),
+    notificationId: index ? "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" : NOTIFICATION_ID,
+    recipientUserId: "owner",
+    actorUserId: "actor",
+    type: index ? "comment_reply" : "review_comment",
+    reviewId: internalReviewId,
+    commentId: index ? new mongoose.Types.ObjectId() : internalCommentId,
+    readAt: null,
+    createdAt: new Date("2026-10-06T12:00:00.000Z"),
+    status,
+  }));
+  const comments = rows.map((row, index) => ({ _id: row.commentId, commentId: index ? "cccccccc-cccc-4ccc-8ccc-cccccccccccc" : COMMENT_ID, status: row.status, body: `${"word ".repeat(40)}end` }));
+  t.mock.method(Notification, "find", () => ({ sort() { return this; }, limit() { return this; }, lean: async () => rows }));
+  t.mock.method(Review, "find", () => ({ lean: async () => [{ _id: internalReviewId, reviewId: REVIEW_ID, albumCatalogId: album._id, rating: 4 }] }));
+  t.mock.method(ReviewComment, "find", () => ({ lean: async () => comments }));
+  t.mock.method(AlbumCatalog, "find", async () => [album]);
+  const router = loadRoute(t, notificationRoutePath);
+
+  const response = await invokeLastHandler(router, "/", "get", { userId: "owner", query: { markRead: "false" } });
+  const [commented, replied] = response.body.notifications;
+  assert.equal(commented.subject.review.reviewId, REVIEW_ID);
+  assert.equal(commented.subject.album.albumId, album.albumId);
+  assert.equal(commented.subject.comment.commentId, COMMENT_ID);
+  assert.ok(commented.subject.comment.excerpt.length <= 140);
+  assert.ok(commented.subject.comment.excerpt.endsWith("…"));
+  assert.equal(replied.subject.comment.excerpt, "", "a removed comment loses its excerpt");
+  const serialized = JSON.stringify(response.body);
+  for (const id of [internalReviewId, internalCommentId, rows[1].commentId]) assert.equal(serialized.includes(String(id)), false);
+});
+
 test("profile pins resolve public review IDs before storing the internal relationship", async (t) => {
   const realInteractions = require(reviewInteractionsPath);
   const internalReviewId = new mongoose.Types.ObjectId();
@@ -303,6 +341,7 @@ test("profile review activity uses the public review ID for both activity identi
   t.mock.method(BoardItem, "find", () => chainQuery([]));
   t.mock.method(Listen, "aggregate", async () => []);
   t.mock.method(TrackRanking, "aggregate", async () => []);
+  t.mock.method(ReviewComment, "aggregate", async () => [{ _id: internalReviewId, count: 6 }]);
   const router = loadRoute(t, profileRoutePath);
 
   const response = await invokeLastHandler(router, "/me/activity", "get", { userId: "owner" });
@@ -310,6 +349,7 @@ test("profile review activity uses the public review ID for both activity identi
   assert.equal(response.status, 200);
   assert.equal(activity.id, REVIEW_ID);
   assert.equal(activity.reviewId, REVIEW_ID);
+  assert.equal(activity.commentCount, 6);
   assert.equal(Object.hasOwn(activity, "_id"), false);
   assert.equal(JSON.stringify(activity).includes(String(internalReviewId)), false);
 });
@@ -331,6 +371,7 @@ test("review permalinks resolve a public UUID and hide reviews whose album no lo
   const findOne = t.mock.method(Review, "findOne", async (value) => { filter = value; return value.reviewId === REVIEW_ID ? review : null; });
   t.mock.method(AlbumCatalog, "find", async () => catalogRows);
   t.mock.method(Like, "find", async () => []);
+  t.mock.method(ReviewComment, "aggregate", async () => []);
   const router = loadRoute(t, reviewRoutePath);
 
   const found = await invokeLastHandler(router, "/review/:reviewId", "get", { params: { reviewId: REVIEW_ID.toUpperCase() } });
@@ -382,6 +423,7 @@ test("rating-sorted review pages query in rating order and continue from the las
   });
   t.mock.method(AlbumCatalog, "find", async () => [album]);
   t.mock.method(Like, "find", async () => []);
+  t.mock.method(ReviewComment, "aggregate", async () => []);
   const router = loadRoute(t, reviewRoutePath);
 
   const first = await invokeLastHandler(router, "/review/user/:userId", "get", { params: { userId: "author" }, query: { sort: "highest", limit: "2" } });

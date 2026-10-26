@@ -427,6 +427,18 @@ When changing moderator behavior:
 12. Update backend tests, integration tests, frontend error handling, the Phase 2 contract, and this guide together.
 13. Run the catalog contract guard for approval, identity, provider, or album-bearing changes.
 
+## Comment reports
+
+Reported review comments have their own desk at `/moderation/comment-reports`, linked from the suggestion queue. It uses the same checks as every moderator route: Clerk sign-in, `MODERATOR_USER_IDS`, and, for commands, `COMMUNITY_MODERATION_ENABLED` plus the moderation-mutation limit. The queue read ignores the flag.
+
+1. Open the queue. Items are visible comments with open reports, most reported first, then oldest report. Each shows the comment, its review and album, reason counts, and the individual reports with any notes. Open the album link to read the comment in its thread.
+2. Write a reason. Both actions require one, and it is stored in the append-only `CommentModerationEvent` log.
+3. **Remove comment** hides it for everyone (it shows as "Removed by a moderator" when it has replies), closes its open reports as `actioned`, and deletes its notifications. There is no restore command yet, so the page asks for confirmation.
+4. **Dismiss reports** closes the open reports as `dismissed` and leaves the comment up. A reporter cannot report the same comment again.
+5. A `409 COMMENT_STATE_CONFLICT` means someone else already handled it or the author deleted it; the page reloads the queue.
+
+Reports never hide a comment on their own, and reporters are visible only to moderators. The contract is in [the review comments guide](./REVIEW_COMMENTS.md).
+
 ## Current backend state and rollout gaps
 
 | Capability | Current state |
@@ -436,4 +448,5 @@ When changing moderator behavior:
 | Transactional create approval | Implemented |
 | Link-only approval to existing `albumId` | Implemented |
 | Transactional selected-field correction | Backend and contributor/moderator UI implemented under [Moderator-approved catalog corrections](./PHASE_2_SUBMISSIONS.md#moderator-approved-catalog-corrections); reviewed existing-row reconciliation and correction-specific integration proof are implemented |
+| Comment report queue, remove, and dismiss | Implemented under [review comments](./REVIEW_COMMENTS.md); restore is reserved but not implemented |
 | Public approved-submission feed | Backend `GET /suggestions/approved`, minimal serializer, reconciliation command, and `/community/approved` page implemented |

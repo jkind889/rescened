@@ -1,6 +1,6 @@
 # Notifications
 
-Signed-in users get notifications when someone likes their review, follows them, reviews an album on one of their boards, or when a moderator decides on their suggestion. Each user can mute every type except suggestion updates. The logic lives in `routes/utils/notifications.js`; the routes are `routes/notifications.js` and the preference routes in `routes/profile.js`.
+Signed-in users get notifications when someone likes their review, follows them, reviews an album on one of their boards, comments on their review or replies to their comment, or when a moderator decides on their suggestion. Each user can mute every type except suggestion updates. The logic lives in `routes/utils/notifications.js`; the routes are `routes/notifications.js` and the preference routes in `routes/profile.js`.
 
 ## Types
 
@@ -10,8 +10,10 @@ Signed-in users get notifications when someone likes their review, follows them,
 | `follow` | The followed user | Someone follows them. An idempotent upsert after the follow write. | The follower | `(recipient, actor)` |
 | `suggestion_status` | The contributor | A moderator requests changes, rejects, marks duplicate, or approves their suggestion (new album, correction, or genre suggestion). | `rescened:moderation`, never the moderator | `(recipient, submission, revision, status)` |
 | `followed_review` | Each follower of the reviewer who has the album on one of their boards | A new review is created. | The reviewer | `(recipient, review)` |
+| `review_comment` | The review's author | Someone posts a top-level comment on their review. Written inside the comment creation transaction. | The commenter | `(recipient, comment, type)` |
+| `comment_reply` | The thread's top-level author, and the author of the reply being answered | Someone replies in their thread or answers their reply. Same transaction. | The replier | `(recipient, comment, type)` |
 
-Each key is a partial unique index on `Notification`. Followed-review delivery also records a private receipt on the review, so clearing notifications cannot make a creation retry deliver again. No one is notified about their own action; a moderator acting on their own suggestion is not notified either.
+Each key is a partial unique index on `Notification`. Followed-review delivery also records a private receipt on the review, so clearing notifications cannot make a creation retry deliver again. No one is notified about their own action; a moderator acting on their own suggestion is not notified either. A thread whose top-level comment was deleted or removed no longer notifies that author. See [review comments](REVIEW_COMMENTS.md).
 
 ### Suggestion updates
 
@@ -29,7 +31,7 @@ After `POST /reviews/review` creates a review, the API fans out to the reviewer'
 
 ## Preferences
 
-`UserProfile.notificationPreferences` holds one boolean per mutable type: `review_like`, `follow`, and `followed_review`. Missing values read as on, so existing profiles need no migration.
+`UserProfile.notificationPreferences` holds one boolean per mutable type: `review_like`, `follow`, `followed_review`, `review_comment`, and `comment_reply`. Missing values read as on, so existing profiles need no migration.
 
 | Method | Path | Body | Behavior |
 | --- | --- | --- | --- |
@@ -77,6 +79,7 @@ Preferences are checked **on write**: a muted type never creates rows, so the un
 | Type | `subject` |
 | --- | --- |
 | `review_like`, `followed_review` | `{ review: { reviewId, rating }, album }`, or `null` if the review is gone |
+| `review_comment`, `comment_reply` | `{ review: { reviewId, rating }, album, comment: { commentId, excerpt } }`, or `null` if the review or comment is gone. `excerpt` is up to 140 characters and empty once the comment is no longer visible. The page links to `/review/:reviewId#comment-:commentId`. |
 | `suggestion_status` | `{ submissionId, submissionType, status, title, albumId? }` |
 | `follow` | `null` |
 
@@ -86,6 +89,7 @@ The Notifications page invalidates pending page loads when clearing or changing 
 
 ## Cleanup
 
+- **Comment deletion and moderator removal** delete that comment's notifications in the same transaction. Review deletion removes them with the review's comments.
 - **Review deletion** removes the review's `review_like` and `followed_review` rows inside its deletion transaction. Fan-out and deletion both claim the same review document. A losing fan-out observes the deletion on retry and writes nothing; a losing deletion retries its cleanup after delivery commits.
 - **Account deletion** removes every row the user sent or received. Reviewer anonymization and fan-out claim the same review document, so concurrent delivery cannot recreate the deleted author’s identity. The moderation actor is never a real account, so it is never matched.
 - A suggestion submitted by an account that was later deleted keeps its `submittedByUserId`, so a later decision can still write a row for that ID. Nothing reads those rows.

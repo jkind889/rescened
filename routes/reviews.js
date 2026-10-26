@@ -23,6 +23,7 @@ const {
 } = require("./utils/reviewPagination");
 const { deleteOwnedReview, assertReviewId, persistedReviewId } = require("./utils/reviewInteractions");
 const { fanOutFollowedReview } = require("./utils/notifications");
+const { commentCounts } = require("../lib/reviewComments/read");
 const {
   reviewCreateRateLimit,
   reviewMutationRateLimit,
@@ -61,7 +62,7 @@ async function serializeReviews(reviews, viewerId) {
   const albums = albumIds.length ? await AlbumCatalog.find({ _id: { $in: albumIds } }) : [];
   const albumMap = new Map(albums.map((album) => [String(album._id), normalizeCatalogAlbum(album)]));
   const authors = await authorMap(sources.map((review) => review.userId).filter((id) => !Review.isDeletedAuthor(id)));
-  const stats = await likeStats(sources, viewerId);
+  const [stats, comments] = await Promise.all([likeStats(sources, viewerId), commentCounts(sources.map((review) => review._id))]);
   return sources.map((review) => ({
     reviewId: persistedReviewId(review),
     userId: Review.isDeletedAuthor(review.userId) ? null : review.userId,
@@ -78,6 +79,7 @@ async function serializeReviews(reviews, viewerId) {
       ? { ...DELETED_AUTHOR }
       : authors.get(review.userId) || { userId: review.userId, username: DEFAULT_AUTHOR, imageUrl: "" },
     ...(stats.get(String(review._id)) || { likeCount: 0, likedByViewer: false }),
+    commentCount: comments.get(String(review._id)) || 0,
   }));
 }
 function rating(body) {

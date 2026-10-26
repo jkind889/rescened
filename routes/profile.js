@@ -20,6 +20,8 @@ const { notificationMutationRateLimit, profileStatsRateLimit, queueMutationRateL
 const { addToQueue, queuePreview, readQueue, removeFromQueue, reorderQueue } = require("./utils/listenQueue");
 const { normalizePreferencesPatch, recordFollow, serializePreferences } = require("./utils/notifications");
 
+const { commentCounts } = require("../lib/reviewComments/read");
+
 const router = express.Router();
 const MAX_FAVORITES = 5;
 const MAX_ACTIVITY = 20;
@@ -130,7 +132,8 @@ async function profileAccess(target, viewerId) { if (!(await followable(target))
 async function activity(userId, includePrivate = false, viewerId = "") {
   const profileAuthors = await authors([userId]); const actor = profileAuthors.get(userId) || author(userId);
   const [reviews, saved, listens, rankings] = await Promise.all([Review.find({ userId }).populate("albumCatalogId").sort({ date: -1 }).limit(MAX_ACTIVITY), getExplicitSavedAlbums(userId), getListenActivity([userId], MAX_ACTIVITY), getRankingActivity([userId], MAX_ACTIVITY)]);
-  const reviewActivities = reviews.map((review) => { const source = plain(review); const reviewId = persistedReviewId(source); const album = source.albumCatalogId ? normalizeCatalogAlbum(source.albumCatalogId) : null; return { id: reviewId, reviewId, type: "review", actor, userId, createdAt: source.date, album, rating: source.rating, reviewText: source.reviewText }; });
+  const comments = await commentCounts(reviews.map((review) => review._id));
+  const reviewActivities = reviews.map((review) => { const source = plain(review); const reviewId = persistedReviewId(source); const album = source.albumCatalogId ? normalizeCatalogAlbum(source.albumCatalogId) : null; return { id: reviewId, reviewId, type: "review", actor, userId, createdAt: source.date, album, rating: source.rating, reviewText: source.reviewText, commentCount: comments.get(String(source._id)) || 0 }; });
   const savedActivities = saved.map((album) => ({ id: `saved-${userId}-${album.albumId}`, type: "saved_album", actor, userId, createdAt: album.savedAt, album }));
   return [...reviewActivities, ...listens.map((listen) => ({ ...listen, actor })), ...rankings.map((ranking) => ({ ...ranking, actor })), ...(includePrivate ? savedActivities : [])].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, MAX_ACTIVITY);
 }
