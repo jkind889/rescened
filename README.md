@@ -2,7 +2,7 @@
 
 Repeatable local API/database performance tests and their interpretation are documented in [the benchmark guide](./benchmarks/README.md).
 
-Rescened is a community-curated album catalog. Albums, reviews, boards, listens, and notifications receive domain-specific immutable UUIDs (`albumId`, `reviewId`, `boardId`, `listenId`, and `notificationId`); MongoDB `_id` values remain internal implementation details. Search, album detail, reviews, likes, profiles, activity, boards, and the diary use the local catalog only.
+Rescened is a community-curated album catalog. Albums, reviews, review comments, boards, listens, and notifications receive domain-specific immutable UUIDs (`albumId`, `reviewId`, `commentId`, `boardId`, `listenId`, and `notificationId`); MongoDB `_id` values remain internal implementation details. Search, album detail, reviews, likes, profiles, activity, boards, and the diary use the local catalog only.
 
 Application, provider, and operator failures are cataloged in the [error and status code reference](./docs/ERROR_CODES.md), including HTTP meanings, rate-limit budgets, report reasons, workflow statuses, and command exit codes.
 
@@ -16,7 +16,7 @@ Set `MONGO_URI`, `CLERK_SECRET_KEY`, and either `CLERK_PUBLISHABLE_KEY` or `VITE
 
 `REVIEW_CURSOR_SECRET` is optional but recommended when review-pagination cursors should be rotated independently of the Clerk secret.
 
-The database is intentionally empty after the generation-2 cutover. Phase 2 includes contributor and moderator APIs: approval creates, links, or applies an explicit field-level correction to a usable local catalog album inside a Mongo transaction. Approval commands and review interaction mutations (deletion, review likes, and pinning) require a transaction-capable MongoDB replica set or sharded deployment; standalone Mongo remains safe for reads and non-publication moderation commands only. Transaction-unavailable mutations return an action-specific `503` code and do not fall back to partial writes.
+The database is intentionally empty after the generation-2 cutover. Phase 2 includes contributor and moderator APIs: approval creates, links, or applies an explicit field-level correction to a usable local catalog album inside a Mongo transaction. Approval commands, review interaction mutations (deletion, review likes, and pinning), and review comment writes require a transaction-capable MongoDB replica set or sharded deployment; standalone Mongo remains safe for reads and non-publication moderation commands only. Transaction-unavailable mutations return an action-specific `503` code and do not fall back to partial writes.
 
 ## Catalog contract
 
@@ -76,7 +76,7 @@ Before a review-ID rollout, audit orphaned review likes, review-like notificatio
 
 `GET /profile/me/network` requires Clerk authentication and returns the newest 20 review and listen activities across everyone the signed-in user follows, ordered by review date or listen creation time descending. Within each event type, internal IDs break timestamp ties; reviews precede listens at identical timestamps. The limit applies to the combined feed, not to each followed account. Self-follow rows, private-profile activity, and events whose catalog album no longer exists are excluded before selecting the feed. Following a private account does not grant access to its activity, even though its reviews remain available through public review surfaces.
 
-Each review item contains `id` and `reviewId` (the same public review UUID), `type: "review"`, `actor` (`userId`, `username`, `imageUrl`), `userId`, `createdAt`, `album`, `rating`, `reviewText`, `likeCount`, and `likedByViewer`. Album links use the public Rescened `album.albumId`; album metadata is resolved from the current catalog. Missing Clerk display details fall back to the existing account ID and a generic display name. Listen items contain `id` and `listenId` (the same public listen UUID), `type: "listen"`, `actor`, `userId`, `createdAt`, `listenedOn`, and `album`. No followed accounts or no visible activities returns `[]`.
+Each review item contains `id` and `reviewId` (the same public review UUID), `type: "review"`, `actor` (`userId`, `username`, `imageUrl`), `userId`, `createdAt`, `album`, `rating`, `reviewText`, `likeCount`, `likedByViewer`, and `commentCount`. Album links use the public Rescened `album.albumId`; album metadata is resolved from the current catalog. Missing Clerk display details fall back to the existing account ID and a generic display name. Listen items contain `id` and `listenId` (the same public listen UUID), `type: "listen"`, `actor`, `userId`, `createdAt`, `listenedOn`, and `album`. No followed accounts or no visible activities returns `[]`.
 
 Network includes reviews and listens, while relationship lists remain at `/profile/me/social`. Listen cards show the listening date separately from the date logged, both in the activity feed and its profile sidebar summary.
 
@@ -88,7 +88,7 @@ Popular history pagination requires MongoDB 5.0+ on a replica set or sharded dep
 
 `highest` and `lowest` order by rating, then newest first among equal ratings, then an internal tie-breaker. Their cursors use their own version and carry the last rating, so a cursor works only with the sort that issued it; any other sort returns `400 INVALID_REVIEW_CURSOR`. Unlike `popular`, they do not freeze a snapshot. A review whose rating is edited between page loads can move across pages. Each sort direction has its own index for album and user lists: `{ albumCatalogId: 1, rating: ±1, date: -1, _id: -1 }` and `{ userId: 1, rating: ±1, date: -1, _id: -1 }`. These are four non-unique indexes, so building them cannot fail on existing data. Build them before the rating sorts receive traffic (Mongoose builds them at startup when index creation is enabled). Without them, every rating-sorted page sorts all of the album's or user's reviews in memory.
 
-`GET /reviews/review/:reviewId` returns one review in the same shape as the list endpoints, for shareable `/review/:reviewId` links. It needs no authentication; signed-in viewers also get `likedByViewer`. A malformed ID or a Mongo ObjectId returns `400 INVALID_REVIEW_ID`. An unknown review, or one whose catalog album no longer resolves, returns `404 REVIEW_NOT_FOUND`. As with the other review surfaces, a review stays public even when its author's profile is private.
+`GET /reviews/review/:reviewId` returns one review in the same shape as the list endpoints, for shareable `/review/:reviewId` links. It needs no authentication; signed-in viewers also get `likedByViewer`. A malformed ID or a Mongo ObjectId returns `400 INVALID_REVIEW_ID`. An unknown review, or one whose catalog album no longer resolves, returns `404 REVIEW_NOT_FOUND`. As with the other review surfaces, a review stays public even when its author's profile is private. Every review response includes `commentCount`, the number of visible comments and replies. Comment threads, their flag, and moderation are described in [review comments](docs/REVIEW_COMMENTS.md).
 
 ## Album social context
 
