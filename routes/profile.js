@@ -20,6 +20,7 @@ const { notificationMutationRateLimit, profileStatsRateLimit, queueMutationRateL
 const { addToQueue, queuePreview, readQueue, removeFromQueue, reorderQueue } = require("./utils/listenQueue");
 const { normalizePreferencesPatch, recordFollow, serializePreferences } = require("./utils/notifications");
 
+const { getCommentActivity, compareActivity } = require("../lib/reviewComments/activity");
 const { commentCounts } = require("../lib/reviewComments/read");
 
 const router = express.Router();
@@ -131,11 +132,11 @@ async function followable(userId) { if (Review.isDeletedAuthor(userId)) return f
 async function profileAccess(target, viewerId) { if (!(await followable(target))) return { status: 404, body: { error: "User not found" } }; const profile = await ensureProfile(target); if (profile.isPrivate && target !== viewerId) return { status: 403, body: PRIVATE_ERROR, profile }; return { status: 200, profile }; }
 async function activity(userId, includePrivate = false, viewerId = "") {
   const profileAuthors = await authors([userId]); const actor = profileAuthors.get(userId) || author(userId);
-  const [reviews, saved, listens, rankings] = await Promise.all([Review.find({ userId }).populate("albumCatalogId").sort({ date: -1 }).limit(MAX_ACTIVITY), getExplicitSavedAlbums(userId), getListenActivity([userId], MAX_ACTIVITY), getRankingActivity([userId], MAX_ACTIVITY)]);
+  const [reviews, saved, listens, rankings, commentActivities] = await Promise.all([Review.find({ userId }).populate("albumCatalogId").sort({ date: -1, _id: -1 }).limit(MAX_ACTIVITY), getExplicitSavedAlbums(userId), getListenActivity([userId], MAX_ACTIVITY), getRankingActivity([userId], MAX_ACTIVITY), getCommentActivity([userId], MAX_ACTIVITY, authors)]);
   const comments = await commentCounts(reviews.map((review) => review._id));
   const reviewActivities = reviews.map((review) => { const source = plain(review); const reviewId = persistedReviewId(source); const album = source.albumCatalogId ? normalizeCatalogAlbum(source.albumCatalogId) : null; return { id: reviewId, reviewId, type: "review", actor, userId, createdAt: source.date, album, rating: source.rating, reviewText: source.reviewText, commentCount: comments.get(String(source._id)) || 0 }; });
   const savedActivities = saved.map((album) => ({ id: `saved-${userId}-${album.albumId}`, type: "saved_album", actor, userId, createdAt: album.savedAt, album }));
-  return [...reviewActivities, ...listens.map((listen) => ({ ...listen, actor })), ...rankings.map((ranking) => ({ ...ranking, actor })), ...(includePrivate ? savedActivities : [])].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, MAX_ACTIVITY);
+  return [...reviewActivities, ...listens.map((listen) => ({ ...listen, actor })), ...rankings.map((ranking) => ({ ...ranking, actor })), ...(includePrivate ? savedActivities : []), ...commentActivities.map((item) => ({ ...item, actor }))].sort(compareActivity).slice(0, MAX_ACTIVITY);
 }
 
 router.get("/me", auth, async (req, res) => { try { const profile = await ensureProfile(req.userId); res.json({ ...(await formatProfile(profile)), ...(await socialStats(req.userId, req.userId)) }); } catch { res.status(500).json({ error: "Failed to fetch profile" }); } });

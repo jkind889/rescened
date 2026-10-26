@@ -413,3 +413,136 @@ integration("creation and duplicate responses supply real totals and existing th
   assert.equal(existingTop.body.replies.length, 3);
   assert.ok(existingTop.body.repliesCursor);
 });
+
+integration("comment activity includes own-review comments, others' reviews and replies without changing notifications or counts", async () => {
+  const userId = `activity_${crypto.randomUUID()}`;
+  const own = await createReview(userId);
+  const other = await createReview(`owner_${crypto.randomUUID()}`);
+  const { comment: ownTop } = await comment(own, userId, "My own review");
+  const { comment: otherTop } = await comment(other, userId, "Another review");
+  const { comment: reply } = await comment(own, userId, "My reply", ownTop.commentId);
+  const { comment: nested } = await comment(own, userId, "Answering a reply", reply.commentId);
+  const duplicate = await comment(own, userId, "My own review");
+  assert.equal(duplicate.created, false);
+  const before = await Notification.countDocuments({ actorUserId: userId });
+  const page = await request("GET", "/profile/me/activity", { userId });
+  const rows = page.body.filter((item) => item.commentId);
+  assert.equal(rows.length, 4);
+  assert.equal(new Set(rows.map((item) => item.id)).size, 4);
+  assert.deepEqual(new Set(rows.map((item) => item.commentId)), new Set([ownTop, otherTop, reply, nested].map((row) => row.commentId)));
+  assert.equal(rows.find((item) => item.commentId === ownTop.commentId).reviewAuthor.userId, userId);
+  assert.equal(rows.find((item) => item.commentId === reply.commentId).type, "comment_reply");
+  assert.equal(rows.find((item) => item.commentId === reply.commentId).threadId, ownTop.commentId);
+  assert.equal(page.body.find((item) => item.id === own.reviewId).commentCount, 3);
+  assert.equal(await Notification.countDocuments({ actorUserId: userId }), before);
+  assert.equal(await Notification.countDocuments({ actorUserId: userId, recipientUserId: userId }), 0);
+  for (const row of rows) {
+    assert.equal(row.actor.userId, userId);
+    assert.equal(row.id, `comment:${row.commentId}`);
+    assert.equal(JSON.stringify(row).includes(String(own._id)), false);
+    assert.equal(row.body, undefined);
+  }
+  const publicPage = await request("GET", `/profile/${userId}/activity`);
+  assert.deepEqual(publicPage.body.map((item) => item.id), page.body.map((item) => item.id));
+  const original = rows.find((item) => item.commentId === ownTop.commentId);
+  await editComment({ commentId: ownTop.commentId, userId, body: "Edited " + "😀".repeat(150) });
+  const edited = (await request("GET", "/profile/me/activity", { userId })).body.find((item) => item.id === original.id);
+  assert.equal(edited.createdAt, original.createdAt);
+  assert.equal(Array.from(edited.excerpt).length, 140);
+  assert.ok(edited.excerpt.startsWith("Edited"));
+});
+
+integration("comment feed visibility follows profile and network rules, and the flag hides only comment events", async () => {
+  const Follow = require("../models/Follow");
+  const viewer = `viewer_${crypto.randomUUID()}`;
+  const publicId = `public_${crypto.randomUUID()}`;
+  const privateId = `private_${crypto.randomUUID()}`;
+  const stranger = `stranger_${crypto.randomUUID()}`;
+  const review = await createReview(publicId);
+  await UserProfile.create({ userId: privateId, isPrivate: true });
+  await Follow.create([publicId, privateId, viewer].map((followingId) => ({ followerId: viewer, followingId })));
+  for (const userId of [publicId, privateId, stranger, viewer]) await comment(review, userId, `Post by ${userId}`);
+  const network = await request("GET", "/profile/me/network", { userId: viewer });
+  assert.equal(network.status, 200);
+  assert.deepEqual(network.body.filter((row) => row.commentId).map((row) => row.userId), [publicId]);
+  assert.equal((await request("GET", `/profile/${privateId}/activity`, { userId: viewer })).status, 403);
+  assert.equal((await request("GET", "/profile/me/activity", { userId: privateId })).body.filter((row) => row.commentId).length, 1);
+  // Reviews stay public even when the review author's profile is private.
+  await UserProfile.create({ userId: publicId, isPrivate: true });
+  const own = await request("GET", "/profile/me/activity", { userId: stranger });
+  assert.equal(own.body.filter((row) => row.commentId).length, 1);
+  process.env.REVIEW_COMMENTS_ENABLED = "false";
+  try {
+    assert.equal((await request("GET", "/profile/me/activity", { userId: publicId })).body.some((row) => row.commentId), false);
+    assert.equal((await request("GET", "/profile/me/activity", { userId: publicId })).body.some((row) => row.type === "review"), true);
+    assert.equal((await request("GET", "/profile/me/network", { userId: viewer })).body.some((row) => row.commentId), false);
+  } finally { process.env.REVIEW_COMMENTS_ENABLED = "true"; }
+});
+
+integration("comment activity removes deleted/moderated content and inaccessible targets before limiting", async () => {
+  const { getCommentActivity } = require("../lib/reviewComments/activity");
+  const userId = `lifecycle_${crypto.randomUUID()}`;
+  const review = await createReview();
+  const { comment: top } = await comment(review, userId, "SECRET parent");
+  const replyUser = `reply_${crypto.randomUUID()}`;
+  await comment(review, replyUser, "Surviving reply", top.commentId);
+  await deleteComment({ commentId: top.commentId, userId });
+  const { comment: removed } = await comment(review, userId, "SECRET moderator");
+  await removeComment({ commentId: removed.commentId, actorUserId: "user_mod", reason: "spam" });
+  assert.deepEqual(await getCommentActivity([userId], 20, authors), []);
+  const surviving = await getCommentActivity([replyUser], 20, authors);
+  assert.equal(surviving.length, 1);
+  assert.equal(surviving[0].threadId, top.commentId);
+  assert.equal(JSON.stringify(surviving).includes("SECRET"), false);
+  await Review.updateOne({ _id: review._id }, { $set: { userId: Review.DELETED_AUTHOR_ID } });
+  const anonymized = await getCommentActivity([replyUser], 20, authors);
+  assert.equal(anonymized[0].reviewAuthor.userId, null);
+  assert.equal(JSON.stringify(anonymized).includes(Review.DELETED_AUTHOR_ID), false);
+  const { comment: visible } = await comment(review, userId, "Visible");
+  const missingAlbum = await createReview();
+  await comment(missingAlbum, userId, "SECRET missing album");
+  await AlbumCatalog.deleteOne({ _id: missingAlbum.albumCatalogId });
+  const missingReview = await createReview();
+  await comment(missingReview, userId, "SECRET missing review");
+  await Review.deleteOne({ _id: missingReview._id });
+  assert.deepEqual((await getCommentActivity([userId], 1, authors)).map((row) => row.commentId), [visible.commentId]);
+  const session = await mongoose.startSession();
+  try { await session.withTransaction(() => removeAccountData(userId, session)); } finally { await session.endSession(); }
+  assert.deepEqual(await getCommentActivity([userId], 20, authors), []);
+});
+
+integration("comment activity is repeatable at the newest-20 boundary and focused links preserve pagination", async () => {
+  const { getCommentActivity } = require("../lib/reviewComments/activity");
+  const userId = `paging_${crypto.randomUUID()}`;
+  const review = await createReview();
+  const date = new Date("2026-10-01T00:00:00Z");
+  const tops = await ReviewComment.insertMany(Array.from({ length: 25 }, (_, i) => ({
+    reviewId: review._id, userId, body: `Top ${i}`, createdAt: date,
+    commentId: `10000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+  })));
+  const target = tops.at(-1);
+  const replies = await ReviewComment.insertMany(Array.from({ length: 25 }, (_, i) => ({
+    reviewId: review._id, parentCommentId: target._id, userId, body: `Reply ${i}`, createdAt: date,
+    commentId: `20000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+  })));
+  const events = await getCommentActivity([userId], 20, authors);
+  assert.equal(events.length, 20);
+  assert.deepEqual(events.map((row) => row.commentId), replies.slice(-20).reverse().map((row) => row.commentId));
+  assert.deepEqual(await getCommentActivity([userId], 20, authors), events);
+  const path = `/reviews/review/${review.reviewId}/comments`;
+  const focused = (await request("GET", `${path}?focus=${replies.at(-1).commentId}`)).body;
+  assert.equal(focused.comments.length, 20);
+  assert.equal(focused.focusedThread.commentId, target.commentId);
+  assert.equal(focused.focusedThread.focusedReply.commentId, replies.at(-1).commentId);
+  assert.equal(focused.focusedThread.replies.length, 3);
+  const next = (await request("GET", `${path}?cursor=${focused.nextCursor}`)).body;
+  assert.deepEqual(next.comments.map((row) => row.commentId), tops.slice(20).map((row) => row.commentId));
+  const pageUrl = `${path}/${target.commentId}/replies?cursor=${focused.focusedThread.repliesCursor}`;
+  const page = (await request("GET", pageUrl)).body;
+  assert.equal(page.replies.length, 20);
+  assert.deepEqual((await request("GET", pageUrl)).body, page);
+  const last = (await request("GET", `${path}/${target.commentId}/replies?cursor=${page.nextCursor}`)).body;
+  assert.deepEqual(last.replies.map((row) => row.commentId), replies.slice(23).map((row) => row.commentId));
+  await removeComment({ commentId: replies.at(-1).commentId, actorUserId: "user_mod", reason: "spam" });
+  assert.equal((await request("GET", `${path}?focus=${replies.at(-1).commentId}`)).body.focusedThread, null);
+});

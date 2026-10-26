@@ -123,3 +123,34 @@ test("a lost creation response reconciles a retry even though the server returns
   assert.equal(recovered.comments[0].replyCount, 3);
   assert.equal(addComment(recovered, { commentId: "a3", parentCommentId: "a", status: "visible", commentCount: 5, threadReplyCount: 3 }).commentCount, 5);
 });
+
+test("focused activity targets survive normal thread/reply pagination without duplicates or skipped pages", async () => {
+  const { includeFocusedThread, appendThreadPage, appendReplies } = await helpers;
+  const focusedThread = { commentId: "late", replies: [{ commentId: "r1" }], repliesCursor: "rnext", replyCount: 3,
+    focusedReply: { commentId: "r3" } };
+  const page = includeFocusedThread({ ...sampleThread(), focusedThread });
+  assert.equal(page.nextCursor, "next");
+  assert.equal(page.comments.at(-1).repliesCursor, "rnext");
+  let loaded = appendThreadPage(page, { comments: [{ commentId: "late", replies: [{ commentId: "r1" }] }], nextCursor: null });
+  loaded = appendReplies(loaded, "late", { replies: [{ commentId: "r2" }, { commentId: "r3" }], nextCursor: null });
+  assert.equal(loaded.comments.filter((row) => row.commentId === "late").length, 1);
+  assert.deepEqual(loaded.comments.at(-1).replies.map((row) => row.commentId), ["r1", "r2", "r3"]);
+  const existing = includeFocusedThread({ ...sampleThread(), focusedThread: { ...focusedThread, commentId: "a" } });
+  assert.equal(existing.comments.length, 2);
+  assert.ok(existing.comments[0].replies.some((row) => row.commentId === "r3"));
+});
+
+test("a focused middle thread and reply move into page order without losing loaded context", async () => {
+  const { includeFocusedThread, appendThreadPage, appendReplies } = await helpers;
+  let thread = includeFocusedThread({ commentCount: 10, comments: [{ commentId: "t1", replies: [] }], nextCursor: "t-next",
+    focusedThread: { commentId: "t3", replies: [{ commentId: "r1" }], repliesCursor: "r-next", replyCount: 4,
+      focusedReply: { commentId: "r3" } } });
+  thread = appendReplies(thread, "t3", { replies: [{ commentId: "r2" }, { commentId: "r3" }, { commentId: "r4" }], nextCursor: null });
+  assert.deepEqual(thread.comments[1].replies.map((row) => row.commentId), ["r1", "r2", "r3", "r4"]);
+  const page = { comments: [{ commentId: "t2", replies: [] }, { commentId: "t3", replies: [{ commentId: "r1" }], repliesCursor: "old-preview" }, { commentId: "t4", replies: [] }], nextCursor: null };
+  thread = appendThreadPage(thread, page);
+  assert.deepEqual(thread.comments.map((row) => row.commentId), ["t1", "t2", "t3", "t4"]);
+  assert.deepEqual(thread.comments[2].replies.map((row) => row.commentId), ["r1", "r2", "r3", "r4"]);
+  assert.equal(thread.comments[2].repliesCursor, null);
+  assert.deepEqual(appendThreadPage(thread, page).comments, thread.comments);
+});

@@ -920,6 +920,8 @@ export function Account() {
           const album = activity.album || {};
           const targetUser = activity.targetUser || {};
           const reviewAuthor = activity.reviewAuthor || {};
+          const isComment = activity.type === "review_comment" || activity.type === "comment_reply";
+          const commentPath = `/review/${activity.reviewId}#comment-${activity.commentId}`;
           const actorName = actor.username || "rescened user";
           const actionLabelByType = {
             saved_album: "Saved",
@@ -929,6 +931,8 @@ export function Account() {
             liked_review: "Liked",
             follow: "Followed",
             ranked_album: "Ranked",
+            review_comment: "Commented",
+            comment_reply: "Replied",
           };
           const actionTextByType = {
             saved_album: "saved",
@@ -938,6 +942,8 @@ export function Account() {
             liked_review: "liked a review of",
             follow: "followed",
             ranked_album: "ranked the tracks on",
+            review_comment: "commented on",
+            comment_reply: "replied on",
           };
           const actionLabel = actionLabelByType[activity.type] || "Activity";
           const actionText = actionTextByType[activity.type] || "updated";
@@ -985,8 +991,8 @@ export function Account() {
                       {actorName}
                     </Link>
                     {` ${actionText} `}
-                    <Link to={`/album/${album.albumId}`}>
-                      {album.title || "Untitled album"}
+                    <Link to={isComment ? commentPath : `/album/${album.albumId}`}>
+                      {isComment ? `${reviewAuthorName}’s review of ` : ""}{album.title || "Untitled album"}
                     </Link>
                   </h3>
                 )}
@@ -1008,6 +1014,7 @@ export function Account() {
                     ))}
                   </ol>
                 )}
+                {isComment && <p className="profile-review-copy"><Link to={commentPath}>{activity.excerpt}</Link></p>}
                 {activity.reviewText && <p className="profile-review-copy">{activity.reviewText}</p>}
                 {activity.type === "review" && (
                   <div className="review-card-actions">
@@ -1455,11 +1462,15 @@ export function Account() {
                           liked_review: "Liked",
                           follow: "Followed",
                           ranked_album: "Ranked",
+                          review_comment: "Commented",
+                          comment_reply: "Replied",
                         };
                         const actionLabel = actionLabelByType[activity.type] || "Activity";
                         const activityPath = activity.type === "follow" && targetUser.userId
                           ? `/profile/${encodeURIComponent(targetUser.userId)}`
-                          : `/album/${album.albumId}`;
+                          : activity.type === "review_comment" || activity.type === "comment_reply"
+                            ? `/review/${activity.reviewId}#comment-${activity.commentId}`
+                            : `/album/${album.albumId}`;
 
                         return (
                           <Link

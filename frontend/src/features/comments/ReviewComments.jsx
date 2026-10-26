@@ -13,6 +13,7 @@ import {
   editComment,
   fetchReplies,
   fetchThread,
+  includeFocusedThread,
   linkSegments,
   hasReplyContent,
   postComment,
@@ -221,30 +222,32 @@ export function ReviewComments({ reviewId }) {
   const [loadingReplies, setLoadingReplies] = useState("");
   const [replying, setReplying] = useState(null);
   const scrolledTo = useRef("");
+  const focus = /^#comment-([0-9a-f-]{36})$/i.exec(hash)?.[1] || "";
 
   useEffect(() => {
     const controller = new AbortController();
     setThread(null);
     setError("");
+    scrolledTo.current = "";
     (async () => {
       try {
         const token = isSignedIn ? await getToken() : null;
-        const data = await fetchThread(reviewId, { token, signal: controller.signal });
-        if (!controller.signal.aborted) setThread(data);
+        const data = await fetchThread(reviewId, { token, focus, signal: controller.signal });
+        if (!controller.signal.aborted) setThread({ ...includeFocusedThread(data), loadedFocus: focus });
       } catch (loadError) {
         if (!controller.signal.aborted) setError(loadError.message);
       }
     })();
     return () => controller.abort();
-  }, [getToken, isSignedIn, reviewId]);
+  }, [getToken, isSignedIn, reviewId, focus]);
 
   // Notification and card links point at #comments or one #comment-<id>.
   useEffect(() => {
-    if (!thread || !hash.startsWith("#comment") || scrolledTo.current === hash) return;
+    if (!thread || thread.loadedFocus !== focus || !hash.startsWith("#comment") || scrolledTo.current === hash) return;
     scrolledTo.current = hash;
     const target = document.getElementById(hash.slice(1)) || document.getElementById("comments");
     target?.scrollIntoView({ block: "start" });
-  }, [hash, thread]);
+  }, [hash, thread, focus]);
 
   if (error) return <section className="review-comments" id="comments"><p className="review-comment-error" role="alert">{error}</p></section>;
   if (!thread) return <section className="review-comments" id="comments" aria-busy="true" />;
