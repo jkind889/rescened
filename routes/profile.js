@@ -55,7 +55,17 @@ async function getProfile(userId) {
     .populate("pinnedBoardId");
 }
 async function ensureProfile(userId) {
-  return (await getProfile(userId)) || UserProfile.create({ userId });
+  const existing = await getProfile(userId);
+  if (existing) return existing;
+  try { return await UserProfile.create({ userId }); }
+  catch (error) {
+    // Parallel first-visit reads can all observe a missing profile. The unique
+    // userId index chooses one creator; the other reads use its persisted data.
+    if (error?.code !== 11000 || !error.keyPattern?.userId) throw error;
+    const created = await getProfile(userId);
+    if (!created) throw error;
+    return created;
+  }
 }
 async function updateProfile(userId, update, session) {
   return UserProfile.findOneAndUpdate(

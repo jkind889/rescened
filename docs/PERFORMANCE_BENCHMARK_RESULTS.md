@@ -70,3 +70,4 @@ The discovery feeds measured above changed after this run, and they have not bee
 - The four site-wide feeds cache ranked ids for 60 seconds per process and share in-flight rankings (`routes/utils/feedCache.js`). Catalog metadata, review content, and viewer likes are read on every request. Circle feeds are not cached. A new review can take up to 60 seconds to move a site-wide ranking.
 - The three anonymous album feeds send `Cache-Control: public, max-age=60, stale-while-revalidate=120`. Viewer-dependent feeds send `private, no-store`.
 - The API gzips its responses with `compression`, and CORS preflights carry `max-age=600`.
+- Profile sections load in parallel. Concurrent first visits share the profile selected by the unique `userId` index: a losing insert re-reads the persisted profile, preserving its fields and privacy settings instead of returning a duplicate-key error.

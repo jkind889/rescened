@@ -258,3 +258,91 @@ test("people suggestions rank active public reviewers outside the viewer's circl
   await Review.updateMany({ userId: "busy" }, { $set: { userId: Review.DELETED_AUTHOR_ID } });
   assert.deepEqual((await suggestPeople({ viewerId: "viewer", now, authors })).map((person) => person.userId), ["recent-one", "veteran"]);
 });
+
+// Execute the actual public route handlers with real Mongo reads/writes. Clerk
+// metadata stays offline, and no server or live provider is involved.
+function publicProfileClient(t) {
+  const clerkPath = require.resolve("@clerk/express");
+  const routePath = require.resolve("../routes/profile");
+  const previousClerk = require.cache[clerkPath];
+  const previousRoute = require.cache[routePath];
+  require.cache[clerkPath] = {
+    id: clerkPath, filename: clerkPath, loaded: true,
+    exports: {
+      getAuth: () => ({ userId: null }),
+      clerkClient: { users: { getUserList: async () => ({ data: [] }) } },
+    },
+  };
+  delete require.cache[routePath];
+  const router = require(routePath);
+  t.after(() => {
+    if (previousClerk) require.cache[clerkPath] = previousClerk;
+    else delete require.cache[clerkPath];
+    if (previousRoute) require.cache[routePath] = previousRoute;
+    else delete require.cache[routePath];
+  });
+  return async (path, userId) => {
+    const handler = router.stack.find((layer) => layer.route?.path === path && layer.route.methods.get).route.stack.at(-1).handle;
+    const res = {
+      statusCode: 200,
+      status(code) { this.statusCode = code; return this; },
+      json(body) { this.body = body; return this; },
+    };
+    await handler({ params: { userId }, query: {} }, res);
+    return { status: res.statusCode, body: res.body };
+  };
+}
+
+test("parallel first profile visits create one profile and preserve subsequent privacy settings", { skip: !enabled, timeout: 15_000 }, async (t) => {
+  const userId = "first-profile-visit";
+  const album = await createAlbum("First review");
+  const review = await Review.create(reviewRow(1, album, userId, "2026-10-01T12:00:00Z"));
+  const request = publicProfileClient(t);
+  const paths = ["/:userId", "/:userId/saved", "/:userId/activity", "/:userId/boards"];
+  const create = UserProfile.create.bind(UserProfile);
+  let release;
+  const allCreating = new Promise((resolve) => { release = resolve; });
+  let arrivals = 0;
+  const insertErrors = [];
+  const createMock = t.mock.method(UserProfile, "create", async (...args) => {
+    // Hold every insert until all four requests have observed no profile.
+    // This makes the unique-index race deterministic instead of timing-based.
+    if (++arrivals === paths.length) release();
+    await allCreating;
+    try { return await create(...args); }
+    catch (error) { insertErrors.push(error.code); throw error; }
+  });
+  const responses = await Promise.all(paths.map((path) => request(path, userId)));
+  createMock.mock.restore();
+  assert.equal(arrivals, 4);
+  assert.deepEqual(insertErrors, [11000, 11000, 11000]);
+  assert.deepEqual(responses.map((response) => response.status), [200, 200, 200, 200]);
+  assert.equal(responses[0].body.userId, userId);
+  assert.equal(responses[0].body.reviewCount, 1);
+  assert.deepEqual(responses[1].body, []);
+  assert.equal(responses[2].body[0].reviewId, review.reviewId);
+  assert.deepEqual(responses[3].body, []);
+  assert.equal(await UserProfile.countDocuments({ userId }), 1);
+
+  await UserProfile.updateOne({ userId }, { $set: {
+    bio: "Keep my profile", isPrivate: true,
+    favoriteAlbums: [{ albumCatalogId: album._id, rank: 0 }],
+  } });
+  const before = await UserProfile.findOne({ userId }).lean();
+  const privateResponses = await Promise.all(paths.map((path) => request(path, userId)));
+  assert.deepEqual(privateResponses.map((response) => response.status), [200, 403, 403, 403]);
+  assert.equal(privateResponses[0].body.isPrivate, true);
+  assert.equal(privateResponses[0].body.bio, "");
+  assert.deepEqual(privateResponses[0].body.favoriteAlbums, []);
+  assert.deepEqual(await UserProfile.findOne({ userId }).lean(), before);
+});
+
+test("profile initialization propagates unrelated insert failures", { skip: !enabled }, async (t) => {
+  const request = publicProfileClient(t);
+  const userId = "profile-insert-failure";
+  const album = await createAlbum("Failed profile");
+  await Review.create(reviewRow(1, album, userId, "2026-10-01T12:00:00Z"));
+  t.mock.method(UserProfile, "create", async () => { throw Object.assign(new Error("Unavailable"), { code: 91 }); });
+  assert.equal((await request("/:userId", userId)).status, 500);
+  assert.equal(await UserProfile.countDocuments({ userId }), 0);
+});
