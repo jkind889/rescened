@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "../config/api";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import Cover from "./Cover";
 
 const DEFAULT_USERNAME = "rescened user";
 
@@ -79,7 +80,7 @@ export function PopularReviews({ limit = 4 }) {
                     <article className="front-review-card" key={review.reviewId}>
                         <Link className="front-review-cover-link" to={`/album/${review.albumId}`}>
                             {review.album?.cover ? (
-                                <img src={review.album.cover} alt={`${review.album.title} cover`} />
+                                <Cover src={review.album.cover} alt={`${review.album.title} cover`} />
                             ) : (
                                 <span className="front-album-cover-fallback">No cover</span>
                             )}

@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import LikeButton from "./LikeButton";
 import ShareButton from "./ShareButton";
 import CommentCountLink from "../features/comments/CommentCountLink";
+import Cover from "./Cover";
 
 function formatDate(value) {
   if (!value) {
@@ -26,7 +27,7 @@ function AlbumCover({ src, title }) {
     return <div className="profile-cover-fallback">No cover</div>;
   }
 
-  return <img className="profile-cover" src={src} alt={`${title} cover`} />;
+  return <Cover className="profile-cover" src={src} alt={`${title} cover`} />;
 }
 
 export function ProfileReviewCard({ review, likeMessage = "", onToggleLike }) {

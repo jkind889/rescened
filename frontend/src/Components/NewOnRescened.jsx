@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "../config/api";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import Cover from "./Cover";
 
 export function NewOnRescened({ limit = 6 }) {
     const [albums, setAlbums] = useState([]);
@@ -59,7 +60,7 @@ export function NewOnRescened({ limit = 6 }) {
             {albums.map((album) => (
                 <Link className="front-album-card" key={album.albumId} to={`/album/${album.albumId}`}>
                     {album.cover ? (
-                        <img src={album.cover} alt={`${album.title} cover`} />
+                        <Cover src={album.cover} alt={`${album.title} cover`} />
                     ) : (
                         <span className="front-album-cover-fallback">No cover</span>
                     )}

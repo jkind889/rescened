@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import AsyncState from "../Components/Loading/AsyncState";
 import ExternalAlbumCard from "../Components/ExternalAlbumCard";
 import { getApiErrorMessage } from "../utils/apiErrors";
+import Cover from "../Components/Cover";
 
 const EXTERNAL_SEARCH_LIMIT = 12;
 
@@ -28,22 +29,81 @@ export function SearchResults() {
   const [genreName, setGenreName] = useState("");
   const viewMode = viewParam === "list" ? "list" : "grid";
 
+  // The catalog and external searches run concurrently. Retrying external
+  // discovery refetches only the external results.
   useEffect(() => {
     let shouldIgnore = false;
     const controller = new AbortController();
 
-    function resetExternalResults() {
+    async function fetchResults() {
+      if (!query) {
+        setResults([]);
+        setHasNextPage(false);
+        setError("");
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError("");
+      setResults([]);
+      setHasNextPage(false);
+
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/search/search?q=${encodeURIComponent(query)}&page=${page}${genre ? `&genre=${encodeURIComponent(genre)}` : ""}`,
+          { signal: controller.signal },
+        );
+
+        if (!response.ok) {
+          throw new Error(await getApiErrorMessage(response, "Search request failed"));
+        }
+
+        const data = await response.json();
+        if (shouldIgnore) return;
+
+        const results = Array.isArray(data) ? data : data.results;
+        const localResults = Array.isArray(results) ? results : [];
+        setResults(localResults);
+        setHasNextPage(Boolean(data?.hasNextPage));
+        setGenreName(data?.genre?.name || "");
+      } catch (searchError) {
+        if (shouldIgnore || searchError.name === "AbortError") return;
+
+        setResults([]);
+        setHasNextPage(false);
+        setError(searchError.message || "Unable to load search results.");
+      } finally {
+        if (!shouldIgnore) setLoading(false);
+      }
+    }
+
+    fetchResults();
+
+    return () => {
+      shouldIgnore = true;
+      controller.abort();
+    };
+  }, [query, page, genre]);
+
+  useEffect(() => {
+    let shouldIgnore = false;
+    const controller = new AbortController();
+
+    setExternalError("");
+    setCatalogMatches([]);
+    setExternalCandidates([]);
+
+    // External candidates carry no genres, so a genre-filtered search skips them.
+    if (!query || page !== 1 || genre) {
       setExternalLoading(false);
-      setExternalError("");
       setExternalState("idle");
-      setCatalogMatches([]);
-      setExternalCandidates([]);
+      return undefined;
     }
 
     async function fetchExternalResults() {
       setExternalLoading(true);
       setExternalState("loading");
-      setExternalError("");
 
       try {
         const searchParams = new URLSearchParams({
@@ -77,65 +137,13 @@ export function SearchResults() {
       }
     }
 
-    async function fetchResults() {
-      resetExternalResults();
-
-      if (!query) {
-        setResults([]);
-        setHasNextPage(false);
-        setError("");
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      setError("");
-      setResults([]);
-      setHasNextPage(false);
-
-      try {
-        const response = await fetch(
-          `${API_BASE_URL}/search/search?q=${encodeURIComponent(query)}&page=${page}${genre ? `&genre=${encodeURIComponent(genre)}` : ""}`,
-          { signal: controller.signal },
-        );
-
-        if (!response.ok) {
-          throw new Error(await getApiErrorMessage(response, "Search request failed"));
-        }
-
-        const data = await response.json();
-        if (shouldIgnore) return;
-
-        const results = Array.isArray(data) ? data : data.results;
-        const localResults = Array.isArray(results) ? results : [];
-        setResults(localResults);
-        setHasNextPage(Boolean(data?.hasNextPage));
-        setGenreName(data?.genre?.name || "");
-        setLoading(false);
-
-        // External candidates carry no genres, so a genre-filtered search skips them.
-        if (page === 1 && !genre) {
-          await fetchExternalResults();
-        }
-      } catch (searchError) {
-        if (shouldIgnore || searchError.name === "AbortError") return;
-
-        setResults([]);
-        setHasNextPage(false);
-        setError(searchError.message || "Unable to load search results.");
-        setLoading(false);
-      } finally {
-        if (!shouldIgnore) setLoading(false);
-      }
-    }
-
-    fetchResults();
+    fetchExternalResults();
 
     return () => {
       shouldIgnore = true;
       controller.abort();
     };
-  }, [query, page, externalRetry, genre]);
+  }, [query, page, genre, externalRetry]);
 
   function updatePage(nextPage) {
     const nextParams = new URLSearchParams(searchParams);
@@ -162,7 +170,7 @@ export function SearchResults() {
         {Array.isArray(results) && results.map((result) => (
           <Link className="result-card" key={result.albumId} to={`/album/${result.albumId}`}>
             {result.cover ? (
-              <img className="result-cover" src={result.cover} alt={`${result.title} cover`} />
+              <Cover className="result-cover" src={result.cover} alt={`${result.title} cover`} size={viewMode === "list" ? 58 : undefined} />
             ) : (
               <span className="result-cover result-cover-fallback" aria-label="No cover available">No cover</span>
             )}
@@ -335,7 +343,7 @@ export function SearchResults() {
           error={error}
           isEmpty={!loading && !error && Boolean(query) && !hasVisibleResults && !isExternalMiss}
           loadingVariant="grid"
-          loadingMessage={externalLoading ? "Searching MusicBrainz" : "Loading search results"}
+          loadingMessage="Loading search results"
           errorTitle="Search unavailable"
           emptyTitle="No albums matched that search."
         >

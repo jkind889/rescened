@@ -113,7 +113,7 @@ function NotificationRow({ notification }) {
       {!notification.readAt && <span className="notification-unread-dot" aria-label="Unread notification" />}
       <div className="notification-avatar-wrap">
         {notification.actor?.imageUrl ? (
-          <img className="notification-avatar" src={notification.actor.imageUrl} alt="" />
+          <img className="notification-avatar" src={notification.actor.imageUrl} alt="" loading="lazy" decoding="async" />
         ) : (
           <span className="notification-avatar notification-avatar-fallback">
             {avatarName.slice(0, 1).toUpperCase()}

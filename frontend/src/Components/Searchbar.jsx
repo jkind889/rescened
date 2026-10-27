@@ -2,6 +2,7 @@ import { API_BASE_URL } from "../config/api";
 import {useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getApiErrorMessage } from "../utils/apiErrors";
+import Cover from "./Cover";
 
 const MIN_SUGGESTION_QUERY_LENGTH = 2;
 const SUGGESTION_LIMIT = 5;
@@ -115,7 +116,7 @@ export function SearchBar({ placeholder = "Search" })
         <ul className="suggestions-dropdown">
           {suggestions.map((suggestion) => (
             <li key={suggestion.albumId} onClick={() => { navigate(`/album/${suggestion.albumId}`); setShowDropdown(false); }}>
-             <img src={suggestion.cover} className="suggestion-cover" alt={suggestion.title} />
+             <Cover src={suggestion.cover} className="suggestion-cover" alt={suggestion.title} size={32} />
              {suggestion.title} - {suggestion.artistDisplayName}
             </li>
           ))}

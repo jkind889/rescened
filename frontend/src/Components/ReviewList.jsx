@@ -2,6 +2,7 @@ import { useState } from "react";
 import LikeButton from "./LikeButton";
 import ShareButton from "./ShareButton";
 import CommentCountLink from "../features/comments/CommentCountLink";
+import Cover from "./Cover";
 
 function ReviewEditForm({
     review,
@@ -106,7 +107,7 @@ function ReviewListCard({
         <article className="review-card" key={review.reviewId}>
             <div className="review-card-poster">
                 {review.cover && (
-                    <img className="review-card-image" src={review.cover} alt={`${review.title} cover`} />
+                    <Cover className="review-card-image" src={review.cover} alt={`${review.title} cover`} />
                 )}
                 {!review.cover && (
                     <div className="review-card-image-fallback">No cover</div>

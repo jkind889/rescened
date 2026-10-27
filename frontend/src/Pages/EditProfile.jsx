@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { RedirectToSignIn, Show, useAuth, useUser } from "@clerk/react";
 import { getApiErrorMessage } from "../utils/apiErrors";
+import Cover from "../Components/Cover";
 
 const MAX_BIO_LENGTH = 280;
 const MAX_FAVORITES = 5;
@@ -65,7 +66,7 @@ function AlbumCover({ src, title }) {
     return <div className="edit-profile-cover-fallback">No cover</div>;
   }
 
-  return <img className="edit-profile-cover" src={src} alt={`${title} cover`} />;
+  return <Cover className="edit-profile-cover" src={src} alt={`${title} cover`} />;
 }
 
 const PIN_SNIPPET_LENGTH = 30;

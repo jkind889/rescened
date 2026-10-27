@@ -7,6 +7,7 @@ import {
   formatCommunityValue,
   requestCommunityJson,
 } from "../features/community/community";
+import Cover from "../Components/Cover";
 
 const PAGE_LIMIT = 20;
 const SEARCH_DELAY_MS = 300;
@@ -35,7 +36,7 @@ function ApprovedCard({ item }) {
   return (
     <article className="approved-feed-card">
       <Link className="approved-feed-cover" to={`/album/${album.albumId}`}>
-        {album.cover ? <img alt={`${album.title || "Album"} cover`} src={album.cover} /> : <span>No cover</span>}
+        {album.cover ? <Cover alt={`${album.title || "Album"} cover`} src={album.cover} /> : <span>No cover</span>}
       </Link>
       <div className="approved-feed-copy">
         <p className="community-eyebrow">{formatCommunityValue(item.publicationType)}</p>

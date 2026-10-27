@@ -137,7 +137,7 @@ function ReportForm({ onSubmit, onCancel }) {
 function Avatar({ author }) {
   const name = author?.username || "";
   return author?.imageUrl
-    ? <img className="review-comment-avatar" src={author.imageUrl} alt="" />
+    ? <img className="review-comment-avatar" src={author.imageUrl} alt="" loading="lazy" decoding="async" />
     : <span className="review-comment-avatar" aria-hidden="true">{(name.trim()[0] || "?").toUpperCase()}</span>;
 }
 

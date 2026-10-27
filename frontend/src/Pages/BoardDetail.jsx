@@ -1,5 +1,5 @@
 import { API_BASE_URL } from "../config/api";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@clerk/react";
 import BoardListens from "../Components/BoardListens";
@@ -10,6 +10,7 @@ import ShareButton from "../Components/ShareButton";
 import { moveItem } from "../features/queue/queue";
 import { earlierOrderTarget, normalizeDraft, orderLimitOf, rankMap, sameOrder, saveBoardOrder, saveBoardSettings } from "../features/boards/boardOrder";
 import "../features/boards/boards.css";
+import Cover from "../Components/Cover";
 
 const MAX_DESCRIPTION_LENGTH = 280;
 const UNSAVED_ORDER_HINT = "Save or discard your new order first";
@@ -48,7 +49,7 @@ function getArtistName(album) {
 export function BoardDetail() {
   const { boardId, userId } = useParams();
   const navigate = useNavigate();
-  const { getToken, isSignedIn } = useAuth();
+  const { getToken, isLoaded, isSignedIn } = useAuth();
   const isPublicBoard = Boolean(userId);
   const requestRef = useRef(null);
   const mutationRef = useRef(false);
@@ -59,6 +60,8 @@ export function BoardDetail() {
   const [board, setBoard] = useState(null);
   const [title, setTitle] = useState("");
   const [query, setQuery] = useState("");
+  // Filtering a large board can lag behind typing; the input stays responsive.
+  const deferredQuery = useDeferredValue(query);
   // null follows the board: ranked boards open as a list, others as a grid.
   const [viewMode, setViewMode] = useState(null);
   const [loadError, setLoadError] = useState("");
@@ -149,9 +152,11 @@ export function BoardDetail() {
   }, [boardId, getToken, isPublicBoard, isSignedIn, userId, scope]);
 
   useEffect(() => {
+    // Wait for Clerk so a board is fetched once, with the right token.
+    if (!isLoaded) return undefined;
     fetchBoard();
     return () => requestRef.current?.abort();
-  }, [fetchBoard]);
+  }, [fetchBoard, isLoaded]);
 
   const isManual = board?.orderMode === "manual";
   const isRanked = board?.displayStyle === "ranked";
@@ -163,7 +168,7 @@ export function BoardDetail() {
   // A new server order (save, removal, reload) replaces the draft.
   const order = orderDraft.base === savedOrder ? orderDraft.order : savedOrder;
   const isOrderDirty = !sameOrder(order, savedOrder);
-  const isFiltered = Boolean(query.trim()) || albumFilter !== "all";
+  const isFiltered = Boolean(deferredQuery.trim()) || albumFilter !== "all";
   // Hold the album snapshot and its revision steady while any write or refresh
   // is pending, including listen edits made in the modal.
   const isBoardBusy = Boolean(isSavingOrder || isSavingSettings || isSavingTitle || isSavingDescription
@@ -176,7 +181,7 @@ export function BoardDetail() {
   const filteredAlbums = useMemo(() => {
     const source = sortKey === CUSTOM_SORT ? order.map((albumId) => albumsById.get(albumId)).filter(Boolean) : board?.albums || [];
     const albums = source.filter((album) => albumFilter === "all" || (albumFilter === "listened" ? album.listenCount > 0 : album.explicitlySaved));
-    const normalizedQuery = query.trim().toLowerCase();
+    const normalizedQuery = deferredQuery.trim().toLowerCase();
     const matching = normalizedQuery
       ? albums.filter((album) => [
         album.title,
@@ -188,7 +193,7 @@ export function BoardDetail() {
     // Ties fall back to the board's own order (most recently added first).
     const compare = ALBUM_SORTS[sortKey]?.compare || ALBUM_SORTS.recent.compare;
     return [...matching].sort((a, b) => compare(a, b) || ALBUM_SORTS.recent.compare(a, b));
-  }, [albumFilter, albumsById, board, order, query, sortKey]);
+  }, [albumFilter, albumsById, board, deferredQuery, order, sortKey]);
 
   // The ref also guards repeated actions before React has rendered busy state.
   function beginMutation() {
@@ -671,7 +676,7 @@ export function BoardDetail() {
             <Fragment key={album.albumId}>
               <article className={itemClassName("board-album-card", index)} {...arrangeProps(index)}>
                 <Link to={`/album/${album.albumId}`} draggable={false}>
-                  {album.cover ? <img src={album.cover} alt={`${album.title} cover`} draggable={false} /> : <span>No cover</span>}
+                  {album.cover ? <Cover src={album.cover} alt={`${album.title} cover`} draggable={false} /> : <span>No cover</span>}
                   <h2>{album.title || "Untitled album"}</h2>
                   <p>{getArtistName(album)}</p>
                 </Link>
@@ -691,7 +696,7 @@ export function BoardDetail() {
               <article className={itemClassName("board-album-row", index)} {...arrangeProps(index)}>
                 {renderRank(album)}
                 <Link to={`/album/${album.albumId}`} draggable={false}>
-                  {album.cover ? <img src={album.cover} alt={`${album.title} cover`} draggable={false} /> : <span>No cover</span>}
+                  {album.cover ? <Cover src={album.cover} alt={`${album.title} cover`} draggable={false} size={58} /> : <span>No cover</span>}
                   <strong>{album.title || "Untitled album"}</strong>
                   <em>{getArtistName(album)}</em>
                 </Link>

@@ -27,7 +27,7 @@ export function ProfileNetwork() {
   const { userId } = useParams();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { getToken, isSignedIn, userId: viewerId } = useAuth();
+  const { getToken, isLoaded, isSignedIn, userId: viewerId } = useAuth();
   const requestedTab = searchParams.get("tab") || location.state?.activeTab || "followers";
   const [activeTab, setActiveTab] = useState(
     tabs.some((tab) => tab.id === requestedTab) ? requestedTab : "followers",
@@ -50,6 +50,8 @@ export function ProfileNetwork() {
   }, [requestedTab]);
 
   useEffect(() => {
+    // Wait for Clerk so the network is fetched once, with the right token.
+    if (!isLoaded) return undefined;
     let isCurrent = true;
 
     async function fetchNetwork() {
@@ -104,7 +106,7 @@ export function ProfileNetwork() {
     return () => {
       isCurrent = false;
     };
-  }, [getToken, isOwnNetwork, isSignedIn, userId, viewerId]);
+  }, [getToken, isLoaded, isOwnNetwork, isSignedIn, userId, viewerId]);
 
   const activeUsers = activeTab === "followers" ? network.followers : network.following;
   const counts = useMemo(() => ({
@@ -117,7 +119,7 @@ export function ProfileNetwork() {
     setSearchParams({ tab: tabId });
   }
 
-  if (isOwnNetwork && !isSignedIn) {
+  if (isOwnNetwork && isLoaded && !isSignedIn) {
     return <RedirectToSignIn />;
   }
 

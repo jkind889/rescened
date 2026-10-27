@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@clerk/react";
 import { getApiErrorMessage } from "../../utils/apiErrors";
 import "./rankings.css";
+import Cover from "../../Components/Cover";
 
 // A profile's track rankings, most recently changed first, each showing its top tracks.
 export function ProfileRankings({ userId, isOwner = false }) {
@@ -84,7 +85,7 @@ export function ProfileRankings({ userId, isOwner = false }) {
         {rankings.map((entry) => (
           <li key={entry.album.albumId}>
             <Link className="profile-rankings-album" to={`/album/${entry.album.albumId}`}>
-              {entry.album.cover ? <img src={entry.album.cover} alt="" /> : <span className="profile-rankings-fallback">No cover</span>}
+              {entry.album.cover ? <Cover src={entry.album.cover} /> : <span className="profile-rankings-fallback">No cover</span>}
               <span>
                 <strong>{entry.album.title || "Untitled album"}</strong>
                 <em>{entry.album.artistDisplayName || "Artist unknown"}</em>
