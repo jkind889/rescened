@@ -1,5 +1,19 @@
 [
   {
+    "id": "faster-pages",
+    "date": "2026-10-27",
+    "title": "Faster pages",
+    "summary": "Rescened loads faster, especially the home page, album pages, and profiles.",
+    "changes": [
+      "The first visit downloads about 40% less code, and each page loads the rest when you open it.",
+      "Album covers load as you scroll instead of all at once.",
+      "Search checks MusicBrainz at the same time as Rescened, so discovery results appear sooner.",
+      "Home page lists, profiles, and board lists load faster.",
+      "A profile still shows everything else if one section fails to load.",
+      "Review feeds and follower lists show everyone's names, not just the first 10 people."
+    ]
+  },
+  {
     "id": "review-comments",
     "date": "2026-10-25",
     "title": "Talk about reviews",
