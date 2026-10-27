@@ -7,9 +7,11 @@ const Follow = require("../models/Follow");
 const { findAlbumByPublicId, normalizeCatalogAlbum } = require("./utils/albumCatalog");
 const {
   rankedAlbums,
-  recentlyReviewedAlbums,
-  featuredAlbums,
-  buildPopularReviewsPipeline,
+  popularReviewRows,
+  sitePopularAlbums,
+  siteFeaturedAlbums,
+  siteRecentlyReviewedAlbums,
+  sitePopularReviewRows,
   getListLimit,
 } = require("./utils/reviewFeeds");
 const {
@@ -224,19 +226,19 @@ router.get("/review/:reviewId", async (req, res) => {
 
 router.get("/popular", async (req, res) => {
   try {
-    res.json(await rankedAlbums({ limit: req.query.limit, window: req.query.window }));
+    res.json(await sitePopularAlbums({ limit: req.query.limit, window: req.query.window }));
   } catch { res.status(500).json({ error: "Failed to fetch reviews" }); }
 });
 
 router.get("/recent-albums", async (req, res) => {
-  try { res.json(await recentlyReviewedAlbums(getListLimit(req.query.limit, 6))); }
+  try { res.json(await siteRecentlyReviewedAlbums(getListLimit(req.query.limit, 6))); }
   catch { res.status(500).json({ error: "Failed to fetch recent albums" }); }
 });
 
 router.get("/popular-reviews", async (req, res) => {
   try {
-    const limit = getListLimit(req.query.limit, 4);
-    const reviews = await Review.aggregate(buildPopularReviewsPipeline(limit));
+    // The ranking is cached site-wide; likes and authors are read per viewer.
+    const reviews = await sitePopularReviewRows(getListLimit(req.query.limit, 4));
     res.json(await serializeReviews(reviews, viewer(req)));
   } catch { res.status(500).json({ error: "Failed to fetch popular reviews" }); }
 });
@@ -258,13 +260,13 @@ router.get("/circle/popular-reviews", auth, async (req, res) => {
   try {
     const limit = getListLimit(req.query.limit, 4);
     const userIds = await circleUserIds(req.userId);
-    const reviews = await Review.aggregate(buildPopularReviewsPipeline(limit, { userIds }));
+    const reviews = await popularReviewRows(limit, { userIds });
     res.json(await serializeReviews(reviews, req.userId));
   } catch { res.status(500).json({ error: "Failed to fetch circle reviews" }); }
 });
 
 router.get("/featured", async (req, res) => {
-  try { res.json(await featuredAlbums(getListLimit(req.query.limit, 5))); }
+  try { res.json(await siteFeaturedAlbums(getListLimit(req.query.limit, 5))); }
   catch { res.status(500).json({ error: "Failed to fetch featured albums" }); }
 });
 

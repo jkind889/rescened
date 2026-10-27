@@ -15,7 +15,8 @@ const {
   rankedAlbums,
   recentlyReviewedAlbums,
   featuredAlbums,
-  buildPopularReviewsPipeline,
+  popularReviewRows,
+  resetFeedCache,
 } = require("../routes/utils/reviewFeeds");
 const {
   deleteOwnedReview,
@@ -140,7 +141,7 @@ test("review discovery aggregates use catalog order, windows, deduplication, and
     { userId: "liker-1", targetType: "review", reviewId: firstReview._id },
     { userId: "liker-2", targetType: "review", reviewId: firstReview._id },
   ]);
-  const popularReviews = await Review.aggregate(buildPopularReviewsPipeline(12));
+  const popularReviews = await popularReviewRows(12);
   assert.equal(String(popularReviews[0]._id), String(firstReview._id));
   assert.equal(popularReviews.length, 6);
   assert.equal(popularReviews.some((row) => String(row.albumCatalogId) === String(missing._id)), false);
@@ -370,4 +371,49 @@ test("concurrent delete and like/pin requests leave no dangling review relations
   assert.equal(await Review.exists({ _id: review._id }), null);
   assert.equal(await Like.countDocuments({ targetType: "review", reviewId: review._id }), 0);
   assert.equal(await UserProfile.countDocuments({ pinnedReviewId: review._id }), 0);
+});
+
+test("discovery feeds top up past deleted catalog rows and cache only site-wide rankings", { skip: !enabled }, async (t) => {
+  await Promise.all([Review.deleteMany({}), Like.deleteMany({}), AlbumCatalog.deleteMany({}), Follow.deleteMany({})]);
+  resetFeedCache();
+  t.after(() => resetFeedCache());
+  const base = new Date("2026-09-01T00:00:00Z").getTime();
+  // More deleted albums than the first ranking window, all outranking the kept ones.
+  const deleted = await Promise.all(Array.from({ length: 15 }, (_, index) => createAlbum(`Deleted ${index}`)));
+  await Promise.all(deleted.flatMap((album, index) => [0, 1, 2].map((offset) => (
+    createReview(album, `deleted-${index}-${offset}`, 5, new Date(base + (100 + index) * 60_000))
+  ))));
+  const kept = await Promise.all(["A", "B", "C"].map((title) => createAlbum(`Kept ${title}`)));
+  const keptReviews = await Promise.all(kept.map((album, index) => createReview(album, `kept-${index}`, 5 - index, new Date(base - index * 60_000))));
+  await Like.create([0, 1, 2, 3].map((index) => ({ userId: `fan-${index}`, targetType: "review", reviewId: (index < 3 ? keptReviews[0] : keptReviews[1])._id })));
+  await AlbumCatalog.deleteMany({ _id: { $in: deleted.map((album) => album._id) } });
+
+  assert.deepEqual((await featuredAlbums(3)).map((album) => album.title), ["Kept A", "Kept B", "Kept C"]);
+  assert.deepEqual((await recentlyReviewedAlbums(3)).map((album) => album.title), ["Kept A", "Kept B", "Kept C"]);
+  assert.deepEqual((await rankedAlbums({ limit: 5, window: "all" })).map((album) => album.title), ["Kept A", "Kept B", "Kept C"]);
+  const reviewRows = await popularReviewRows(3);
+  assert.deepEqual(reviewRows.map((row) => String(row._id)), keptReviews.map((review) => String(review._id)));
+  assert.equal(reviewRows.some((row) => "catalogAlbum" in row || "likeCount" in row), false);
+
+  const asViewer = reviewFeedClient(t, "fan-0");
+  const featuredBefore = Object.values(await asViewer("/featured", {}, { limit: "3" })).filter((row) => row?.albumId);
+  assert.deepEqual(featuredBefore.map((album) => album.title), ["Kept A", "Kept B", "Kept C"]);
+
+  // Inside the TTL the ranking holds, but catalog metadata is read fresh.
+  const newcomer = await createAlbum("Newcomer");
+  await Promise.all([0, 1, 2, 3].map((index) => createReview(newcomer, `new-${index}`, 5, new Date(base))));
+  await AlbumCatalog.updateOne({ _id: kept[0]._id }, { $set: { title: "Kept A (renamed)" } });
+  const featuredCached = Object.values(await asViewer("/featured", {}, { limit: "3" })).filter((row) => row?.albumId);
+  assert.deepEqual(featuredCached.map((album) => album.title), ["Kept A (renamed)", "Kept B", "Kept C"]);
+
+  // Popular reviews share one cached ranking but serialize likes per viewer.
+  const fanView = Object.values(await asViewer("/popular-reviews", {}, { limit: "2" })).filter((row) => row?.reviewId);
+  const strangerView = Object.values(await reviewFeedClient(t, "stranger")("/popular-reviews", {}, { limit: "2" })).filter((row) => row?.reviewId);
+  assert.deepEqual(fanView.map((row) => row.reviewId), strangerView.map((row) => row.reviewId));
+  assert.deepEqual(fanView.map((row) => [row.likeCount, row.likedByViewer]), [[3, true], [1, false]]);
+  assert.deepEqual(strangerView.map((row) => [row.likeCount, row.likedByViewer]), [[3, false], [1, false]]);
+
+  resetFeedCache();
+  const featuredFresh = Object.values(await asViewer("/featured", {}, { limit: "3" })).filter((row) => row?.albumId);
+  assert.equal(featuredFresh[0].title, "Newcomer");
 });
