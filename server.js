@@ -3,6 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const app = express();
 const cors = require("cors");
+const compression = require("compression");
 const mongoose = require("mongoose");
 const { clerkMiddleware } = require("@clerk/express");
 const healthRoutes = require("./routes/health");
@@ -21,6 +22,8 @@ validateServerEnv();
 // Signature verification must receive the exact bytes, before JSON parsing.
 app.use("/webhooks/clerk/listening", express.raw({ type: "application/json", limit: "256kb" }), require("./routes/listeningWebhook"));
 app.use(express.json())
+// Railway's edge does not reliably compress responses, so the API compresses its own.
+app.use(compression())
 app.use("/health", healthRoutes);
 app.use(cors(buildCorsOptions()))
 const trustProxyHops = getTrustProxyHops();

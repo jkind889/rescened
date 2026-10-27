@@ -94,6 +94,7 @@ test("buildCorsOptions allows configured origins and rejects unknown origins", a
     CORS_ALLOWED_ORIGINS: "https://rescened.vercel.app",
   }));
 
+  assert.equal(corsOptions.maxAge, 600, "preflights are reusable for 10 minutes");
   assert.equal(await checkCors(corsOptions, "https://rescened.vercel.app"), true);
   assert.equal(await checkCors(corsOptions), true);
   await assert.rejects(

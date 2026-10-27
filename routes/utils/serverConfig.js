@@ -112,6 +112,8 @@ function buildCorsOptions(env = process.env) {
 
       callback(new Error("Origin is not allowed by CORS."));
     },
+    // Authorized API calls need a preflight; browsers may reuse one for 10 minutes.
+    maxAge: 600,
   };
 }
 

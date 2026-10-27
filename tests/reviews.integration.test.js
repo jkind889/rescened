@@ -72,11 +72,13 @@ function reviewFeedClient(t, viewerId) {
     const layer = router.stack.find((item) => item.route?.path === path && item.route.methods.get);
     const res = {
       statusCode: 200,
+      headers: {},
+      set(name, value) { this.headers[name.toLowerCase()] = value; return this; },
       status(code) { this.statusCode = code; return this; },
       json(body) { this.body = body; return this; },
     };
     await layer.route.stack.at(-1).handle({ userId: viewerId, params, query }, res);
-    return { status: res.statusCode, ...res.body };
+    return { status: res.statusCode, headers: res.headers, ...res.body };
   };
 }
 
@@ -396,7 +398,9 @@ test("discovery feeds top up past deleted catalog rows and cache only site-wide 
   assert.equal(reviewRows.some((row) => "catalogAlbum" in row || "likeCount" in row), false);
 
   const asViewer = reviewFeedClient(t, "fan-0");
-  const featuredBefore = Object.values(await asViewer("/featured", {}, { limit: "3" })).filter((row) => row?.albumId);
+  const featuredResponse = await asViewer("/featured", {}, { limit: "3" });
+  assert.equal(featuredResponse.headers["cache-control"], "public, max-age=60, stale-while-revalidate=120");
+  const featuredBefore = Object.values(featuredResponse).filter((row) => row?.albumId);
   assert.deepEqual(featuredBefore.map((album) => album.title), ["Kept A", "Kept B", "Kept C"]);
 
   // Inside the TTL the ranking holds, but catalog metadata is read fresh.
@@ -407,7 +411,9 @@ test("discovery feeds top up past deleted catalog rows and cache only site-wide 
   assert.deepEqual(featuredCached.map((album) => album.title), ["Kept A (renamed)", "Kept B", "Kept C"]);
 
   // Popular reviews share one cached ranking but serialize likes per viewer.
-  const fanView = Object.values(await asViewer("/popular-reviews", {}, { limit: "2" })).filter((row) => row?.reviewId);
+  const fanResponse = await asViewer("/popular-reviews", {}, { limit: "2" });
+  assert.equal(fanResponse.headers["cache-control"], "private, no-store");
+  const fanView = Object.values(fanResponse).filter((row) => row?.reviewId);
   const strangerView = Object.values(await reviewFeedClient(t, "stranger")("/popular-reviews", {}, { limit: "2" })).filter((row) => row?.reviewId);
   assert.deepEqual(fanView.map((row) => row.reviewId), strangerView.map((row) => row.reviewId));
   assert.deepEqual(fanView.map((row) => [row.likeCount, row.likedByViewer]), [[3, true], [1, false]]);

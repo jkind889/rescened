@@ -27,6 +27,7 @@ const {
 const { deleteOwnedReview, assertReviewId, persistedReviewId } = require("./utils/reviewInteractions");
 const { fanOutFollowedReview } = require("./utils/notifications");
 const { commentCounts } = require("../lib/reviewComments/read");
+const { cachePublicFeed, noStore } = require("./utils/cacheHeaders");
 const { lookupAuthors } = require("../lib/clerkAuthors");
 const {
   reviewCreateRateLimit,
@@ -236,18 +237,24 @@ router.get("/review/:reviewId", async (req, res) => {
   } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch review", ...(error.code ? { code: error.code } : {}) }); }
 });
 
+// Site-wide album feeds are identical for every viewer, so browsers may reuse
+// them briefly. Feeds that carry likedByViewer or a viewer's circle are never stored.
 router.get("/popular", async (req, res) => {
   try {
-    res.json(await sitePopularAlbums({ limit: req.query.limit, window: req.query.window }));
+    const albums = await sitePopularAlbums({ limit: req.query.limit, window: req.query.window });
+    cachePublicFeed(res).json(albums);
   } catch { res.status(500).json({ error: "Failed to fetch reviews" }); }
 });
 
 router.get("/recent-albums", async (req, res) => {
-  try { res.json(await siteRecentlyReviewedAlbums(getListLimit(req.query.limit, 6))); }
-  catch { res.status(500).json({ error: "Failed to fetch recent albums" }); }
+  try {
+    const albums = await siteRecentlyReviewedAlbums(getListLimit(req.query.limit, 6));
+    cachePublicFeed(res).json(albums);
+  } catch { res.status(500).json({ error: "Failed to fetch recent albums" }); }
 });
 
 router.get("/popular-reviews", async (req, res) => {
+  noStore(res);
   try {
     // The ranking is cached site-wide; likes and authors are read per viewer.
     const reviews = await sitePopularReviewRows(getListLimit(req.query.limit, 4));
@@ -262,6 +269,7 @@ async function circleUserIds(userId) {
 }
 
 router.get("/circle/popular", auth, async (req, res) => {
+  noStore(res);
   try {
     const userIds = await circleUserIds(req.userId);
     res.json(await rankedAlbums({ limit: req.query.limit, window: req.query.window, userIds }));
@@ -269,6 +277,7 @@ router.get("/circle/popular", auth, async (req, res) => {
 });
 
 router.get("/circle/popular-reviews", auth, async (req, res) => {
+  noStore(res);
   try {
     const limit = getListLimit(req.query.limit, 4);
     const userIds = await circleUserIds(req.userId);
@@ -278,8 +287,10 @@ router.get("/circle/popular-reviews", auth, async (req, res) => {
 });
 
 router.get("/featured", async (req, res) => {
-  try { res.json(await siteFeaturedAlbums(getListLimit(req.query.limit, 5))); }
-  catch { res.status(500).json({ error: "Failed to fetch featured albums" }); }
+  try {
+    const albums = await siteFeaturedAlbums(getListLimit(req.query.limit, 5));
+    cachePublicFeed(res).json(albums);
+  } catch { res.status(500).json({ error: "Failed to fetch featured albums" }); }
 });
 
 module.exports = router;
