@@ -1,5 +1,6 @@
 const express = require("express");
-const { clerkClient, getAuth } = require("@clerk/express");
+const { getAuth } = require("@clerk/express");
+const { lookupAuthors } = require("../lib/clerkAuthors");
 const { notificationMutationRateLimit } = require("./utils/rateLimit");
 const {
   clearNotifications,
@@ -13,11 +14,8 @@ const Notification = require("../models/Notification");
 
 const router = express.Router();
 function auth(req, res, next) { const { userId } = getAuth(req); if (!userId) return res.status(401).json({ error: "Unauthorized" }); req.userId = userId; next(); }
-async function authors(ids) {
-  const map = new Map([...new Set(ids.filter((id) => id && id !== Notification.MODERATION_ACTOR_ID))].map((id) => [id, { userId: id, username: "rescened user", imageUrl: "" }]));
-  if (!map.size) return map;
-  try { const listed = await clerkClient.users.getUserList({ userId: [...map.keys()] }); const users = Array.isArray(listed) ? listed : listed.data || []; users.forEach((user) => map.set(user.id, { userId: user.id, username: user.username || "rescened user", imageUrl: user.imageUrl || "" })); } catch { /* optional */ }
-  return map;
+function authors(ids) {
+  return lookupAuthors(ids.filter((id) => id && id !== Notification.MODERATION_ACTOR_ID));
 }
 function sendError(res, error, fallback) {
   if (error?.status === 400) return res.status(400).json({ error: error.message, code: error.code });

@@ -196,7 +196,8 @@ test("network returns followed-user review activities with current catalog metad
   assert.equal(result.body[1].likedByViewer, false);
   assert.equal(result.body[1].album.albumId, ALBUM_ID);
   assert.deepEqual(route.calls.follows, [{ filter: { followerId: VIEWER }, select: "followingId", lean: true }]);
-  assert.deepEqual(route.calls.authors, [{ userId: ["user_alex", "user_sam"], limit: 20 }]);
+  // The limit always covers every requested id, so Clerk never truncates to its default of 10.
+  assert.deepEqual(route.calls.authors, [{ userId: ["user_alex", "user_sam"], limit: 2 }]);
 });
 
 test("network requests enough Clerk users to resolve all 20 distinct feed actors", async (t) => {

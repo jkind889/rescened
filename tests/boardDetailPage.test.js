@@ -51,7 +51,7 @@ async function pageHarness() {
   };
   const context = vm.createContext({
     console, AbortController, Response, Date, API_BASE_URL: "https://fixture.invalid",
-    useParams: () => params, useNavigate: () => () => {}, useAuth: () => ({ getToken, isSignedIn: true }),
+    useParams: () => params, useNavigate: () => () => {}, useAuth: () => ({ getToken, isLoaded: true, isSignedIn: true }),
     useState: (initial) => {
       const index = hook++;
       if (!(index in slots)) slots[index] = typeof initial === "function" ? initial() : initial;
@@ -62,7 +62,7 @@ async function pageHarness() {
       if (!(index in slots)) slots[index] = { current };
       return slots[index];
     },
-    useMemo, useCallback: (fn, deps) => useMemo(() => fn, deps), useEffect: () => {},
+    useMemo, useCallback: (fn, deps) => useMemo(() => fn, deps), useEffect: () => {}, useDeferredValue: (value) => value,
     getApiErrorMessage: async (response, fallback) => (await response.json()).error || fallback,
     fetch: async (url, options = {}) => {
       const method = options.method || "GET";

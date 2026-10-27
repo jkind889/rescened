@@ -1,5 +1,6 @@
 const express = require("express");
-const { clerkClient, getAuth } = require("@clerk/express");
+const { getAuth } = require("@clerk/express");
+const { lookupAuthors } = require("../lib/clerkAuthors");
 const UserProfile = require("../models/UserProfile");
 const Follow = require("../models/Follow");
 const Review = require("../models/Reviews");
@@ -37,11 +38,9 @@ function publicBoardId(value) {
   const boardId = String(value || "").trim().toLowerCase();
   return Board.isBoardId(boardId) ? boardId : "";
 }
-async function authors(ids, options = {}) {
-  const map = new Map([...new Set(ids.filter(Boolean))].map((id) => [id, author(id)]));
-  try { const listed = await clerkClient.users.getUserList({ ...options, userId: [...map.keys()] }); const users = Array.isArray(listed) ? listed : listed.data || []; users.forEach((user) => map.set(user.id, author(user.id, user))); } catch { /* optional */ }
-  return map;
-}
+// Batched, cached Clerk lookups. Pass refresh for the viewer's own profile so a
+// rename shows up there immediately.
+function authors(ids, { refresh } = {}) { return lookupAuthors(ids, { refresh }); }
 function spotifyProfile(value) {
   const input = typeof value === "string" ? value.trim() : "";
   if (!input) return "";
@@ -100,8 +99,8 @@ async function formatReview(review) {
   const album = source.albumCatalogId && typeof source.albumCatalogId === "object" ? normalizeCatalogAlbum(source.albumCatalogId) : null;
   return { reviewId: persistedReviewId(source), userId: source.userId, albumId: album?.albumId || "", album, rating: source.rating, reviewText: source.reviewText, date: source.date };
 }
-async function formatProfile(profile) {
-  const source = plain(profile); const userMap = await authors([source.userId]);
+async function formatProfile(profile, viewerId = "") {
+  const source = plain(profile); const userMap = await authors([source.userId], { refresh: source.userId === viewerId ? [viewerId] : [] });
   const favoriteAlbums = [...(source.favoriteAlbums || [])].sort((a, b) => a.rank - b.rank).map((item) => normalizeCatalogAlbum(item.albumCatalogId)).filter(Boolean);
   const { upNext, queueCount } = await queuePreview(source);
   let pinnedReview = null;
@@ -139,7 +138,7 @@ async function activity(userId, includePrivate = false, viewerId = "") {
   return [...reviewActivities, ...listens.map((listen) => ({ ...listen, actor })), ...rankings.map((ranking) => ({ ...ranking, actor })), ...(includePrivate ? savedActivities : []), ...commentActivities.map((item) => ({ ...item, actor }))].sort(compareActivity).slice(0, MAX_ACTIVITY);
 }
 
-router.get("/me", auth, async (req, res) => { try { const profile = await ensureProfile(req.userId); res.json({ ...(await formatProfile(profile)), ...(await socialStats(req.userId, req.userId)) }); } catch { res.status(500).json({ error: "Failed to fetch profile" }); } });
+router.get("/me", auth, async (req, res) => { try { const profile = await ensureProfile(req.userId); res.json({ ...(await formatProfile(profile, req.userId)), ...(await socialStats(req.userId, req.userId)) }); } catch { res.status(500).json({ error: "Failed to fetch profile" }); } });
 router.get("/me/saved", auth, async (req, res) => { try { res.json(await getSavedAlbums(req.userId)); } catch { res.status(500).json({ error: "Failed to fetch saved albums" }); } });
 function sendStatsError(res, error) {
   res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch stats", ...(error.status && error.code ? { code: error.code } : {}) });
@@ -208,10 +207,10 @@ router.put("/me", auth, async (req, res) => {
       await updateProfile(req.userId, update);
     }
     profile = await getProfile(req.userId);
-    res.json({ ...(await formatProfile(profile)), ...(await socialStats(req.userId, req.userId)) });
+    res.json({ ...(await formatProfile(profile, req.userId)), ...(await socialStats(req.userId, req.userId)) });
   } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to update profile", ...(error.code ? { code: error.code } : {}) }); }
 });
-router.patch("/me", auth, async (req, res) => { try { if (typeof req.body.isPrivate !== "boolean") return res.status(400).json({ error: "isPrivate must be true or false" }); const profile = await UserProfile.findOneAndUpdate({ userId: req.userId }, { $set: { userId: req.userId, isPrivate: req.body.isPrivate } }, { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }).populate("favoriteAlbums.albumCatalogId").populate({ path: "pinnedReviewId", populate: { path: "albumCatalogId" } }).populate("pinnedBoardId"); res.json({ ...(await formatProfile(profile)), ...(await socialStats(req.userId, req.userId)) }); } catch { res.status(500).json({ error: "Failed to update profile" }); } });
+router.patch("/me", auth, async (req, res) => { try { if (typeof req.body.isPrivate !== "boolean") return res.status(400).json({ error: "isPrivate must be true or false" }); const profile = await UserProfile.findOneAndUpdate({ userId: req.userId }, { $set: { userId: req.userId, isPrivate: req.body.isPrivate } }, { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }).populate("favoriteAlbums.albumCatalogId").populate({ path: "pinnedReviewId", populate: { path: "albumCatalogId" } }).populate("pinnedBoardId"); res.json({ ...(await formatProfile(profile, req.userId)), ...(await socialStats(req.userId, req.userId)) }); } catch { res.status(500).json({ error: "Failed to update profile" }); } });
 
 router.get("/me/notification-preferences", auth, async (req, res) => {
   try { res.json(serializePreferences(await UserProfile.findOne({ userId: req.userId }, { notificationPreferences: 1 }).lean())); } catch { res.status(500).json({ error: "Failed to fetch notification preferences" }); }
@@ -288,6 +287,6 @@ router.get("/:userId/boards", async (req, res) => { try { const access = await p
 router.get("/:userId/network", async (req, res) => { try { const access = await profileAccess(req.params.userId, viewer(req)); if (access.status !== 200) return res.status(access.status).json(access.body); const [followers, following] = await Promise.all([Follow.find({ followingId: req.params.userId }), Follow.find({ followerId: req.params.userId })]); const [fm, nm] = await Promise.all([authors(followers.map((row) => plain(row).followerId)), authors(following.map((row) => plain(row).followingId))]); res.json({ userId: req.params.userId, followers: followers.map((row) => fm.get(plain(row).followerId)), following: following.map((row) => nm.get(plain(row).followingId)), followerCount: followers.length, followingCount: following.length }); } catch { res.status(500).json({ error: "Failed to fetch network" }); } });
 router.get("/:userId/activity", async (req, res) => { try { const access = await profileAccess(req.params.userId, viewer(req)); if (access.status !== 200) return res.status(access.status).json(access.body); res.json(await activity(req.params.userId, true, viewer(req))); } catch { res.status(500).json({ error: "Failed to fetch activity" }); } });
 router.get("/:userId/saved", async (req, res) => { try { const access = await profileAccess(req.params.userId, viewer(req)); if (access.status !== 200) return res.status(access.status).json(access.body); res.json(await getSavedAlbums(req.params.userId)); } catch { res.status(500).json({ error: "Failed to fetch saved albums" }); } });
-router.get("/:userId", async (req, res) => { try { const target = String(req.params.userId || ""); if (!(await followable(target))) return res.status(404).json({ error: "User not found" }); const profile = await ensureProfile(target); if (profile.isPrivate && viewer(req) !== target) return res.json({ ...(await formatPrivateProfile(profile)), ...(await socialStats(target, viewer(req))) }); res.json({ ...(await formatProfile(profile)), ...(await socialStats(target, viewer(req))) }); } catch { res.status(500).json({ error: "Failed to fetch profile" }); } });
+router.get("/:userId", async (req, res) => { try { const target = String(req.params.userId || ""); if (!(await followable(target))) return res.status(404).json({ error: "User not found" }); const profile = await ensureProfile(target); if (profile.isPrivate && viewer(req) !== target) return res.json({ ...(await formatPrivateProfile(profile)), ...(await socialStats(target, viewer(req))) }); res.json({ ...(await formatProfile(profile, viewer(req))), ...(await socialStats(target, viewer(req))) }); } catch { res.status(500).json({ error: "Failed to fetch profile" }); } });
 
 module.exports = router;

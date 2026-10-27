@@ -1,5 +1,5 @@
 const express = require("express");
-const { clerkClient, getAuth } = require("@clerk/express");
+const { getAuth } = require("@clerk/express");
 const Review = require("../models/Reviews");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const Like = require("../models/Like");
@@ -24,6 +24,7 @@ const {
 const { deleteOwnedReview, assertReviewId, persistedReviewId } = require("./utils/reviewInteractions");
 const { fanOutFollowedReview } = require("./utils/notifications");
 const { commentCounts } = require("../lib/reviewComments/read");
+const { lookupAuthors } = require("../lib/clerkAuthors");
 const {
   reviewCreateRateLimit,
   reviewMutationRateLimit,
@@ -37,15 +38,6 @@ const MAX_REVIEW_TEXT_LENGTH = 300;
 function plain(value) { return typeof value?.toObject === "function" ? value.toObject() : value; }
 function viewer(req) { try { return getAuth(req).userId || ""; } catch { return ""; } }
 function auth(req, res, next) { const userId = viewer(req); if (!userId) return res.status(401).json({ error: "Unauthorized" }); req.userId = userId; next(); }
-async function authorMap(ids) {
-  const map = new Map([...new Set(ids.filter(Boolean))].map((id) => [id, { userId: id, username: DEFAULT_AUTHOR, imageUrl: "" }]));
-  try {
-    const listed = await clerkClient.users.getUserList({ userId: [...map.keys()] });
-    const users = Array.isArray(listed) ? listed : listed.data || [];
-    users.forEach((user) => map.set(user.id, { userId: user.id, username: user.username || DEFAULT_AUTHOR, imageUrl: user.imageUrl || "" }));
-  } catch { /* optional */ }
-  return map;
-}
 async function likeStats(reviews, viewerId) {
   const ids = reviews.map((review) => String(review._id)).filter(Boolean);
   const rows = ids.length ? await Like.find({
@@ -61,7 +53,7 @@ async function serializeReviews(reviews, viewerId) {
   const albumIds = [...new Set(sources.map((review) => String(review.albumCatalogId?._id || review.albumCatalogId || "")).filter(Boolean))];
   const albums = albumIds.length ? await AlbumCatalog.find({ _id: { $in: albumIds } }) : [];
   const albumMap = new Map(albums.map((album) => [String(album._id), normalizeCatalogAlbum(album)]));
-  const authors = await authorMap(sources.map((review) => review.userId).filter((id) => !Review.isDeletedAuthor(id)));
+  const authors = await lookupAuthors(sources.map((review) => review.userId).filter((id) => !Review.isDeletedAuthor(id)));
   const [stats, comments] = await Promise.all([likeStats(sources, viewerId), commentCounts(sources.map((review) => review._id))]);
   return sources.map((review) => ({
     reviewId: persistedReviewId(review),

@@ -1,5 +1,6 @@
 const express = require("express");
-const { clerkClient, getAuth } = require("@clerk/express");
+const { getAuth } = require("@clerk/express");
+const { lookupAuthors } = require("../lib/clerkAuthors");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const { savedUserCount } = require("./utils/boardLibrary");
 const Follow = require("../models/Follow");
@@ -14,7 +15,6 @@ const { resolveAlbumGenres } = require("../lib/genres/read");
 const router = express.Router();
 const PAGE_LIMIT = 24;
 const MAX_PAGE_LIMIT = 24;
-const DEFAULT_USERNAME = "rescened user";
 const RATINGS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 
 function getViewerId(req) {
@@ -34,17 +34,6 @@ function limit(value) {
 }
 
 function plain(value) { return typeof value?.toObject === "function" ? value.toObject() : value; }
-
-async function authors(userIds) {
-  const result = new Map([...new Set(userIds.filter(Boolean))].map((id) => [id, { userId: id, username: DEFAULT_USERNAME, imageUrl: "" }]));
-  if (!result.size) return result;
-  try {
-    const listed = await clerkClient.users.getUserList({ userId: [...result.keys()] });
-    const users = Array.isArray(listed) ? listed : listed.data || [];
-    users.forEach((user) => result.set(user.id, { userId: user.id, username: user.username || DEFAULT_USERNAME, imageUrl: user.imageUrl || "" }));
-  } catch { /* metadata is optional */ }
-  return result;
-}
 
 async function ratingSummary(albumCatalogId) {
   const rows = await Review.aggregate([
@@ -82,7 +71,7 @@ async function socialContext(album, viewerId) {
         Review.find({ albumCatalogId: album._id, userId: { $in: followedIds } }).sort({ date: -1, _id: -1 }),
         Like.find({ targetType: "album", albumCatalogId: album._id, userId: { $in: followedIds } }),
       ]);
-      const userMap = await authors([...reviews, ...likes].map((row) => plain(row).userId));
+      const userMap = await lookupAuthors([...reviews, ...likes].map((row) => plain(row).userId));
       // Reviews arrive newest first, so the first one per person is their latest.
       const latestByUser = new Map();
       reviews.map(plain).forEach((review) => { if (!latestByUser.has(review.userId)) latestByUser.set(review.userId, review); });
