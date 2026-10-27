@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { API_BASE_URL } from "../config/api";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import "../Components/Community/GenreSuggestion.css";
+import Cover from "../Components/Cover";
 
 const SORTS = [
   { value: "rating", label: "Highest rated" },
@@ -157,7 +158,7 @@ export function GenrePage() {
           {albums.rows.map((album) => (
             <Link className="result-card" key={album.albumId} to={`/album/${album.albumId}`}>
               {album.cover ? (
-                <img className="result-cover" src={album.cover} alt={`${album.title} cover`} />
+                <Cover className="result-cover" src={album.cover} alt={`${album.title} cover`} />
               ) : (
                 <span className="result-cover result-cover-fallback" aria-label="No cover available">No cover</span>
               )}

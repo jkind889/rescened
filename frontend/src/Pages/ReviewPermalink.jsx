@@ -18,13 +18,15 @@ function formatDate(value) {
 // A shareable page for one review, reached from any review's Share button.
 export function ReviewPermalink() {
   const { reviewId } = useParams();
-  const { getToken, userId } = useAuth();
+  const { getToken, isLoaded, userId } = useAuth();
   const [review, setReview] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [likeMessage, setLikeMessage] = useState("");
 
   useEffect(() => {
+    // likedByViewer depends on the viewer, so wait for Clerk and fetch once.
+    if (!isLoaded) return undefined;
     const controller = new AbortController();
     async function fetchReview() {
       setIsLoading(true);
@@ -49,7 +51,7 @@ export function ReviewPermalink() {
     }
     void fetchReview();
     return () => controller.abort();
-  }, [getToken, reviewId, userId]);
+  }, [getToken, isLoaded, reviewId, userId]);
 
   async function toggleLike() {
     if (!userId) {

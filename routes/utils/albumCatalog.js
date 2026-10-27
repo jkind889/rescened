@@ -94,6 +94,10 @@ function normalizeAlbumInput(input = {}, options = {}) {
   };
 }
 
+// Exactly the fields normalizeCatalogAlbum reads, for album lookups that only
+// serialize the public shape. Skips fieldProvenance and other internal fields.
+const CATALOG_ALBUM_FIELDS = "albumId title artistDisplayName artistCredits releaseType releaseDate releaseDatePrecision releaseYear cover tracks label externalReferences catalogSource";
+
 function normalizeCatalogAlbum(album) {
   if (!album) return null;
   const source = typeof album.toObject === "function" ? album.toObject() : album;
@@ -148,6 +152,7 @@ async function createCatalogAlbum(input, options = {}) {
 
 module.exports = {
   UUID_V4,
+  CATALOG_ALBUM_FIELDS,
   isAlbumId,
   requireAlbumId,
   normalizeAlbumInput,

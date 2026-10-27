@@ -1,15 +1,18 @@
 const express = require("express");
-const { clerkClient, getAuth } = require("@clerk/express");
+const mongoose = require("mongoose");
+const { getAuth } = require("@clerk/express");
 const Review = require("../models/Reviews");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const Like = require("../models/Like");
 const Follow = require("../models/Follow");
-const { findAlbumByPublicId, normalizeCatalogAlbum } = require("./utils/albumCatalog");
+const { CATALOG_ALBUM_FIELDS, findAlbumByPublicId, normalizeCatalogAlbum } = require("./utils/albumCatalog");
 const {
   rankedAlbums,
-  recentlyReviewedAlbums,
-  featuredAlbums,
-  buildPopularReviewsPipeline,
+  popularReviewRows,
+  sitePopularAlbums,
+  siteFeaturedAlbums,
+  siteRecentlyReviewedAlbums,
+  sitePopularReviewRows,
   getListLimit,
 } = require("./utils/reviewFeeds");
 const {
@@ -24,6 +27,8 @@ const {
 const { deleteOwnedReview, assertReviewId, persistedReviewId } = require("./utils/reviewInteractions");
 const { fanOutFollowedReview } = require("./utils/notifications");
 const { commentCounts } = require("../lib/reviewComments/read");
+const { cachePublicFeed, noStore } = require("./utils/cacheHeaders");
+const { lookupAuthors } = require("../lib/clerkAuthors");
 const {
   reviewCreateRateLimit,
   reviewMutationRateLimit,
@@ -37,32 +42,34 @@ const MAX_REVIEW_TEXT_LENGTH = 300;
 function plain(value) { return typeof value?.toObject === "function" ? value.toObject() : value; }
 function viewer(req) { try { return getAuth(req).userId || ""; } catch { return ""; } }
 function auth(req, res, next) { const userId = viewer(req); if (!userId) return res.status(401).json({ error: "Unauthorized" }); req.userId = userId; next(); }
-async function authorMap(ids) {
-  const map = new Map([...new Set(ids.filter(Boolean))].map((id) => [id, { userId: id, username: DEFAULT_AUTHOR, imageUrl: "" }]));
-  try {
-    const listed = await clerkClient.users.getUserList({ userId: [...map.keys()] });
-    const users = Array.isArray(listed) ? listed : listed.data || [];
-    users.forEach((user) => map.set(user.id, { userId: user.id, username: user.username || DEFAULT_AUTHOR, imageUrl: user.imageUrl || "" }));
-  } catch { /* optional */ }
-  return map;
-}
+// Like counts come from a grouped count, and likedByViewer from the viewer's
+// own likes, instead of reading every like on the page's reviews.
 async function likeStats(reviews, viewerId) {
-  const ids = reviews.map((review) => String(review._id)).filter(Boolean);
-  const rows = ids.length ? await Like.find({
-    targetType: "review",
-    reviewId: { $in: ids },
-  }) : [];
+  const ids = reviews.map((review) => String(review._id || "")).filter(Boolean);
   const stats = new Map(ids.map((id) => [id, { likeCount: 0, likedByViewer: false }]));
-  rows.forEach((row) => { const item = stats.get(String(row.reviewId)); if (item) { item.likeCount += 1; item.likedByViewer ||= Boolean(viewerId && row.userId === viewerId); } });
+  const objectIds = ids.filter((id) => mongoose.isValidObjectId(id)).map((id) => new mongoose.Types.ObjectId(id));
+  if (!objectIds.length) return stats;
+  const [counts, viewerLikes] = await Promise.all([
+    Like.aggregate([
+      { $match: { targetType: "review", reviewId: { $in: objectIds } } },
+      { $group: { _id: "$reviewId", likeCount: { $sum: 1 } } },
+    ]),
+    viewerId ? Like.find({ targetType: "review", reviewId: { $in: objectIds }, userId: viewerId }, "reviewId") : [],
+  ]);
+  counts.forEach((row) => { const item = stats.get(String(row._id)); if (item) item.likeCount = Number(row.likeCount) || 0; });
+  viewerLikes.forEach((row) => { const item = stats.get(String(plain(row).reviewId)); if (item) item.likedByViewer = true; });
   return stats;
 }
 async function serializeReviews(reviews, viewerId) {
   const sources = reviews.map(plain);
   const albumIds = [...new Set(sources.map((review) => String(review.albumCatalogId?._id || review.albumCatalogId || "")).filter(Boolean))];
-  const albums = albumIds.length ? await AlbumCatalog.find({ _id: { $in: albumIds } }) : [];
+  const [albums, authors, stats, comments] = await Promise.all([
+    albumIds.length ? AlbumCatalog.find({ _id: { $in: albumIds } }, CATALOG_ALBUM_FIELDS) : [],
+    lookupAuthors(sources.map((review) => review.userId).filter((id) => !Review.isDeletedAuthor(id))),
+    likeStats(sources, viewerId),
+    commentCounts(sources.map((review) => review._id)),
+  ]);
   const albumMap = new Map(albums.map((album) => [String(album._id), normalizeCatalogAlbum(album)]));
-  const authors = await authorMap(sources.map((review) => review.userId).filter((id) => !Review.isDeletedAuthor(id)));
-  const [stats, comments] = await Promise.all([likeStats(sources, viewerId), commentCounts(sources.map((review) => review._id))]);
   return sources.map((review) => ({
     reviewId: persistedReviewId(review),
     userId: Review.isDeletedAuthor(review.userId) ? null : review.userId,
@@ -230,21 +237,27 @@ router.get("/review/:reviewId", async (req, res) => {
   } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch review", ...(error.code ? { code: error.code } : {}) }); }
 });
 
+// Site-wide album feeds are identical for every viewer, so browsers may reuse
+// them briefly. Feeds that carry likedByViewer or a viewer's circle are never stored.
 router.get("/popular", async (req, res) => {
   try {
-    res.json(await rankedAlbums({ limit: req.query.limit, window: req.query.window }));
+    const albums = await sitePopularAlbums({ limit: req.query.limit, window: req.query.window });
+    cachePublicFeed(res).json(albums);
   } catch { res.status(500).json({ error: "Failed to fetch reviews" }); }
 });
 
 router.get("/recent-albums", async (req, res) => {
-  try { res.json(await recentlyReviewedAlbums(getListLimit(req.query.limit, 6))); }
-  catch { res.status(500).json({ error: "Failed to fetch recent albums" }); }
+  try {
+    const albums = await siteRecentlyReviewedAlbums(getListLimit(req.query.limit, 6));
+    cachePublicFeed(res).json(albums);
+  } catch { res.status(500).json({ error: "Failed to fetch recent albums" }); }
 });
 
 router.get("/popular-reviews", async (req, res) => {
+  noStore(res);
   try {
-    const limit = getListLimit(req.query.limit, 4);
-    const reviews = await Review.aggregate(buildPopularReviewsPipeline(limit));
+    // The ranking is cached site-wide; likes and authors are read per viewer.
+    const reviews = await sitePopularReviewRows(getListLimit(req.query.limit, 4));
     res.json(await serializeReviews(reviews, viewer(req)));
   } catch { res.status(500).json({ error: "Failed to fetch popular reviews" }); }
 });
@@ -256,6 +269,7 @@ async function circleUserIds(userId) {
 }
 
 router.get("/circle/popular", auth, async (req, res) => {
+  noStore(res);
   try {
     const userIds = await circleUserIds(req.userId);
     res.json(await rankedAlbums({ limit: req.query.limit, window: req.query.window, userIds }));
@@ -263,17 +277,20 @@ router.get("/circle/popular", auth, async (req, res) => {
 });
 
 router.get("/circle/popular-reviews", auth, async (req, res) => {
+  noStore(res);
   try {
     const limit = getListLimit(req.query.limit, 4);
     const userIds = await circleUserIds(req.userId);
-    const reviews = await Review.aggregate(buildPopularReviewsPipeline(limit, { userIds }));
+    const reviews = await popularReviewRows(limit, { userIds });
     res.json(await serializeReviews(reviews, req.userId));
   } catch { res.status(500).json({ error: "Failed to fetch circle reviews" }); }
 });
 
 router.get("/featured", async (req, res) => {
-  try { res.json(await featuredAlbums(getListLimit(req.query.limit, 5))); }
-  catch { res.status(500).json({ error: "Failed to fetch featured albums" }); }
+  try {
+    const albums = await siteFeaturedAlbums(getListLimit(req.query.limit, 5));
+    cachePublicFeed(res).json(albums);
+  } catch { res.status(500).json({ error: "Failed to fetch featured albums" }); }
 });
 
 module.exports = router;

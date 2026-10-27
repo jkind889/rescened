@@ -28,6 +28,9 @@ function Navbar()
     const { getToken, isLoaded, isSignedIn } = useAuth()
     const location = useLocation()
     const [unreadCount, setUnreadCount] = useState(0)
+    // Bumped when the tab becomes visible again so the badge catches up.
+    const [unreadRefreshKey, setUnreadRefreshKey] = useState(0)
+    const isNotificationsPage = location.pathname === "/notifications"
     const [isModerator, setIsModerator] = useState(false)
     const isCurrent = (path) => location.pathname === path || location.pathname.startsWith(`${path}/`)
     const [theme, setTheme] = useState(() => localStorage.getItem("rescened-theme") || "dark")
@@ -38,6 +41,21 @@ function Navbar()
     }, [theme])
 
     useEffect(() => {
+        if (!isLoaded || !isSignedIn) return undefined
+
+        function handleVisibilityChange() {
+            if (document.visibilityState === "visible") {
+                setUnreadRefreshKey((key) => key + 1)
+            }
+        }
+
+        document.addEventListener("visibilitychange", handleVisibilityChange)
+        return () => document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }, [isLoaded, isSignedIn])
+
+    // Fetched at sign-in, when leaving the notifications page, and when the tab
+    // becomes visible again. Ordinary navigation does not refetch.
+    useEffect(() => {
         let isCurrent = true
 
         async function fetchUnreadCount() {
@@ -46,7 +64,7 @@ function Navbar()
                 return
             }
 
-            if (location.pathname === "/notifications") {
+            if (isNotificationsPage) {
                 setUnreadCount(0)
                 return
             }
@@ -82,7 +100,7 @@ function Navbar()
         return () => {
             isCurrent = false
         }
-    }, [getToken, isLoaded, isSignedIn, location.pathname])
+    }, [getToken, isLoaded, isSignedIn, isNotificationsPage, unreadRefreshKey])
 
     // Display hint only: the moderation API enforces moderator access itself.
     useEffect(() => {

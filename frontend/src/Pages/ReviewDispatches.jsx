@@ -7,13 +7,15 @@ import { getApiErrorMessage } from "../utils/apiErrors";
 const POPULAR_REVIEW_LIMIT = 12;
 
 export function ReviewDispatches() {
-  const { getToken, userId: viewerId } = useAuth();
+  const { getToken, isLoaded, userId: viewerId } = useAuth();
   const [reviews, setReviews] = useState([]);
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
   const [likeMessage, setLikeMessage] = useState("");
 
   useEffect(() => {
+    // Like state depends on the viewer, so wait for Clerk and fetch once.
+    if (!isLoaded) return undefined;
     let isCurrent = true;
 
     async function fetchPopularReviews() {
@@ -62,7 +64,7 @@ export function ReviewDispatches() {
     return () => {
       isCurrent = false;
     };
-  }, [getToken, viewerId]);
+  }, [getToken, isLoaded, viewerId]);
 
   function updateReviewLikeState(reviewId, nextState) {
     setReviews((currentReviews) => currentReviews.map((review) => (

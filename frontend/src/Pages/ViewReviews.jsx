@@ -19,11 +19,11 @@ export function ViewReviews() {
     const [editMessage, setEditMessage] = useState("");
     const [editingReview, setEditingReview] = useState(null);
     const [reviewSort, setReviewSort] = useState("recent");
-    const [isLoading, setIsLoading] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [deletingReviewId, setDeletingReviewId] = useState("");
     const [deleteErrors, setDeleteErrors] = useState({});
-    const { getToken, userId: viewerId } = useAuth();
+    const { getToken, isLoaded, userId: viewerId } = useAuth();
     const { userId } = useParams();
     const isPublicReviewList = Boolean(userId);
     const canManageReviews = !isPublicReviewList;
@@ -33,6 +33,8 @@ export function ViewReviews() {
         : `${API_BASE_URL}/reviews/review/user/`;
 
     useEffect(() => {
+        // Like state depends on the viewer, so wait for Clerk and fetch once.
+        if (!isLoaded) return undefined;
         const controller = new AbortController();
         async function fetchFirstPage() {
             setIsLoading(true);
@@ -60,7 +62,7 @@ export function ViewReviews() {
         }
         void fetchFirstPage();
         return () => controller.abort();
-    }, [getToken, reviewEndpoint, reviewSort, viewerId]);
+    }, [getToken, isLoaded, reviewEndpoint, reviewSort, viewerId]);
 
     async function loadMore() {
         if (!nextCursor || isLoadingMore) return;

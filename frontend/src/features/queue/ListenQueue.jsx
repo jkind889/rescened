@@ -3,10 +3,11 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@clerk/react";
 import { fetchProfileQueue, moveItem, normalizeQueue, useListenQueue } from "./queue";
 import "./queue.css";
+import Cover from "../../Components/Cover";
 
 function QueueCover({ album }) {
   return album.cover
-    ? <img className="listen-queue-cover" src={album.cover} alt="" loading="lazy" />
+    ? <Cover className="listen-queue-cover" src={album.cover} size={40} />
     : <span className="listen-queue-cover listen-queue-cover-empty" aria-hidden="true" />;
 }
 

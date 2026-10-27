@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "../config/api";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import Cover from "./Cover";
 
 export function PopularAlbums({ limit = 10, window = "30d" }) {
     const [albums, setAlbums] = useState([]);
@@ -67,10 +68,11 @@ export function PopularAlbums({ limit = 10, window = "30d" }) {
                 >
                     <span className="popular-album-rank">{index + 1}</span>
                     {album.cover ? (
-                        <img
+                        <Cover
                             className="popular-album-cover"
                             src={album.cover}
                             alt={`${album.title} cover`}
+                            size={84}
                         />
                     ) : (
                         <div className="popular-album-cover popular-album-cover-fallback">

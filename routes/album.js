@@ -1,11 +1,12 @@
 const express = require("express");
-const { clerkClient, getAuth } = require("@clerk/express");
+const { getAuth } = require("@clerk/express");
+const { lookupAuthors } = require("../lib/clerkAuthors");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const { savedUserCount } = require("./utils/boardLibrary");
 const Follow = require("../models/Follow");
 const Like = require("../models/Like");
 const Review = require("../models/Reviews");
-const { findAlbumByPublicId, normalizeCatalogAlbum } = require("./utils/albumCatalog");
+const { CATALOG_ALBUM_FIELDS, findAlbumByPublicId, normalizeCatalogAlbum } = require("./utils/albumCatalog");
 const { buildCatalogSearchQuery } = require("./utils/catalogSearch");
 const { albumTopTrack } = require("./utils/trackRankings");
 const { isGenresEnabled } = require("./utils/serverConfig");
@@ -14,7 +15,6 @@ const { resolveAlbumGenres } = require("../lib/genres/read");
 const router = express.Router();
 const PAGE_LIMIT = 24;
 const MAX_PAGE_LIMIT = 24;
-const DEFAULT_USERNAME = "rescened user";
 const RATINGS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 
 function getViewerId(req) {
@@ -34,17 +34,6 @@ function limit(value) {
 }
 
 function plain(value) { return typeof value?.toObject === "function" ? value.toObject() : value; }
-
-async function authors(userIds) {
-  const result = new Map([...new Set(userIds.filter(Boolean))].map((id) => [id, { userId: id, username: DEFAULT_USERNAME, imageUrl: "" }]));
-  if (!result.size) return result;
-  try {
-    const listed = await clerkClient.users.getUserList({ userId: [...result.keys()] });
-    const users = Array.isArray(listed) ? listed : listed.data || [];
-    users.forEach((user) => result.set(user.id, { userId: user.id, username: user.username || DEFAULT_USERNAME, imageUrl: user.imageUrl || "" }));
-  } catch { /* metadata is optional */ }
-  return result;
-}
 
 async function ratingSummary(albumCatalogId) {
   const rows = await Review.aggregate([
@@ -66,23 +55,23 @@ function averageOf(ratings) {
 }
 
 async function socialContext(album, viewerId) {
-  const [savedCount, summary, viewerReview, topTrack] = await Promise.all([
+  const [savedCount, summary, viewerReview, topTrack, follows] = await Promise.all([
     savedUserCount(album._id),
     ratingSummary(album._id),
     viewerId ? Review.findOne({ albumCatalogId: album._id, userId: viewerId }).sort({ date: -1, _id: -1 }) : null,
     albumTopTrack(album),
+    viewerId ? Follow.find({ followerId: viewerId }, "followingId") : [],
   ]);
   let followedReviewers = [];
   let followedAlbumLikers = [];
   if (viewerId) {
-    const follows = await Follow.find({ followerId: viewerId });
     const followedIds = follows.map((follow) => plain(follow).followingId).filter((id) => id && id !== viewerId);
     if (followedIds.length) {
       const [reviews, likes] = await Promise.all([
         Review.find({ albumCatalogId: album._id, userId: { $in: followedIds } }).sort({ date: -1, _id: -1 }),
         Like.find({ targetType: "album", albumCatalogId: album._id, userId: { $in: followedIds } }),
       ]);
-      const userMap = await authors([...reviews, ...likes].map((row) => plain(row).userId));
+      const userMap = await lookupAuthors([...reviews, ...likes].map((row) => plain(row).userId));
       // Reviews arrive newest first, so the first one per person is their latest.
       const latestByUser = new Map();
       reviews.map(plain).forEach((review) => { if (!latestByUser.has(review.userId)) latestByUser.set(review.userId, review); });
@@ -110,11 +99,14 @@ router.get("/catalog", async (req, res) => {
     const pageLimit = limit(req.query.limit);
     const skip = (page - 1) * pageLimit;
     const query = catalogQuery(req.query.q);
-    const [total, albums] = await Promise.all([
-      AlbumCatalog.countDocuments(query),
-      AlbumCatalog.find(query).sort({ artistDisplayName: 1, title: 1 }).skip(skip).limit(pageLimit),
+    // One extra row answers hasNextPage. An unfiltered total comes from
+    // collection metadata instead of counting every catalog document.
+    const [total, rows] = await Promise.all([
+      Object.keys(query).length ? AlbumCatalog.countDocuments(query) : AlbumCatalog.estimatedDocumentCount(),
+      AlbumCatalog.find(query, CATALOG_ALBUM_FIELDS).sort({ artistDisplayName: 1, title: 1 }).skip(skip).limit(pageLimit + 1),
     ]);
-    res.json({ results: albums.map(normalizeCatalogAlbum), page, limit: pageLimit, total, hasPreviousPage: page > 1, hasNextPage: skip + albums.length < total });
+    const albums = rows.slice(0, pageLimit);
+    res.json({ results: albums.map(normalizeCatalogAlbum), page, limit: pageLimit, total, hasPreviousPage: page > 1, hasNextPage: rows.length > pageLimit });
   } catch (error) { res.status(500).json({ error: "Failed to fetch album catalog" }); }
 });
 

@@ -61,3 +61,13 @@ Do not describe these as real-user or production-traffic numbers. Do not claim i
 - Frontend lint/build were not run because no frontend code changed.
 
 The work remains uncommitted on `rescened-performance-benchmarks`. A subsequently added `.gitignore` rule currently ignores `benchmarks/` itself, in addition to the intended `.benchmarks/` artifacts directory. That rule was preserved. The harness must be deliberately tracked before committing the new package scripts and tests, which import it; otherwise a fresh checkout will be incomplete.
+
+## Changes since this run (October 27, 2026)
+
+The discovery feeds measured above changed after this run, and they have not been re-benchmarked yet. Do not carry the 9.9-second figure forward as current, and do not claim an improvement until a new run measures one.
+
+- The popular, featured, recent-albums, and popular-reviews feeds rank first and join the catalog only for a bounded window of top rows (`routes/utils/reviewFeeds.js`). Deleted catalog rows are dropped and the window widens until the page is full, so they still never take a result slot.
+- The four site-wide feeds cache ranked ids for 60 seconds per process and share in-flight rankings (`routes/utils/feedCache.js`). Catalog metadata, review content, and viewer likes are read on every request. Circle feeds are not cached. A new review can take up to 60 seconds to move a site-wide ranking.
+- The three anonymous album feeds send `Cache-Control: public, max-age=60, stale-while-revalidate=120`. Viewer-dependent feeds send `private, no-store`.
+- The API gzips its responses with `compression`, and CORS preflights carry `max-age=600`.
+- Profile sections load in parallel. Concurrent first visits share the profile selected by the unique `userId` index: a losing insert re-reads the persisted profile, preserving its fields and privacy settings instead of returning a duplicate-key error.

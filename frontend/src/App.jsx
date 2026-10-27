@@ -1,27 +1,28 @@
-import { lazy, Suspense } from "react";
+import { lazy } from "react";
 import { BrowserRouter, Navigate, Routes, Route } from "react-router-dom";
 import "./reset.css";
 import "./App.css";
-import SearchResults from "./Pages/SearchResults";
-import AlbumDetail from "./Components/AlbumDetail";
-import ViewReviews from "./Pages/ViewReviews";
-import ReviewDispatches from "./Pages/ReviewDispatches";
-import PopularAlbums from "./Pages/PopularAlbums";
 import FrontPage from "./Pages/FrontPage";
 import Layout from "./Layout";
-import Account from "./Pages/Account";
-import EditProfile from "./Pages/EditProfile";
-import LastfmCallback from "./Pages/LastfmCallback";
-import AlbumMappings from "./Pages/AlbumMappings";
-import ProfileNetwork from "./Pages/ProfileNetwork";
-import Boards from "./Pages/Boards";
-import BoardDetail from "./Pages/BoardDetail";
-import Notifications from "./Pages/Notifications";
-import PatchNotes from "./Pages/PatchNotes";
-import Community from "./Pages/Community";
-import ReviewPermalink from "./Pages/ReviewPermalink";
 import ProtectedRoute from "./Components/ProtectedRoute";
 
+// FrontPage stays in the entry chunk; every other route loads on demand.
+const SearchResults = lazy(() => import("./Pages/SearchResults"));
+const AlbumDetail = lazy(() => import("./Components/AlbumDetail"));
+const ViewReviews = lazy(() => import("./Pages/ViewReviews"));
+const ReviewDispatches = lazy(() => import("./Pages/ReviewDispatches"));
+const PopularAlbums = lazy(() => import("./Pages/PopularAlbums"));
+const Account = lazy(() => import("./Pages/Account"));
+const EditProfile = lazy(() => import("./Pages/EditProfile"));
+const LastfmCallback = lazy(() => import("./Pages/LastfmCallback"));
+const AlbumMappings = lazy(() => import("./Pages/AlbumMappings"));
+const ProfileNetwork = lazy(() => import("./Pages/ProfileNetwork"));
+const Boards = lazy(() => import("./Pages/Boards"));
+const BoardDetail = lazy(() => import("./Pages/BoardDetail"));
+const Notifications = lazy(() => import("./Pages/Notifications"));
+const PatchNotes = lazy(() => import("./Pages/PatchNotes"));
+const Community = lazy(() => import("./Pages/Community"));
+const ReviewPermalink = lazy(() => import("./Pages/ReviewPermalink"));
 const Suggestions = lazy(() => import("./Pages/Suggestions"));
 const SuggestionEditor = lazy(() => import("./Pages/SuggestionEditor"));
 const ApprovedSuggestions = lazy(() => import("./Pages/ApprovedSuggestions"));
@@ -35,7 +36,6 @@ export function App() {
    return (
     <BrowserRouter>
       <div className="app-shell">
-        <Suspense fallback={<div className="community-loading" role="status">Loading community workspace…</div>}>
         <Routes>
           <Route element={<Layout />}>
             <Route index element={<FrontPage />} />
@@ -136,7 +136,6 @@ export function App() {
             <Route path="/account/lastfm/callback" element={<LastfmCallback />} />
           </Route>
         </Routes>
-        </Suspense>
       </div>
     </BrowserRouter>
   );

@@ -18,6 +18,12 @@
   --app-display-font: "Avenir Next Condensed", "Helvetica Neue", Arial, sans-serif;
 }
 
+/* Cover width/height attributes only reserve an aspect ratio; component CSS sets the size. */
+:where(img.cover-image) {
+  width: auto;
+  height: auto;
+}
+
 :root[data-theme="light"] {
   color-scheme: light;
   --app-bg: #f6f6f4;

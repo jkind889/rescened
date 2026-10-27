@@ -18,6 +18,8 @@ function ExternalAlbumCover({ candidate }) {
       className="external-album-cover"
       src={candidate.cover}
       alt={`${title} cover`}
+      loading="lazy"
+      decoding="async"
       onError={() => setImageFailed(true)}
     />
   );

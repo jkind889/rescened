@@ -140,3 +140,36 @@ test("typographic apostrophe queries match ASCII apostrophes on both catalog end
     assert.deepEqual(endpoint.extract(result.body).map((album) => album.albumId), [ALBUM_ID], endpoint.name);
   }
 });
+
+test("the album catalog list reads one extra row for hasNextPage and avoids counting an unfiltered catalog", async (t) => {
+  const albums = Array.from({ length: 5 }, (_, index) => ({ ...albumWithArtist(`Artist ${index}`), albumId: `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa${index}` }));
+  const limits = [];
+  let projection;
+  AlbumCatalog.find = (query, fields) => {
+    projection = fields;
+    let rows = Object.keys(query).length ? matchingAlbums(query, albums) : albums;
+    return {
+      sort() { return this; },
+      skip(value) { rows = rows.slice(value); return this; },
+      limit(value) { limits.push(value); return Promise.resolve(rows.slice(0, value)); },
+    };
+  };
+  const counted = t.mock.method(AlbumCatalog, "countDocuments", async () => { throw new Error("unfiltered lists must not count every document"); });
+  t.mock.method(AlbumCatalog, "estimatedDocumentCount", async () => albums.length);
+
+  const first = await callRoute(albumRouter, "get", "/catalog", { query: { page: "1", limit: "2" } });
+  assert.equal(first.status, 200);
+  assert.deepEqual(first.body.results.map((album) => album.albumId), albums.slice(0, 2).map((album) => album.albumId));
+  assert.equal(first.body.total, 5);
+  assert.equal(first.body.hasNextPage, true);
+  assert.equal(first.body.hasPreviousPage, false);
+  assert.deepEqual(limits, [3]);
+  assert.equal(counted.mock.callCount(), 0);
+  assert.match(projection, /\balbumId\b/);
+  assert.doesNotMatch(projection, /fieldProvenance/);
+
+  const last = await callRoute(albumRouter, "get", "/catalog", { query: { page: "3", limit: "2" } });
+  assert.deepEqual(last.body.results.map((album) => album.albumId), [albums[4].albumId]);
+  assert.equal(last.body.hasNextPage, false);
+  assert.equal(last.body.hasPreviousPage, true);
+});

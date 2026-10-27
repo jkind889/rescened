@@ -21,6 +21,7 @@ import ProfileStats from "../features/stats/ProfileStats";
 import { ListenQueueEditor, UpNextList } from "../features/queue/ListenQueue";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import { REVIEW_SORTS, REVIEW_SORT_OPTIONS } from "../utils/reviewSorts";
+import Cover from "../Components/Cover";
 
 const tabs = [
   { id: "overview", label: "Overview" },
@@ -91,7 +92,7 @@ function AlbumCover({ src, title }) {
     return <div className="profile-cover-fallback">No cover</div>;
   }
 
-  return <img className="profile-cover" src={src} alt={`${title} cover`} />;
+  return <Cover className="profile-cover" src={src} alt={`${title} cover`} />;
 }
 
 export function Account() {
@@ -159,6 +160,9 @@ export function Account() {
     const controller = new AbortController();
 
     async function fetchProfileData() {
+      // Wait for Clerk so the profile is fetched once, with the right token.
+      if (!isLoaded) return;
+
       if (!isPublicProfile && !isSignedIn) {
         setSavedAlbums([]);
         setReviews([]);
@@ -195,103 +199,52 @@ export function Account() {
 
         const token = isSignedIn ? await getToken() : null;
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
-        let savedData = [];
-        let reviewsData = { reviews: [], nextCursor: null };
-        let popularReviewsData = { reviews: [], nextCursor: null };
-        let activityData = [];
-        let networkData = [];
-        let boardsData = [];
-        let profileData;
+        const getJson = async (path) => {
+          const response = await fetch(`${API_BASE_URL}${path}`, { headers, signal: controller.signal });
+          if (!response.ok) throw new Error(`Failed to load ${path}`);
+          return response.json();
+        };
+        // Only the profile itself is required. Any other section that fails to
+        // load falls back to empty instead of blanking the whole profile.
+        const valueOf = (result, fallback) => {
+          if (result.status === "fulfilled") return result.value;
+          if (!controller.signal.aborted) console.error(result.reason);
+          return fallback;
+        };
+        const emptyReviews = { reviews: [], nextCursor: null };
+        const profilePath = isPublicProfile ? `/profile/${encodeURIComponent(publicUserId)}` : "/profile/me";
+        const reviewsPath = isPublicProfile ? `/reviews/review/user/${encodeURIComponent(publicUserId)}` : "/reviews/review/user/";
+        const [
+          profileResult,
+          reviewsResult,
+          popularReviewsResult,
+          savedResult,
+          activityResult,
+          boardsResult,
+          networkResult,
+        ] = await Promise.allSettled([
+          getJson(profilePath),
+          getJson(`${reviewsPath}?sort=recent`),
+          getJson(`${reviewsPath}?sort=popular&limit=${REVIEW_PREVIEW_LIMIT}`),
+          // A private profile answers these with 403; they are ignored below.
+          getJson(`${profilePath}/saved`),
+          getJson(`${profilePath}/activity`),
+          getJson(isPublicProfile ? `${profilePath}/boards` : "/boards"),
+          isPublicProfile ? Promise.resolve([]) : getJson("/profile/me/network"),
+        ]);
 
-        if (isPublicProfile) {
-          const encodedPublicUserId = encodeURIComponent(publicUserId);
-          const [profileResponse, reviewsResponse, popularReviewsResponse] = await Promise.all([
-            fetch(`${API_BASE_URL}/profile/${encodedPublicUserId}`, { headers }),
-            fetch(`${API_BASE_URL}/reviews/review/user/${encodedPublicUserId}?sort=recent`, { headers, signal: controller.signal }),
-            fetch(`${API_BASE_URL}/reviews/review/user/${encodedPublicUserId}?sort=popular&limit=${REVIEW_PREVIEW_LIMIT}`, { headers, signal: controller.signal }),
-          ]);
-
-          if (!profileResponse.ok) {
-            throw new Error("Failed to load profile data");
-          }
-
-          profileData = await profileResponse.json();
-
-          if (!reviewsResponse.ok || !popularReviewsResponse.ok) {
-            throw new Error("Failed to load profile reviews");
-          }
-          reviewsData = await reviewsResponse.json();
-          popularReviewsData = await popularReviewsResponse.json();
-
-          if (!(profileData.isPrivate && !profileData.isCurrentUser)) {
-            const [savedResponse, activityResponse, boardsResponse] = await Promise.all([
-              fetch(`${API_BASE_URL}/profile/${encodedPublicUserId}/saved`, { headers }),
-              fetch(`${API_BASE_URL}/profile/${encodedPublicUserId}/activity`, { headers }),
-              fetch(`${API_BASE_URL}/profile/${encodedPublicUserId}/boards`, { headers }),
-            ]);
-
-            if (
-              !savedResponse.ok
-              || !activityResponse.ok
-              || !boardsResponse.ok
-            ) {
-              throw new Error("Failed to load profile data");
-            }
-
-            [savedData, activityData, boardsData] = await Promise.all([
-              savedResponse.json(),
-              activityResponse.json(),
-              boardsResponse.json(),
-            ]);
-          }
-        } else {
-          const [
-            savedResponse,
-            reviewsResponse,
-            profileResponse,
-            activityResponse,
-            networkResponse,
-            boardsResponse,
-            popularReviewsResponse,
-          ] = await Promise.all([
-            fetch(`${API_BASE_URL}/profile/me/saved`, { headers }),
-            fetch(`${API_BASE_URL}/reviews/review/user/?sort=recent`, { headers, signal: controller.signal }),
-            fetch(`${API_BASE_URL}/profile/me`, { headers }),
-            fetch(`${API_BASE_URL}/profile/me/activity`, { headers }),
-            fetch(`${API_BASE_URL}/profile/me/network`, { headers }),
-            fetch(`${API_BASE_URL}/boards`, { headers }),
-            fetch(`${API_BASE_URL}/reviews/review/user/?sort=popular&limit=${REVIEW_PREVIEW_LIMIT}`, { headers, signal: controller.signal }),
-          ]);
-
-          if (
-            !savedResponse.ok
-            || !reviewsResponse.ok
-            || !profileResponse.ok
-            || !activityResponse.ok
-            || !networkResponse.ok
-            || !boardsResponse.ok
-            || !popularReviewsResponse.ok
-          ) {
-            throw new Error("Failed to load profile data");
-          }
-
-          const [savedResponseData, nextReviewsData, nextProfileData, nextActivityData, nextNetworkData, nextBoardsData, nextPopularReviewsData] = await Promise.all([
-            savedResponse.json(),
-            reviewsResponse.json(),
-            profileResponse.json(),
-            activityResponse.json(),
-            networkResponse.json(),
-            boardsResponse.json(),
-            popularReviewsResponse.json(),
-          ]);
-          savedData = Array.isArray(savedResponseData) ? savedResponseData : [];
-          reviewsData = nextReviewsData;
-          popularReviewsData = nextPopularReviewsData;
-          profileData = nextProfileData;
-          activityData = nextActivityData;
-          networkData = nextNetworkData;
-          boardsData = nextBoardsData;
+        if (profileResult.status === "rejected") {
+          throw profileResult.reason;
         }
+
+        const profileData = profileResult.value;
+        const isHiddenProfile = isPublicProfile && profileData.isPrivate && !profileData.isCurrentUser;
+        const reviewsData = valueOf(reviewsResult, emptyReviews) || emptyReviews;
+        const popularReviewsData = valueOf(popularReviewsResult, emptyReviews) || emptyReviews;
+        const savedData = isHiddenProfile ? [] : valueOf(savedResult, []);
+        const activityData = isHiddenProfile ? [] : valueOf(activityResult, []);
+        const boardsData = isHiddenProfile ? [] : valueOf(boardsResult, []);
+        const networkData = valueOf(networkResult, []);
 
         if (!isCurrent) {
           return;
@@ -372,7 +325,7 @@ export function Account() {
       isCurrent = false;
       controller.abort();
     };
-  }, [getToken, isPublicProfile, isSignedIn, publicProfileImageUrl, publicProfileUsername, publicUserId]);
+  }, [getToken, isLoaded, isPublicProfile, isSignedIn, publicProfileImageUrl, publicProfileUsername, publicUserId]);
 
   useEffect(() => {
     if (!availableTabs.some((tab) => tab.id === activeTab)) {

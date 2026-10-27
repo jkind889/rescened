@@ -48,7 +48,7 @@ function AlbumReviewCard({
         <article className="album-review-card">
             <div className="album-review-avatar" aria-hidden="true">
                 {imageUrl ? (
-                    <img src={imageUrl} alt="" />
+                    <img src={imageUrl} alt="" loading="lazy" decoding="async" />
                 ) : (
                     <span>{getAvatarInitial(username)}</span>
                 )}

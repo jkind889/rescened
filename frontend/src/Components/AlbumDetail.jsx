@@ -134,7 +134,7 @@ export function AlbumDetail()
     const [reviewActionMessage, setReviewActionMessage] = useState("");
     const [deletingReviewId, setDeletingReviewId] = useState("");
     const [deleteErrors, setDeleteErrors] = useState({});
-    const { getToken, isSignedIn, userId } = useAuth();
+    const { getToken, isLoaded, isSignedIn, userId } = useAuth();
     const canUseAuthenticatedActions = Boolean(isSignedIn && userId);
     // Album detail includes a genres array only while the server has genres on.
     const genresEnabled = Array.isArray(album?.genres);
@@ -195,9 +195,10 @@ export function AlbumDetail()
                 if (!controller.signal.aborted) setIsReviewsLoading(false);
             }
         }
-        if (albumId) void fetchReviews();
+        // Viewer-dependent responses wait for Clerk so they are fetched once.
+        if (albumId && isLoaded) void fetchReviews();
         return () => controller.abort();
-    }, [getToken, albumId, location.pathname, location.search, userId]);
+    }, [getToken, albumId, isLoaded, location.pathname, location.search, userId]);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -223,9 +224,9 @@ export function AlbumDetail()
             }
         }
 
-        if (albumId) void fetchAlbumLike();
+        if (albumId && isLoaded) void fetchAlbumLike();
         return () => controller.abort();
-    }, [getToken, albumId, userId]);
+    }, [getToken, albumId, isLoaded, userId]);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -262,9 +263,9 @@ export function AlbumDetail()
             }
         }
 
-        if (albumId) void fetchAlbumSocial();
+        if (albumId && isLoaded) void fetchAlbumSocial();
         return () => controller.abort();
-    }, [getToken, albumId, userId, socialVersion]);
+    }, [getToken, albumId, isLoaded, userId, socialVersion]);
 
     useEffect(() => {
         let shouldIgnore = false;
@@ -841,7 +842,7 @@ export function AlbumDetail()
                 to={user.reviewId ? `/review/${user.reviewId}` : `/profile/${encodeURIComponent(user.userId)}`}
             >
                 <span className="album-social-avatar" aria-hidden="true">
-                    {user.imageUrl ? <img src={user.imageUrl} alt="" /> : getSocialInitial(user)}
+                    {user.imageUrl ? <img src={user.imageUrl} alt="" loading="lazy" decoding="async" /> : getSocialInitial(user)}
                 </span>
                 <span>{user.username || "rescened user"}</span>
                 {rating !== null && <span className="album-social-rating" aria-label={`rated ${rating} out of 5`}>★ {rating}</span>}
@@ -913,6 +914,7 @@ export function AlbumDetail()
                             className="album-poster-image"
                             src={albumArt}
                             alt={`${album.title} cover`}
+                            fetchPriority="high"
                         />
                     ) : (
                         <div className="album-poster-fallback">No cover art</div>

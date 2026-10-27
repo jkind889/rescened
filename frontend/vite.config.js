@@ -16,4 +16,18 @@ export default defineConfig({
       'react/jsx-dev-runtime': path.resolve(dirname, 'node_modules/react/jsx-dev-runtime.js'),
     },
   },
+  build: {
+    rolldownOptions: {
+      output: {
+        // Long-lived vendor chunks so app deploys don't bust the framework cache.
+        codeSplitting: {
+          groups: [
+            { name: 'vendor-react', test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+            { name: 'vendor-router', test: /[\\/]node_modules[\\/](react-router|react-router-dom)[\\/]/ },
+            { name: 'vendor-clerk', test: /[\\/]node_modules[\\/]@clerk[\\/]/ },
+          ],
+        },
+      },
+    },
+  },
 })

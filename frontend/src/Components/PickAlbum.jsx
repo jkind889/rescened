@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@clerk/react";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import { AddToQueueButton } from "../features/queue/QueueActions";
+import Cover from "./Cover";
 
 // Suggests a random saved album the viewer has not logged or reviewed yet.
 // Without boardId it draws from every board the viewer owns.
@@ -46,7 +47,7 @@ export function PickAlbum({ boardId = "" }) {
       </button>
       {album && (
         <Link className="pick-album-result" to={`/album/${album.albumId}`}>
-          {album.cover ? <img src={album.cover} alt="" /> : <span className="pick-album-fallback">No cover</span>}
+          {album.cover ? <Cover src={album.cover} /> : <span className="pick-album-fallback">No cover</span>}
           <span>
             <small>Not logged yet · 1 of {pick.candidateCount}</small>
             <strong>{album.title || "Untitled album"}</strong>

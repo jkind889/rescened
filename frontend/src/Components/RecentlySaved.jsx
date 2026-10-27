@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "../config/api";
 import { useState, useEffect } from "react";
 import { useAuth } from "@clerk/react";
+import Cover from "./Cover";
 
 export function RecentlySaved() {
     const [savedAlbums, setSavedAlbums] = useState([]);
@@ -25,7 +26,7 @@ export function RecentlySaved() {
         <div className="recently-saved">
             {savedAlbums.map((album) => (
                 <div key={album.albumId} className="recent-saved-album">
-                    <img src={album.cover} alt={`${album.title} cover`} className="recent-saved-album-cover" />
+                    <Cover src={album.cover} alt={`${album.title} cover`} className="recent-saved-album-cover" />
                     <div className="recent-saved-album-info">
                         <h3>{album.title}</h3>
                         <p>{album.artistDisplayName}</p>
