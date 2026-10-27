@@ -4,7 +4,7 @@ const Board = require("../models/Board");
 const { findAlbumByPublicId } = require("./utils/albumCatalog");
 const { albumSaveRateLimit, boardMutationRateLimit, diaryMutationRateLimit } = require("./utils/rateLimit");
 const { fail, fields } = require("./utils/diaryValidation");
-const { getDefaultBoard, ownedBoard, formatBoard, albumBoards, publicBoardId } = require("./utils/boardLibrary");
+const { getDefaultBoard, ownedBoard, formatBoard, formatBoards, albumBoards, publicBoardId } = require("./utils/boardLibrary");
 const { saveAlbum, removeAlbum, deleteBoard, setMembership, updateBoard, reorderBoard } = require("./utils/boardMutations");
 const { orderInput, settingsInput } = require("./utils/boardOrder");
 const { listListens } = require("./utils/listeningDiary");
@@ -49,7 +49,7 @@ router.get("/", auth, async (req, res) => {
   try {
     await getDefaultBoard(req.userId);
     const boards = await Board.find({ userId: req.userId }).sort({ isDefault: -1, updatedAt: -1 });
-    res.json(await Promise.all(boards.map((board) => formatBoard(board))));
+    res.json(await formatBoards(boards));
   } catch (error) { sendError(res, error, "Failed to fetch boards"); }
 });
 

@@ -337,3 +337,41 @@ integration("public board reads follow the saved order and never contain Mongo I
   const ownerList = await request("GET", "/boards");
   noInternalIds(ownerList.body);
 });
+
+integration("board lists format every board from one read, matching each board's own read", async () => {
+  const [first, second, third, fourth] = albums;
+  const manualId = await createBoard("Manual");
+  const datedId = await createBoard("Dated");
+  for (const album of [first, second, third]) await save(manualId, album);
+  for (const album of [third, fourth]) await save(datedId, album);
+  const manual = await setSettings(manualId, { orderMode: "manual", displayStyle: "ranked" });
+  await reorder(manualId, [third.albumId, first.albumId, second.albumId], manual.body.revision);
+  const listened = await request("POST", "/diary", {
+    key: crypto.randomUUID(), body: { albumId: fourth.albumId, listenedOn: "2026-10-01", timeZone: "UTC", boardIds: [manualId, datedId] },
+  });
+  assert.equal(listened.status, 201, JSON.stringify(listened.body));
+  // Another user's board must not leak into the owner's list.
+  const stranger = `stranger-${crypto.randomUUID()}`;
+  await request("POST", "/boards", { userId: stranger, body: { title: "Not yours" } });
+
+  const { formatBoard, formatBoards } = require("../routes/utils/boardLibrary");
+  const boards = await Board.find({ userId: owner }).sort({ isDefault: -1, updatedAt: -1 });
+  for (const options of [{}, { albums: true }, { albums: true, revision: true }]) {
+    assert.deepEqual(await formatBoards(boards, options), await Promise.all(boards.map((board) => formatBoard(board, options))));
+  }
+
+  const listedBoards = await request("GET", "/boards");
+  assert.equal(listedBoards.status, 200);
+  const listedManual = listedBoards.body.find((board) => board.boardId === manualId);
+  assert.deepEqual(ids(listedManual.previewAlbums), [third.albumId, first.albumId, second.albumId, fourth.albumId]);
+  assert.equal(listedManual.listenCount, 1);
+  const listedDated = listedBoards.body.find((board) => board.boardId === datedId);
+  assert.deepEqual(new Set(ids(listedDated.previewAlbums)), new Set([third.albumId, fourth.albumId]));
+  assert.equal(listedBoards.body.some((board) => board.title === "Not yours"), false);
+  noInternalIds(listedBoards.body);
+
+  const publicBoards = await request("GET", `/profile/${owner}/boards`, { userId: stranger });
+  assert.deepEqual(ids(publicBoards.body.find((board) => board.boardId === manualId).albums), [third.albumId, first.albumId, second.albumId, fourth.albumId]);
+  noInternalIds(publicBoards.body);
+  assert.deepEqual(await formatBoards([]), []);
+});

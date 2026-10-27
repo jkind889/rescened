@@ -1,7 +1,7 @@
 const Board = require("../../models/Board");
 const BoardItem = require("../../models/BoardItem");
 const BoardListen = require("../../models/BoardListen");
-const { normalizeCatalogAlbum } = require("./albumCatalog");
+const { CATALOG_ALBUM_FIELDS, normalizeCatalogAlbum } = require("./albumCatalog");
 const { fail } = require("./diaryValidation");
 const { BOARD_ORDER_LIMIT, orderMode, displayStyle, orderEntries, orderedCount } = require("./boardOrder");
 
@@ -18,6 +18,7 @@ function persistedBoardId(board) {
 
 // Owner reads include interactionRevision, the token a reorder must carry.
 const WITH_REVISION = "+interactionRevision";
+const CATALOG_ALBUM_PROJECTION = Object.fromEntries(CATALOG_ALBUM_FIELDS.split(" ").map((field) => [field, 1]));
 
 async function getDefaultBoard(userId) {
   const existing = await Board.findOne({ userId, isDefault: true }, WITH_REVISION);
@@ -60,18 +61,19 @@ async function linkedAlbums(match, session) {
       _id: { board: "$boardId", album: "$albumCatalogId", user: "$userId" },
       savedAt: { $min: "$addedAt" }, listenCount: { $sum: 1 }, latestListenedOn: { $max: "$listen.listenedOn" },
     } },
-    { $lookup: { from: "albumcatalogs", localField: "_id.album", foreignField: "_id", as: "album" } },
+    { $lookup: { from: "albumcatalogs", localField: "_id.album", foreignField: "_id", pipeline: [{ $project: CATALOG_ALBUM_PROJECTION }], as: "album" } },
     { $unwind: "$album" },
   ]);
   return session ? query.session(session) : query;
 }
 
-// One entry per board album: { key, albumId, savedAt, album }. key is the
-// internal AlbumCatalog _id for ordering; only album is ever serialized.
+// One entry per board album: { key, boardKey, albumId, savedAt, album }. key
+// and boardKey are the internal AlbumCatalog and Board _ids for ordering and
+// grouping; only album is ever serialized.
 // Inside a transaction the reads run in its session, one after the other.
 async function collectionEntries(match, session = null) {
   const loadSaves = () => {
-    const query = BoardItem.find(match).populate("albumCatalogId").sort({ savedAt: -1 });
+    const query = BoardItem.find(match).populate({ path: "albumCatalogId", select: CATALOG_ALBUM_FIELDS }).sort({ savedAt: -1 });
     return session ? query.session(session) : query;
   };
   const [saves, linked] = session
@@ -83,6 +85,7 @@ async function collectionEntries(match, session = null) {
     if (!album?.albumId) continue;
     entries.set(`${row._id.board}:${album.albumId}`, {
       key: String(row._id.album),
+      boardKey: String(row._id.board),
       album: {
         ...album, userId: row._id.user, savedAt: row.savedAt,
         listenCount: row.listenCount, latestListenedOn: row.latestListenedOn, explicitlySaved: false,
@@ -96,6 +99,7 @@ async function collectionEntries(match, session = null) {
     const linkedAlbum = entries.get(id)?.album;
     entries.set(id, {
       key: String(row.albumCatalogId._id),
+      boardKey: String(row.boardId),
       album: {
         ...album, userId: row.userId, savedAt: row.savedAt,
         listenCount: linkedAlbum?.listenCount || 0,
@@ -103,7 +107,7 @@ async function collectionEntries(match, session = null) {
       },
     });
   }
-  return [...entries.values()].map(({ key, album }) => ({ key, albumId: album.albumId, savedAt: album.savedAt, album }));
+  return [...entries.values()].map(({ key, boardKey, album }) => ({ key, boardKey, albumId: album.albumId, savedAt: album.savedAt, album }));
 }
 
 // A board's albums as the order rules arrange them: date order, or the
@@ -113,8 +117,7 @@ async function boardEntries(board, session = null) {
 }
 
 // revision is for the owner: a reorder must send it back.
-async function formatBoard(board, { albums: includeAlbums = false, revision = false } = {}) {
-  const albums = (await boardEntries(board)).map((entry) => entry.album);
+function boardPayload(board, albums, { albums: includeAlbums = false, revision = false } = {}) {
   return {
     boardId: persistedBoardId(board), userId: board.userId, title: board.title, description: board.description || "",
     isDefault: Boolean(board.isDefault), createdAt: board.createdAt, updatedAt: board.updatedAt,
@@ -127,6 +130,27 @@ async function formatBoard(board, { albums: includeAlbums = false, revision = fa
     previewAlbums: albums.slice(0, 4), ...(includeAlbums ? { albums } : {}),
     ...(revision ? { revision: Number(board.interactionRevision) || 0 } : {}),
   };
+}
+
+async function formatBoard(board, options = {}) {
+  return boardPayload(board, (await boardEntries(board)).map((entry) => entry.album), options);
+}
+
+// Formats a list of boards from one membership read instead of one per board.
+// Each board's albums are ordered exactly as boardEntries orders them.
+async function formatBoards(boards, options = {}) {
+  if (!boards.length) return [];
+  const entries = await collectionEntries({ boardId: { $in: boards.map((board) => board._id) } });
+  const byBoard = new Map();
+  for (const entry of entries) {
+    if (!byBoard.has(entry.boardKey)) byBoard.set(entry.boardKey, []);
+    byBoard.get(entry.boardKey).push(entry);
+  }
+  return boards.map((board) => boardPayload(
+    board,
+    orderEntries(byBoard.get(String(board._id)) || [], board).map((entry) => entry.album),
+    options,
+  ));
 }
 
 async function savedAlbums(userId) {
@@ -164,4 +188,4 @@ async function savedUserCount(albumCatalogId) {
   return new Set([...explicit, ...linked.map((row) => row._id)]).size;
 }
 
-module.exports = { publicBoardId, persistedBoardId, getDefaultBoard, ownedBoard, boardEntries, formatBoard, savedAlbums, albumBoards, savedUserCount, liveMembershipStages };
+module.exports = { publicBoardId, persistedBoardId, getDefaultBoard, ownedBoard, boardEntries, formatBoard, formatBoards, savedAlbums, albumBoards, savedUserCount, liveMembershipStages };

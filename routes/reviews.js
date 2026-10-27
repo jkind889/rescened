@@ -1,10 +1,11 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const { getAuth } = require("@clerk/express");
 const Review = require("../models/Reviews");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const Like = require("../models/Like");
 const Follow = require("../models/Follow");
-const { findAlbumByPublicId, normalizeCatalogAlbum } = require("./utils/albumCatalog");
+const { CATALOG_ALBUM_FIELDS, findAlbumByPublicId, normalizeCatalogAlbum } = require("./utils/albumCatalog");
 const {
   rankedAlbums,
   popularReviewRows,
@@ -40,23 +41,34 @@ const MAX_REVIEW_TEXT_LENGTH = 300;
 function plain(value) { return typeof value?.toObject === "function" ? value.toObject() : value; }
 function viewer(req) { try { return getAuth(req).userId || ""; } catch { return ""; } }
 function auth(req, res, next) { const userId = viewer(req); if (!userId) return res.status(401).json({ error: "Unauthorized" }); req.userId = userId; next(); }
+// Like counts come from a grouped count, and likedByViewer from the viewer's
+// own likes, instead of reading every like on the page's reviews.
 async function likeStats(reviews, viewerId) {
-  const ids = reviews.map((review) => String(review._id)).filter(Boolean);
-  const rows = ids.length ? await Like.find({
-    targetType: "review",
-    reviewId: { $in: ids },
-  }) : [];
+  const ids = reviews.map((review) => String(review._id || "")).filter(Boolean);
   const stats = new Map(ids.map((id) => [id, { likeCount: 0, likedByViewer: false }]));
-  rows.forEach((row) => { const item = stats.get(String(row.reviewId)); if (item) { item.likeCount += 1; item.likedByViewer ||= Boolean(viewerId && row.userId === viewerId); } });
+  const objectIds = ids.filter((id) => mongoose.isValidObjectId(id)).map((id) => new mongoose.Types.ObjectId(id));
+  if (!objectIds.length) return stats;
+  const [counts, viewerLikes] = await Promise.all([
+    Like.aggregate([
+      { $match: { targetType: "review", reviewId: { $in: objectIds } } },
+      { $group: { _id: "$reviewId", likeCount: { $sum: 1 } } },
+    ]),
+    viewerId ? Like.find({ targetType: "review", reviewId: { $in: objectIds }, userId: viewerId }, "reviewId") : [],
+  ]);
+  counts.forEach((row) => { const item = stats.get(String(row._id)); if (item) item.likeCount = Number(row.likeCount) || 0; });
+  viewerLikes.forEach((row) => { const item = stats.get(String(plain(row).reviewId)); if (item) item.likedByViewer = true; });
   return stats;
 }
 async function serializeReviews(reviews, viewerId) {
   const sources = reviews.map(plain);
   const albumIds = [...new Set(sources.map((review) => String(review.albumCatalogId?._id || review.albumCatalogId || "")).filter(Boolean))];
-  const albums = albumIds.length ? await AlbumCatalog.find({ _id: { $in: albumIds } }) : [];
+  const [albums, authors, stats, comments] = await Promise.all([
+    albumIds.length ? AlbumCatalog.find({ _id: { $in: albumIds } }, CATALOG_ALBUM_FIELDS) : [],
+    lookupAuthors(sources.map((review) => review.userId).filter((id) => !Review.isDeletedAuthor(id))),
+    likeStats(sources, viewerId),
+    commentCounts(sources.map((review) => review._id)),
+  ]);
   const albumMap = new Map(albums.map((album) => [String(album._id), normalizeCatalogAlbum(album)]));
-  const authors = await lookupAuthors(sources.map((review) => review.userId).filter((id) => !Review.isDeletedAuthor(id)));
-  const [stats, comments] = await Promise.all([likeStats(sources, viewerId), commentCounts(sources.map((review) => review._id))]);
   return sources.map((review) => ({
     reviewId: persistedReviewId(review),
     userId: Review.isDeletedAuthor(review.userId) ? null : review.userId,

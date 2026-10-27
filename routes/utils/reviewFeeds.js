@@ -320,6 +320,7 @@ module.exports = {
   buildFeaturedAlbumsPipeline,
   buildRecentlyReviewedAlbumsPipeline,
   buildPopularReviewsPipeline,
+  currentCatalogStages,
   rankCurrent,
   resolveCatalogAlbums,
   rankedAlbums,

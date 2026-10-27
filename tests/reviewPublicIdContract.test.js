@@ -118,6 +118,7 @@ test("review edits resolve UUIDs and serialize only the public review identifier
   });
   t.mock.method(AlbumCatalog, "find", async () => [album]);
   t.mock.method(Like, "find", async () => []);
+  t.mock.method(Like, "aggregate", async () => []);
   t.mock.method(ReviewComment, "aggregate", async () => []);
   const router = loadRoute(t, reviewRoutePath);
 
@@ -338,7 +339,7 @@ test("profile review activity uses the public review ID for both activity identi
     date: new Date("2026-09-06T12:00:00.000Z"),
   };
   t.mock.method(Review, "find", () => chainQuery([review]));
-  t.mock.method(BoardItem, "find", () => chainQuery([]));
+  t.mock.method(BoardItem, "aggregate", async () => []);
   t.mock.method(Listen, "aggregate", async () => []);
   t.mock.method(TrackRanking, "aggregate", async () => []);
   t.mock.method(ReviewComment, "aggregate", async () => [{ _id: internalReviewId, count: 6 }]);
@@ -371,6 +372,7 @@ test("review permalinks resolve a public UUID and hide reviews whose album no lo
   const findOne = t.mock.method(Review, "findOne", async (value) => { filter = value; return value.reviewId === REVIEW_ID ? review : null; });
   t.mock.method(AlbumCatalog, "find", async () => catalogRows);
   t.mock.method(Like, "find", async () => []);
+  t.mock.method(Like, "aggregate", async () => []);
   t.mock.method(ReviewComment, "aggregate", async () => []);
   const router = loadRoute(t, reviewRoutePath);
 
@@ -423,6 +425,7 @@ test("rating-sorted review pages query in rating order and continue from the las
   });
   t.mock.method(AlbumCatalog, "find", async () => [album]);
   t.mock.method(Like, "find", async () => []);
+  t.mock.method(Like, "aggregate", async () => []);
   t.mock.method(ReviewComment, "aggregate", async () => []);
   const router = loadRoute(t, reviewRoutePath);
 
