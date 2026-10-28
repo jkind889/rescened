@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { formatCalendarDate, formatRating, formatReviewCount, getAlbumId } from "./signals";
+import EditedTag from "../reviews/EditedTag";
 
 export function ArrowIcon() {
     return (
@@ -83,6 +84,7 @@ export function DispatchList({ reviews }) {
                                     ? <Link to={`/profile/${review.userId}`}>{username}</Link>
                                     : <span>{username}</span>}
                                 <span>{formatRating(review.rating)}/5</span>
+                                <EditedTag editedAt={review.editedAt} />
                                 <span>{likeCount} {likeCount === 1 ? "like" : "likes"}</span>
                                 {review.reviewId && <Link to={`/review/${review.reviewId}#comments`}>{commentCount} {commentCount === 1 ? "comment" : "comments"}</Link>}
                             </p>

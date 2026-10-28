@@ -112,7 +112,7 @@ async function recentExplicitSaves(userId, limit = MAX_ACTIVITY) {
 async function formatReview(review) {
   const source = plain(review);
   const album = source.albumCatalogId && typeof source.albumCatalogId === "object" ? normalizeCatalogAlbum(source.albumCatalogId) : null;
-  return { reviewId: persistedReviewId(source), userId: source.userId, albumId: album?.albumId || "", album, rating: source.rating, reviewText: source.reviewText, date: source.date };
+  return { reviewId: persistedReviewId(source), userId: source.userId, albumId: album?.albumId || "", album, rating: source.rating, reviewText: source.reviewText, date: source.date, editedAt: source.editedAt || null };
 }
 async function formatProfile(profile, viewerId = "") {
   const source = plain(profile);
@@ -155,7 +155,7 @@ async function activity(userId, includePrivate = false, viewerId = "") {
   const [profileAuthors, reviews, saved, listens, rankings, commentActivities] = await Promise.all([authors([userId]), Review.find({ userId }).populate("albumCatalogId").sort({ date: -1, _id: -1 }).limit(MAX_ACTIVITY), includePrivate ? recentExplicitSaves(userId) : [], getListenActivity([userId], MAX_ACTIVITY), getRankingActivity([userId], MAX_ACTIVITY), getCommentActivity([userId], MAX_ACTIVITY, authors)]);
   const actor = profileAuthors.get(userId) || author(userId);
   const comments = await commentCounts(reviews.map((review) => review._id));
-  const reviewActivities = reviews.map((review) => { const source = plain(review); const reviewId = persistedReviewId(source); const album = source.albumCatalogId ? normalizeCatalogAlbum(source.albumCatalogId) : null; return { id: reviewId, reviewId, type: "review", actor, userId, createdAt: source.date, album, rating: source.rating, reviewText: source.reviewText, commentCount: comments.get(String(source._id)) || 0 }; });
+  const reviewActivities = reviews.map((review) => { const source = plain(review); const reviewId = persistedReviewId(source); const album = source.albumCatalogId ? normalizeCatalogAlbum(source.albumCatalogId) : null; return { id: reviewId, reviewId, type: "review", actor, userId, createdAt: source.date, album, rating: source.rating, reviewText: source.reviewText, editedAt: source.editedAt || null, commentCount: comments.get(String(source._id)) || 0 }; });
   const savedActivities = saved.map((album) => ({ id: `saved-${userId}-${album.albumId}`, type: "saved_album", actor, userId, createdAt: album.savedAt, album }));
   return [...reviewActivities, ...listens.map((listen) => ({ ...listen, actor })), ...rankings.map((ranking) => ({ ...ranking, actor })), ...(includePrivate ? savedActivities : []), ...commentActivities.map((item) => ({ ...item, actor }))].sort(compareActivity).slice(0, MAX_ACTIVITY);
 }

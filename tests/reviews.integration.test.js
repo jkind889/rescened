@@ -423,3 +423,84 @@ test("discovery feeds top up past deleted catalog rows and cache only site-wide 
   const featuredFresh = Object.values(await asViewer("/featured", {}, { limit: "3" })).filter((row) => row?.albumId);
   assert.equal(featuredFresh[0].title, "Newcomer");
 });
+
+function reviewEditClient(t, userId) {
+  const clerkPath = require.resolve("@clerk/express");
+  const routePath = require.resolve("../routes/reviews");
+  const oldClerk = require.cache[clerkPath];
+  const oldRoute = require.cache[routePath];
+  require.cache[clerkPath] = {
+    id: clerkPath, filename: clerkPath, loaded: true,
+    exports: {
+      getAuth: () => ({ userId }),
+      clerkClient: { users: { getUserList: async () => ({ data: [] }) } },
+    },
+  };
+  delete require.cache[routePath];
+  const router = require(routePath);
+  t.after(() => {
+    if (oldClerk) require.cache[clerkPath] = oldClerk;
+    else delete require.cache[clerkPath];
+    if (oldRoute) require.cache[routePath] = oldRoute;
+    else delete require.cache[routePath];
+  });
+  const layer = router.stack.find((item) => item.route?.path === "/review/user/:id" && item.route.methods.patch);
+  return async (reviewId, body) => {
+    const res = {
+      statusCode: 200,
+      status(code) { this.statusCode = code; return this; },
+      json(value) { this.body = value; return this; },
+    };
+    await layer.route.stack.at(-1).handle({ userId, params: { id: reviewId }, body }, res);
+    return { status: res.statusCode, body: res.body };
+  };
+}
+
+test("review edits change rating and text in place and mark only real changes as edited", { skip: !enabled }, async (t) => {
+  const album = await createAlbum("Edited Album");
+  const review = await createReview(album, "editor", 2, new Date("2026-09-01T00:00:00.000Z"));
+  await createReview(album, "other-editor", 4, new Date("2026-09-02T00:00:00.000Z"));
+  const edit = reviewEditClient(t, "editor");
+
+  const changed = await edit(review.reviewId, { rating: 5, reviewText: "Grew on me" });
+  assert.equal(changed.status, 200);
+  assert.equal(changed.body.rating, 5);
+  assert.equal(changed.body.reviewText, "Grew on me");
+  assert.ok(changed.body.editedAt instanceof Date);
+  assert.equal(changed.body.date.toISOString(), "2026-09-01T00:00:00.000Z");
+
+  const stored = await Review.findById(review._id).select("+interactionRevision").lean();
+  assert.equal(stored.interactionRevision, 1);
+  const [summary] = await Review.aggregate([{ $match: { albumCatalogId: album._id } }, { $group: { _id: null, average: { $avg: "$rating" } } }]);
+  assert.equal(summary.average, 4.5);
+
+  const unchanged = await edit(review.reviewId, { rating: 5, reviewText: "  Grew on me " });
+  assert.equal(unchanged.status, 200);
+  assert.equal(unchanged.body.editedAt.getTime(), changed.body.editedAt.getTime());
+  assert.equal((await Review.findById(review._id).select("+interactionRevision").lean()).interactionRevision, 1);
+
+  const stranger = await reviewEditClient(t, "stranger")(review.reviewId, { rating: 1, reviewText: "Hijacked" });
+  assert.deepEqual(stranger, { status: 404, body: { error: "Review not found", code: "REVIEW_NOT_FOUND" } });
+  assert.equal((await Review.findById(review._id).lean()).reviewText, "Grew on me");
+});
+
+test("an edit racing deletion or account anonymization never resurrects or rewrites the review", { skip: !enabled }, async (t) => {
+  const album = await createAlbum("Race Album");
+  const edit = reviewEditClient(t, "racer");
+
+  const deleted = await createReview(album, "racer", 3, new Date());
+  const [editResult] = await Promise.all([
+    edit(deleted.reviewId, { rating: 1, reviewText: "Racing the delete" }),
+    deleteOwnedReview(deleted.reviewId, "racer"),
+  ]);
+  assert.ok([200, 404].includes(editResult.status));
+  assert.equal(await Review.exists({ _id: deleted._id }), null);
+
+  const anonymized = await createReview(album, "racer", 3, new Date());
+  await Review.updateMany({ userId: "racer" }, { $set: { userId: Review.DELETED_AUTHOR_ID }, $inc: { interactionRevision: 1 } }, { overwriteImmutable: true });
+  const afterAnonymization = await edit(anonymized.reviewId, { rating: 1, reviewText: "Too late" });
+  assert.equal(afterAnonymization.status, 404);
+  const stored = await Review.findById(anonymized._id).lean();
+  assert.equal(stored.reviewText, "racer review");
+  assert.equal(stored.editedAt, null);
+});

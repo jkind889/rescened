@@ -82,6 +82,7 @@ async function serializeReviews(reviews, viewerId) {
     reviewText: review.reviewText,
     rating: review.rating,
     date: review.date,
+    editedAt: review.editedAt || null,
     author: Review.isDeletedAuthor(review.userId)
       ? { ...DELETED_AUTHOR }
       : authors.get(review.userId) || { userId: review.userId, username: DEFAULT_AUTHOR, imageUrl: "" },
@@ -93,6 +94,43 @@ function rating(body) {
   const value = Number(body?.rating);
   if (!Number.isFinite(value) || value < 1 || value > 5 || !Number.isInteger(value * 2)) return null;
   return value;
+}
+
+function invalidReview(message) { return Object.assign(new Error(message), { status: 400, code: "INVALID_REVIEW" }); }
+
+// Shared by creation and edits so both accept exactly the same rating and text.
+function reviewFields(body) {
+  const parsedRating = rating(body);
+  const reviewText = typeof body?.reviewText === "string" ? body.reviewText.trim() : "";
+  if (!parsedRating) throw invalidReview("Rating must be a whole or half number between 1 and 5");
+  if (!reviewText) throw invalidReview("Review text is required");
+  if (reviewText.length > MAX_REVIEW_TEXT_LENGTH) throw invalidReview("Review text must be 300 characters or fewer");
+  return { rating: parsedRating, reviewText };
+}
+
+const EDITABLE_REVIEW_FIELDS = new Set(["rating", "reviewText"]);
+function reviewEdit(body) {
+  rejectClientOwnedReviewId(body);
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw invalidReview("Rating and review text are required");
+  const unknown = Object.keys(body).filter((key) => !EDITABLE_REVIEW_FIELDS.has(key));
+  if (unknown.length) throw invalidReview(`Unsupported review fields: ${unknown.join(", ")}`);
+  return reviewFields(body);
+}
+
+// One conditional write, like comment edits: it marks the review edited and
+// claims interactionRevision only when the rating or text actually changes, so
+// it serializes with deletion, likes, pins, and account anonymization. Saving
+// unchanged values returns the review as it is, without an edited mark.
+async function editOwnedReview(reviewId, userId, fields) {
+  const updated = await Review.findOneAndUpdate(
+    { reviewId, userId, $or: [{ rating: { $ne: fields.rating } }, { reviewText: { $ne: fields.reviewText } }] },
+    { $set: { ...fields, editedAt: new Date() }, $inc: { interactionRevision: 1 } },
+    { returnDocument: "after", runValidators: true },
+  );
+  if (updated) return updated;
+  const current = await Review.findOne({ reviewId, userId });
+  if (current) return current;
+  throw Object.assign(new Error("Review not found"), { status: 404, code: "REVIEW_NOT_FOUND" });
 }
 
 function creationKey(req) {
@@ -137,12 +175,8 @@ router.post("/review", auth, reviewCreateRateLimit, async (req, res) => {
     const key = creationKey(req);
     if (await serializeExistingCreation(res, req.userId, key)) return;
     const album = await findAlbumByPublicId(req.body.albumId);
-    const parsedRating = rating(req.body);
-    const reviewText = String(req.body.reviewText || "").trim();
-    if (!parsedRating) return res.status(400).json({ error: "Rating must be a whole or half number between 1 and 5" });
-    if (!reviewText) return res.status(400).json({ error: "Review text is required" });
-    if (reviewText.length > MAX_REVIEW_TEXT_LENGTH) return res.status(400).json({ error: "Review text must be 300 characters or fewer" });
-    const review = await Review.create({ userId: req.userId, albumCatalogId: album._id, rating: parsedRating, reviewText, creationKey: key });
+    const fields = reviewFields(req.body);
+    const review = await Review.create({ userId: req.userId, albumCatalogId: album._id, ...fields, creationKey: key });
     await notifyFollowers(review);
     res.status(201).json((await serializeReviews([review], req.userId))[0]);
   } catch (error) {
@@ -197,13 +231,7 @@ router.get("/review/user/:userId", async (req, res) => {
 router.patch("/review/user/:id", auth, reviewMutationRateLimit, async (req, res) => {
   try {
     const reviewId = assertReviewId(req.params.id);
-    rejectClientOwnedReviewId(req.body);
-    const parsedRating = rating(req.body);
-    const reviewText = String(req.body.reviewText || "").trim();
-    if (!parsedRating || !reviewText) return res.status(400).json({ error: "Valid rating and review text are required" });
-    if (reviewText.length > MAX_REVIEW_TEXT_LENGTH) return res.status(400).json({ error: "Review text must be 300 characters or fewer" });
-    const review = await Review.findOneAndUpdate({ reviewId, userId: req.userId }, { $set: { rating: parsedRating, reviewText } }, { returnDocument: "after", runValidators: true });
-    if (!review) return res.status(404).json({ error: "Review not found" });
+    const review = await editOwnedReview(reviewId, req.userId, reviewEdit(req.body));
     res.json((await serializeReviews([review], req.userId))[0]);
   } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to update review", ...(error.code ? { code: error.code } : {}) }); }
 });

@@ -4,6 +4,7 @@ import {useState, useEffect, useRef } from "react";
 import ReviewForm from "./ReviewForm";
 import ListenForm from "./ListenForm";
 import AlbumReviewFeed from "./AlbumReviewFeed";
+import { replaceReview, updateReview } from "../features/reviews/reviews";
 import LikeButton from "./LikeButton";
 import TrackRanking from "./TrackRanking";
 import ShareButton from "./ShareButton";
@@ -471,6 +472,19 @@ export function AlbumDetail()
             setDeletingReviewId("");
         }
     };
+
+    // Throws on failure so the card that opened the form can show the error.
+    async function editReview(reviewId, updates) {
+        if (!canUseAuthenticatedActions) throw new Error("Sign in to edit your review.");
+        const updatedReview = await updateReview(await getToken(), reviewId, updates);
+        if (activeAlbumIdRef.current !== albumId) return;
+        setReviews((current) => replaceReview(current, updatedReview));
+        setRecentReviewPreviews((current) => replaceReview(current, updatedReview));
+        setPopularReviewPreviews((current) => replaceReview(current, updatedReview));
+        // The old rating may not be loaded here, so reload the summary rather
+        // than adjusting the rating distribution locally.
+        setSocialVersion((version) => version + 1);
+    }
 
     async function loadMoreReviews() {
         if (!nextReviewCursor || isLoadingMoreReviews) return;
@@ -1103,6 +1117,7 @@ export function AlbumDetail()
                                 reviews={selectedReviews}
                                 currentUserId={userId}
                                 onRemoveReview={removeReview}
+                                onEditReview={editReview}
                                 onToggleReviewLike={toggleReviewLike}
                                 likeMessage={likeMessage}
                                 deletingReviewId={deletingReviewId}
@@ -1122,6 +1137,7 @@ export function AlbumDetail()
                                     reviews={popularReviewPreviews.slice(0, 2)}
                                     currentUserId={userId}
                                     onRemoveReview={removeReview}
+                                    onEditReview={editReview}
                                     onToggleReviewLike={toggleReviewLike}
                                     likeMessage={likeMessage}
                                     deletingReviewId={deletingReviewId}
@@ -1137,6 +1153,7 @@ export function AlbumDetail()
                                     reviews={recentReviewPreviews.slice(0, 2)}
                                     currentUserId={userId}
                                     onRemoveReview={removeReview}
+                                    onEditReview={editReview}
                                     onToggleReviewLike={toggleReviewLike}
                                     likeMessage={likeMessage}
                                     deletingReviewId={deletingReviewId}

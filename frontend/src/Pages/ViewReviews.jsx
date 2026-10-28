@@ -5,6 +5,7 @@ import { useParams } from "react-router-dom";
 import ReviewList from "../Components/ReviewList";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import { REVIEW_SORTS, REVIEW_SORT_OPTIONS } from "../utils/reviewSorts";
+import { replaceReview, updateReview } from "../features/reviews/reviews";
 
 function appendUniqueReviews(current, incoming) {
     const ids = new Set(current.map((review) => review.reviewId));
@@ -104,11 +105,8 @@ export function ViewReviews() {
     async function editReview(reviewId, updates) {
         setEditMessage("");
         try {
-            const token = await getToken();
-            const res = await fetch(`${API_BASE_URL}/reviews/review/user/${reviewId}`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(updates) });
-            if (!res.ok) throw new Error(await getApiErrorMessage(res, "Failed to edit review"));
-            const updatedReview = await res.json();
-            setReviews((current) => current.map((review) => review.reviewId === reviewId ? updatedReview : review));
+            const updatedReview = await updateReview(await getToken(), reviewId, updates);
+            setReviews((current) => replaceReview(current, updatedReview));
             setEditingReview(null);
             return true;
         } catch (reviewError) {

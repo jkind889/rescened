@@ -2,6 +2,7 @@ import { API_BASE_URL } from "../config/api";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import Cover from "./Cover";
+import EditedTag from "../features/reviews/EditedTag";
 
 const DEFAULT_USERNAME = "rescened user";
 
@@ -90,6 +91,7 @@ export function PopularReviews({ limit = 4 }) {
                                 {review.userId ? <Link to={`/profile/${review.userId}`}>{username}</Link> : <span>{username}</span>}
                                 <span>{formatRatingStars(review.rating)}</span>
                                 <span>{formatReviewDate(review.date)}</span>
+                                <EditedTag editedAt={review.editedAt} />
                             </div>
                             <h4>
                                 <Link to={`/album/${review.albumId}`}>{review.album?.title || "Untitled album"}</Link>
