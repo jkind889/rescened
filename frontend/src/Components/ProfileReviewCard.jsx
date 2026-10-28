@@ -3,6 +3,7 @@ import LikeButton from "./LikeButton";
 import ShareButton from "./ShareButton";
 import CommentCountLink from "../features/comments/CommentCountLink";
 import Cover from "./Cover";
+import EditedTag from "../features/reviews/EditedTag";
 
 function formatDate(value) {
   if (!value) {
@@ -43,6 +44,7 @@ export function ProfileReviewCard({ review, likeMessage = "", onToggleLike }) {
       <div className="profile-review-meta">
         <span>{review.rating}/5</span>
         <time>{formatDate(review.date)}</time>
+        <EditedTag editedAt={review.editedAt} />
       </div>
       <p className="profile-review-copy">{review.reviewText}</p>
       <div className="review-card-actions">

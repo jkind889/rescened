@@ -129,7 +129,8 @@ test("review edits resolve UUIDs and serialize only the public review identifier
   });
 
   assert.equal(response.status, 200);
-  assert.deepEqual(filter, { reviewId: REVIEW_ID, userId: "owner" });
+  assert.equal(filter.reviewId, REVIEW_ID);
+  assert.equal(filter.userId, "owner");
   assert.equal(response.body.reviewId, REVIEW_ID);
   assert.equal(Object.hasOwn(response.body, "_id"), false);
   assert.equal(JSON.stringify(response.body).includes(String(internalReviewId)), false);

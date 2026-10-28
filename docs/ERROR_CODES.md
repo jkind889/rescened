@@ -65,6 +65,7 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `INVALID_MODERATION_REQUEST` | `400` | A moderation body, filter, limit, public ID, reason, or `applyFields` selection is invalid. |
 | `INVALID_BOARD_ID` | `400` | A board mutation supplied a client-owned `boardId` or Mongo `_id`; board IDs are server-generated UUID-v4 values. |
 | `INVALID_BOARD_DESCRIPTION` | `400` | A board create or update supplied a description that is not text or is longer than 280 characters. |
+| `INVALID_REVIEW` | `400` | A review create or edit has an invalid rating (not a whole or half number from 1 to 5), missing or overlong text (over 300 characters), or, on edit, a field other than `rating` and `reviewText`. |
 | `INVALID_REVIEW_ID` | `400` | A review lookup or mutation received a malformed or client-supplied public UUID-v4 `reviewId`; Mongo ObjectIds are rejected. |
 | `INVALID_REVIEW_CURSOR` | `400` | A review-list pagination cursor could not be decrypted, does not match its list/sort or supported version, or refers to an expired popular-ranking snapshot. Reload the list from its first page. |
 | `INVALID_REVIEW_SORT` | `400` | A review list requested a sort other than `recent`, `popular`, `highest`, or `lowest`. |
@@ -83,7 +84,7 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `LISTEN_DELETED` | `409` | A creation retry refers to a listen that was subsequently deleted; the retained receipt prevents resurrection. |
 | `DIARY_REQUEST_FAILED` | `500` | An unexpected diary route failure; internal database details are not exposed. |
 | `INVALID_PINNED_REVIEW` | `400` | A requested pinned review is malformed or is not owned by the profile being updated. |
-| `REVIEW_NOT_FOUND` | `404` | A review lookup, review-like, or comment request targeted a review that no longer exists or is hidden because its album no longer resolves. |
+| `REVIEW_NOT_FOUND` | `404` | A review lookup, edit, review-like, or comment request targeted a review that no longer exists or is hidden because its album no longer resolves. |
 | `SUGGESTION_NOT_FOUND` | `404` | A moderator-visible submission does not exist. Contributor detail and mutation routes currently preserve a code-less `404` to conceal ownership. |
 | `CATALOG_TARGET_NOT_FOUND` | `404` | A new correction references a public catalog album that does not exist. |
 | `CATALOG_ALBUM_NOT_FOUND` | `409` | An approval command supplies an `albumId` that does not resolve to a usable catalog album. |

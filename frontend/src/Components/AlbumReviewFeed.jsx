@@ -1,7 +1,10 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import LikeButton from "./LikeButton";
 import ShareButton from "./ShareButton";
 import CommentCountLink from "../features/comments/CommentCountLink";
+import EditedTag from "../features/reviews/EditedTag";
+import ReviewEditForm from "../features/reviews/ReviewEditForm";
 
 const DEFAULT_USERNAME = "rescened user";
 
@@ -29,14 +32,33 @@ function AlbumReviewCard({
     review,
     currentUserId,
     onRemoveReview,
+    onEditReview,
     onToggleReviewLike,
     likeMessage,
     deletingReviewId,
     deleteError,
 }) {
+    const [isEditing, setIsEditing] = useState(false);
+    const [editMessage, setEditMessage] = useState("");
     const username = getReviewUsername(review);
     const imageUrl = review.author?.imageUrl;
     const canDelete = currentUserId && review.userId === currentUserId;
+    const canEdit = canDelete && typeof onEditReview === "function";
+
+    async function saveEdit(reviewId, updates) {
+        setEditMessage("");
+        try {
+            await onEditReview(reviewId, updates);
+            setIsEditing(false);
+        } catch (error) {
+            setEditMessage(error.message || "Could not save your edit.");
+        }
+    }
+
+    function cancelEdit() {
+        setIsEditing(false);
+        setEditMessage("");
+    }
     const profileState = {
         profileUser: {
             username,
@@ -72,33 +94,47 @@ function AlbumReviewCard({
                     </p>
                     <span>{review.rating}/5</span>
                     <span>{formatReviewDate(review.date)}</span>
+                    <EditedTag editedAt={review.editedAt} />
                 </div>
 
-                <p className="album-review-copy">{review.reviewText}</p>
+                {isEditing ? (
+                    <ReviewEditForm review={review} onCancelEdit={cancelEdit} onEditReview={saveEdit} editMessage={editMessage} />
+                ) : (
+                    <>
+                        <p className="album-review-copy">{review.reviewText}</p>
 
-                <div className="review-card-actions">
-                    <LikeButton
-                        liked={Boolean(review.likedByViewer)}
-                        count={review.likeCount}
-                        label="review"
-                        message={likeMessage}
-                        onToggle={() => onToggleReviewLike?.(review)}
-                    />
-                    <CommentCountLink reviewId={review.reviewId} count={review.commentCount} />
-                    {review.reviewId && <ShareButton className="review-share-button" path={`/review/${review.reviewId}`} title={`${username}'s review on Rescened`} />}
-                </div>
+                        <div className="review-card-actions">
+                            <LikeButton
+                                liked={Boolean(review.likedByViewer)}
+                                count={review.likeCount}
+                                label="review"
+                                message={likeMessage}
+                                onToggle={() => onToggleReviewLike?.(review)}
+                            />
+                            <CommentCountLink reviewId={review.reviewId} count={review.commentCount} />
+                            {review.reviewId && <ShareButton className="review-share-button" path={`/review/${review.reviewId}`} title={`${username}'s review on Rescened`} />}
+                        </div>
 
-                {canDelete && (
-                    <button
-                        className="review-delete-button album-review-delete"
-                        type="button"
-                        onClick={() => onRemoveReview(review.reviewId)}
-                        disabled={deletingReviewId === review.reviewId}
-                    >
-                        {deletingReviewId === review.reviewId ? "Deleting..." : "Delete Review"}
-                    </button>
+                        {canDelete && (
+                            <div className="review-card-actions album-review-owner-actions">
+                                {canEdit && (
+                                    <button className="review-edit-button" type="button" onClick={() => setIsEditing(true)}>
+                                        Edit Review
+                                    </button>
+                                )}
+                                <button
+                                    className="review-delete-button"
+                                    type="button"
+                                    onClick={() => onRemoveReview(review.reviewId)}
+                                    disabled={deletingReviewId === review.reviewId}
+                                >
+                                    {deletingReviewId === review.reviewId ? "Deleting..." : "Delete Review"}
+                                </button>
+                            </div>
+                        )}
+                        {deleteError && <p className="review-edit-error" role="alert">{deleteError}</p>}
+                    </>
                 )}
-                {deleteError && <p className="review-edit-error" role="alert">{deleteError}</p>}
             </div>
         </article>
     );
@@ -108,6 +144,7 @@ export function AlbumReviewFeed({
     reviews,
     currentUserId,
     onRemoveReview,
+    onEditReview,
     onToggleReviewLike,
     likeMessage,
     deletingReviewId,
@@ -130,6 +167,7 @@ export function AlbumReviewFeed({
                     review={review}
                     currentUserId={currentUserId}
                     onRemoveReview={onRemoveReview}
+                    onEditReview={onEditReview}
                     onToggleReviewLike={onToggleReviewLike}
                     likeMessage={likeMessage}
                     deletingReviewId={deletingReviewId}

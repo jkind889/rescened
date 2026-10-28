@@ -273,7 +273,7 @@ async function reviewStats(userId, period, listenedAlbumIds) {
   const reviews = await Review.find({
     userId,
     date: { $gte: new Date(`${period.from}T00:00:00.000Z`), $lte: new Date(`${period.to}T23:59:59.999Z`) },
-  }).select("reviewId albumCatalogId rating reviewText date").sort({ date: -1, _id: -1 }).lean();
+  }).select("reviewId albumCatalogId rating reviewText date editedAt").sort({ date: -1, _id: -1 }).lean();
 
   const latestByAlbum = new Map();
   for (const review of reviews) if (!latestByAlbum.has(String(review.albumCatalogId))) latestByAlbum.set(String(review.albumCatalogId), review);
@@ -299,7 +299,7 @@ async function reviewStats(userId, period, listenedAlbumIds) {
     const review = reviews.find((entry) => String(entry._id) === String(likeRows[0]._id));
     const album = review ? albumSummary(await AlbumCatalog.findById(review.albumCatalogId).lean()) : null;
     if (review && album) {
-      mostLiked = { reviewId: persistedReviewId(review), rating: review.rating, reviewText: review.reviewText, date: review.date, likeCount: likeRows[0].likeCount, album };
+      mostLiked = { reviewId: persistedReviewId(review), rating: review.rating, reviewText: review.reviewText, date: review.date, editedAt: review.editedAt || null, likeCount: likeRows[0].likeCount, album };
     }
   }
   const community = new Map(communityRows.map((row) => [String(row._id), row.average]));

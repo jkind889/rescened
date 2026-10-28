@@ -28,6 +28,9 @@ const reviewSchema = new mongoose.Schema({
     validate: { validator: (value) => Number.isInteger(value * 2), message: "Rating must be a whole or half number" },
   },
   date: { type: Date, default: Date.now },
+  // Set when the author changes the rating or text. Null means never edited;
+  // edits keep the original date, so feeds and pagination do not move.
+  editedAt: { type: Date, default: null },
   // Internal serialization token for review deletion, likes, and pinning.
   // This is intentionally excluded from every public representation.
   interactionRevision: { type: Number, default: 0, select: false },
