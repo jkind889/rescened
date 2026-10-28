@@ -186,6 +186,7 @@ test("network returns followed-user review activities with current catalog metad
     },
     rating: 4.5,
     reviewText: alex.reviewText,
+    editedAt: null,
     likeCount: 3,
     likedByViewer: true,
     commentCount: 2,
