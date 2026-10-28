@@ -176,6 +176,23 @@ test("rate limit middleware emits the stable 429 payload and Retry-After header"
   assert.equal(blocked.headers["Retry-After"], String(blocked.body.retryAfterSeconds));
 });
 
+test("a points option charges one point per unit of work before the request runs", async () => {
+  delete require.cache[rateLimitPath];
+  const { createRateLimitMiddleware, createRateLimiter } = require("../routes/utils/rateLimit");
+  const limiter = createRateLimiter({ keyPrefix: `test:bulk-rate-limit:${Date.now()}`, points: 5, duration: 60 });
+  const middleware = createRateLimitMiddleware(limiter, {
+    keyGenerator: () => "moderator-a",
+    points: (req) => req.items.length,
+  });
+  let nextCalls = 0;
+  await middleware({ items: [1, 2, 3], headers: {} }, response(), () => { nextCalls += 1; });
+  const blocked = response();
+  await middleware({ items: [1, 2, 3], headers: {} }, blocked, () => { nextCalls += 1; });
+  assert.equal(nextCalls, 1, "the second three-item request exceeds the five points left");
+  assert.equal(blocked.statusCode, 429);
+  assert.equal(blocked.headers["Retry-After"], String(blocked.body.retryAfterSeconds));
+});
+
 test("routes register the intended limiter after authentication where required", () => {
   const { limiters, routers } = installBlockedRoutes();
   const cases = [

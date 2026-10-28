@@ -598,6 +598,7 @@ async function approveAlbumSubmission({
   genreDecisions,
   confirmPossibleDuplicateProvided = false,
   coverResolver,
+  expectedRevision,
 }) {
   if (typeof mongoose.startSession !== "function") throw new ApprovalUnavailableError();
 
@@ -608,6 +609,12 @@ async function approveAlbumSubmission({
     throw new ModerationConflictError("Suggestion not found", "SUGGESTION_NOT_FOUND");
   }
   const preliminary = plain(preliminarySubmission);
+  // Bulk approval passes the revision the moderator saw. Every branch below
+  // conditions its write on this preliminary revision, so a later revision
+  // can't be approved in its place.
+  if (expectedRevision !== undefined && preliminary.status === "pending" && preliminary.currentRevision !== expectedRevision) {
+    throw new ModerationConflictError("The suggestion was revised after the queue was loaded", "STATE_CONFLICT");
+  }
   // Genre suggestions have their own approval, including the idempotent
   // retry, so they never reach the album publication logic below.
   if (preliminary.submissionType === "genre_suggestion") {

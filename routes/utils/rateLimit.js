@@ -224,9 +224,9 @@ function isRateLimitError(error) {
   return error?.code === RATE_LIMIT_ERROR_CODE;
 }
 
-async function consumeRateLimit(limiter, key, message) {
+async function consumeRateLimit(limiter, key, message, points = 1) {
   try {
-    await limiter.consume(key);
+    await limiter.consume(key, points);
   } catch (error) {
     if (error instanceof RateLimiterRes || typeof error?.msBeforeNext === "number") {
       throw new RateLimitExceededError(getRetryAfterSeconds(error), message);
@@ -239,10 +239,13 @@ async function consumeRateLimit(limiter, key, message) {
 function createRateLimitMiddleware(limiter, options = {}) {
   const keyGenerator = options.keyGenerator || getIpRateLimitKey;
   const message = options.message || "Too many requests. Please try again soon.";
+  // A request that does several units of work, such as a bulk command, can
+  // charge one point per unit.
+  const pointsFor = options.points || (() => 1);
 
   return async (req, res, next) => {
     try {
-      await consumeRateLimit(limiter, keyGenerator(req), message);
+      await consumeRateLimit(limiter, keyGenerator(req), message, pointsFor(req));
       next();
     } catch (error) {
       if (isRateLimitError(error)) {
@@ -361,6 +364,13 @@ module.exports = {
   moderationMutationRateLimit: createRateLimitMiddleware(moderationMutationLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,
     message: RATE_LIMITS.moderationMutation.message,
+  }),
+  // Shares the moderation bucket, charging one point per suggestion, so a
+  // bulk approval costs the same as approving each item on its own.
+  moderationBulkRateLimit: createRateLimitMiddleware(moderationMutationLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.moderationMutation.message,
+    points: (req) => Math.max(1, req.bulkApproval?.items?.length || 1),
   }),
   notificationMutationRateLimit: createRateLimitMiddleware(notificationMutationLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,
