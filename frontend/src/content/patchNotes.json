@@ -1,5 +1,17 @@
 [
   {
+    "id": "review-editing",
+    "date": "2026-10-27",
+    "title": "Edit your reviews",
+    "summary": "Change a review's rating or text after you post it.",
+    "changes": [
+      "Edit your own review from the album page, the review's own page, or your reviews shelf.",
+      "Edited reviews show an \"edited\" tag. Hover over it to see when.",
+      "An edit keeps the review's original date and place in feeds, and doesn't notify anyone again.",
+      "Album ratings update as soon as you save."
+    ]
+  },
+  {
     "id": "faster-pages",
     "date": "2026-10-27",
     "title": "Faster pages",
