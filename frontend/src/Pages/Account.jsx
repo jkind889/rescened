@@ -22,6 +22,7 @@ import { ListenQueueEditor, UpNextList } from "../features/queue/ListenQueue";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import { REVIEW_SORTS, REVIEW_SORT_OPTIONS } from "../utils/reviewSorts";
 import Cover from "../Components/Cover";
+import EditedTag from "../features/reviews/EditedTag";
 
 const tabs = [
   { id: "overview", label: "Overview" },
@@ -985,6 +986,7 @@ export function Account() {
               <div className="profile-activity-meta">
                 {activity.rating && <strong>{activity.rating}/5</strong>}
                 <time dateTime={activity.createdAt}>{activity.type === "listen" ? "Logged " : ""}{formatDate(activity.createdAt)}</time>
+                {activity.type === "review" && <EditedTag editedAt={activity.editedAt} />}
               </div>
             </article>
           );
@@ -1101,6 +1103,7 @@ export function Account() {
         <div className="profile-review-meta">
           <span>{review.rating}/5</span>
           <time>{formatDate(review.date)}</time>
+          <EditedTag editedAt={review.editedAt} />
         </div>
         <p className="profile-review-copy">{review.reviewText}</p>
         <div className="review-card-actions">

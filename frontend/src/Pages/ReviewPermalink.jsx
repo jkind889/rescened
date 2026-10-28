@@ -6,6 +6,9 @@ import AsyncState from "../Components/Loading/AsyncState";
 import LikeButton from "../Components/LikeButton";
 import ShareButton from "../Components/ShareButton";
 import ReviewComments from "../features/comments/ReviewComments";
+import EditedTag from "../features/reviews/EditedTag";
+import ReviewEditForm from "../features/reviews/ReviewEditForm";
+import { updateReview } from "../features/reviews/reviews";
 import { getApiErrorMessage } from "../utils/apiErrors";
 
 function formatDate(value) {
@@ -23,6 +26,8 @@ export function ReviewPermalink() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [likeMessage, setLikeMessage] = useState("");
+  const [isEditing, setIsEditing] = useState(false);
+  const [editMessage, setEditMessage] = useState("");
 
   useEffect(() => {
     // likedByViewer depends on the viewer, so wait for Clerk and fetch once.
@@ -78,6 +83,22 @@ export function ReviewPermalink() {
     }
   }
 
+  async function saveEdit(id, updates) {
+    setEditMessage("");
+    try {
+      const updated = await updateReview(await getToken(), id, updates);
+      setReview((current) => ({ ...current, ...updated }));
+      setIsEditing(false);
+    } catch (editError) {
+      setEditMessage(editError.message || "Could not save your edit.");
+    }
+  }
+
+  function cancelEdit() {
+    setIsEditing(false);
+    setEditMessage("");
+  }
+
   if (isLoading || error || !review) {
     return (
       <section className="review-permalink-page">
@@ -97,6 +118,7 @@ export function ReviewPermalink() {
 
   const album = review.album || {};
   const author = review.author || {};
+  const isOwner = Boolean(userId) && review.userId === userId;
 
   return (
     <section className="review-permalink-page">
@@ -118,13 +140,21 @@ export function ReviewPermalink() {
           <p className="review-permalink-meta">
             <span aria-label={`${review.rating} out of 5`}>★ {review.rating}/5</span>
             <time dateTime={review.date}>{formatDate(review.date)}</time>
+            <EditedTag editedAt={review.editedAt} />
           </p>
-          <p className="review-permalink-copy">{review.reviewText}</p>
-          <div className="review-card-actions">
-            <LikeButton liked={Boolean(review.likedByViewer)} count={review.likeCount} label="review" message={likeMessage} onToggle={toggleLike} />
-            <ShareButton className="review-share-button" path={`/review/${review.reviewId}`} title={`${author.username ? `${author.username}’s review` : "A review"} of ${album.title || "an album"} on Rescened`} />
-            <Link className="review-share-button" to={`/album/${album.albumId}/reviews`}>All reviews of this album</Link>
-          </div>
+          {isEditing ? (
+            <ReviewEditForm review={review} onCancelEdit={cancelEdit} onEditReview={saveEdit} editMessage={editMessage} />
+          ) : (
+            <>
+              <p className="review-permalink-copy">{review.reviewText}</p>
+              <div className="review-card-actions">
+                <LikeButton liked={Boolean(review.likedByViewer)} count={review.likeCount} label="review" message={likeMessage} onToggle={toggleLike} />
+                <ShareButton className="review-share-button" path={`/review/${review.reviewId}`} title={`${author.username ? `${author.username}’s review` : "A review"} of ${album.title || "an album"} on Rescened`} />
+                <Link className="review-share-button" to={`/album/${album.albumId}/reviews`}>All reviews of this album</Link>
+                {isOwner && <button className="review-edit-button" type="button" onClick={() => setIsEditing(true)}>Edit Review</button>}
+              </div>
+            </>
+          )}
         </div>
       </article>
       <ReviewComments reviewId={review.reviewId} />

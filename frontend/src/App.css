@@ -3955,8 +3955,13 @@ html:has(.search-results-page) .search-submit {
   overflow-wrap: anywhere;
 }
 
-.album-review-delete {
+.album-review-owner-actions {
   margin-top: 1rem;
+}
+
+.review-edited-tag {
+  color: var(--app-muted, #94a3b8);
+  font-size: 0.85em;
 }
 
 .review-card-actions {
