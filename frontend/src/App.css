@@ -9063,6 +9063,58 @@ html:has(.community-page) .site-header {
   border-width: 0 0 1px;
 }
 
+.moderation-bulk-bar {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--app-line);
+}
+
+.moderation-bulk-bar .community-message {
+  margin: 0;
+}
+
+.moderation-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+}
+
+.moderation-bulk-actions > span {
+  margin-right: auto;
+  color: var(--app-muted);
+  font-size: 0.6rem;
+}
+
+.moderation-queue-list-selectable .moderation-queue-item {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  border-bottom: 1px solid var(--app-line);
+  background: var(--app-bg);
+}
+
+.moderation-queue-list-selectable .moderation-queue-card {
+  border-bottom: 0;
+}
+
+.moderation-bulk-select {
+  display: flex;
+  justify-content: center;
+  padding-top: 0.9rem;
+}
+
+.moderation-bulk-result {
+  margin: 0;
+  padding: 0 1rem 0.75rem;
+  color: #e6bd78;
+  font-size: 0.6rem;
+}
+
+.moderation-queue-list-selectable .moderation-bulk-result {
+  grid-column: 2;
+}
+
 .moderation-detail-panel {
   min-width: 0;
 }

@@ -317,6 +317,10 @@ The moderator detail response (`GET /moderation/album-suggestions/:submissionId`
 - `albumMissing`: `true` if the album no longer exists.
 - `newGenreCandidates`: per addition, `null` for an existing genre, or up to 5 existing genres that look like the proposed name, for mapping. Each candidate has a `match` (`exact`, `spelling`, `contains`, or `word`). The matching is in `lib/genres/review.js`.
 
+### Bulk approval
+
+[Bulk approval](MODERATOR_IMPLEMENTATION_GUIDE.md#bulk-approval) approves a genre suggestion as proposed: it applies every addition, removal, and primary change, and maps each new name to the active genre whose name or alias matches it exactly, without adding an alias. A suggestion with a new name that has no exact match returns `BULK_REVIEW_REQUIRED` (`unmatched_genre_name`) and needs the single approval, because only a moderator decides whether to create a genre. Once one suggestion's new name has been created, other pending suggestions for the same name become bulk-approvable. Each item is its own transaction, so two items for one album apply in order and the second can return `GENRE_LIMIT_EXCEEDED`.
+
 ### Corrections and genre provenance
 
 Correction approval now writes provenance as dotted `fieldProvenance.<field>` paths for the fields it changes, rather than replacing `fieldProvenance` whole. A correction approved after a genre approval therefore keeps `fieldProvenance.genres`. A legacy album whose `fieldProvenance` isn't an object still gets the whole patched object.

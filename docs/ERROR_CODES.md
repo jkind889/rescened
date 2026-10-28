@@ -194,6 +194,11 @@ See [the notifications guide](NOTIFICATIONS.md).
 | `CATALOG_REFERENCE_CONFLICT` | `409` | A proposed external reference is already owned by another catalog album. |
 | `APPROVAL_CONFLICT` | `409` | Approval produced no consistent result, or an already-approved suggestion conflicts with the requested album. |
 | `APPROVAL_INCONSISTENT` | `409` | A submission says it is approved, but its linked catalog album is missing or unusable. |
+| `BULK_LIMIT_EXCEEDED` | `400` | A bulk approval lists more than 20 suggestions. |
+| `BULK_REVIEW_REQUIRED` | per item | Bulk approval refused this item because it needs an individual review. `details` holds one reason: `possible_duplicate`, `stale_baseline_selection`, `unmatched_genre_name`, or `no_proposed_fields`. |
+| `APPROVAL_FAILED` | per item | A bulk approval item failed unexpectedly. The other items are unaffected. |
+
+Bulk approval returns `200` with a result for each item. Its per-item `error.code` values are the single-approval codes above plus `SUGGESTION_NOT_FOUND`, `APPROVAL_UNAVAILABLE`, and the two bulk-only codes marked "per item".
 
 ### External MusicBrainz search
 
@@ -227,7 +232,7 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Suggestion create | `POST /suggestions`, `POST /suggestions/corrections` | authenticated user | 6 attempts per 10 minutes |
 | Suggestion mutation | `POST /suggestions/:submissionId/revise`, `POST /suggestions/:submissionId/withdraw` | authenticated user | 20 attempts per 10 minutes |
 | Genre suggestion | `POST /suggestions/genres` | authenticated user | 20 attempts per hour |
-| Moderation mutation | Request-changes, reject, duplicate, and approve commands, genre vocabulary commands, and comment remove and dismiss | authenticated moderator | 120 attempts per 10 minutes |
+| Moderation mutation | Request-changes, reject, duplicate, and approve commands, bulk approval (one point per item), genre vocabulary commands, and comment remove and dismiss | authenticated moderator | 120 points per 10 minutes |
 | Comment create | `POST /reviews/review/:reviewId/comments` | authenticated user | 20 attempts per 10 minutes |
 | Comment mutation | `PATCH` and `DELETE /reviews/comments/:commentId` | authenticated user | 60 attempts per 10 minutes |
 | Comment report | `POST /reviews/comments/:commentId/report` | authenticated user | 10 attempts per 10 minutes |

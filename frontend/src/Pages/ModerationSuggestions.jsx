@@ -36,6 +36,19 @@ const INITIAL_FILTERS = {
   submittedByUserId: "",
   limit: "20",
 };
+const BULK_APPROVAL_LIMIT = 20;
+const BULK_REVIEW_LABELS = {
+  possible_duplicate: "Possible duplicate",
+  unmatched_genre_name: "New genre name",
+  stale_baseline_selection: "Baseline changed",
+  no_proposed_fields: "No proposed fields",
+};
+const EMPTY_BULK_STATE = {
+  pending: false,
+  error: null,
+  summary: null,
+  results: {},
+};
 const EMPTY_COMMAND_STATE = {
   submissionId: "",
   pendingAction: "",
@@ -112,6 +125,24 @@ function commandSuccess(action, response) {
   return { message: "Suggestion rejected and the reason was added to its history." };
 }
 
+function isBulkSelectable(suggestion) {
+  return suggestion.status === "pending" && suggestion.bulkApproval?.eligible === true;
+}
+
+function bulkFailureLabel(result) {
+  if (result.error?.code === "BULK_REVIEW_REQUIRED") {
+    return BULK_REVIEW_LABELS[result.error.details?.[0]] || "Needs review";
+  }
+  return result.error?.message || "Not approved";
+}
+
+function bulkSummaryLabel(summary) {
+  const parts = [`${summary.approved} approved`];
+  if (summary.alreadyApproved) parts.push(`${summary.alreadyApproved} already approved`);
+  if (summary.failed) parts.push(`${summary.failed} not approved`);
+  return parts.join(" · ");
+}
+
 function sourceTypeLabel(value) {
   return String(value || "source").replaceAll("_", " ");
 }
@@ -144,6 +175,9 @@ export function ModerationSuggestions() {
   });
   const [commandState, setCommandState] = useState(EMPTY_COMMAND_STATE);
   const [baselineBusy, setBaselineBusy] = useState(false);
+  // submissionId -> the revision the moderator saw when selecting it.
+  const [bulkSelection, setBulkSelection] = useState(() => new Map());
+  const [bulkState, setBulkState] = useState(EMPTY_BULK_STATE);
   const [accessDenied, setAccessDenied] = useState(false);
   const queueRequestIdRef = useRef(0);
   const isNarrowWorkspace = useMediaQuery("(max-width: 900px)");
@@ -287,6 +321,8 @@ export function ModerationSuggestions() {
     }
 
     setFilterError("");
+    setBulkSelection(new Map());
+    setBulkState(EMPTY_BULK_STATE);
     setAppliedFilters({
       statuses: [...filterDraft.statuses],
       submissionType: filterDraft.submissionType,
@@ -302,7 +338,86 @@ export function ModerationSuggestions() {
     setFilterDraft(clearedFilters);
     setAppliedFilters(clearedFilters);
     setFilterError("");
+    setBulkSelection(new Map());
+    setBulkState(EMPTY_BULK_STATE);
     setQueueRefreshIndex((currentIndex) => currentIndex + 1);
+  }
+
+  const bulkSelectableSuggestions = queueSuggestions.filter(isBulkSelectable);
+  const selectedBulkItems = bulkSelectableSuggestions
+    .filter((suggestion) => bulkSelection.has(suggestion.submissionId))
+    .map((suggestion) => ({
+      submissionId: suggestion.submissionId,
+      expectedRevision: bulkSelection.get(suggestion.submissionId),
+    }));
+
+  function toggleBulkSelection(suggestion) {
+    const selectableIds = new Set(bulkSelectableSuggestions.map((entry) => entry.submissionId));
+    setBulkSelection((currentSelection) => {
+      // Drop selections that left the queue, so they don't count toward the cap.
+      const nextSelection = new Map([...currentSelection].filter(([id]) => selectableIds.has(id)));
+      if (nextSelection.has(suggestion.submissionId)) {
+        nextSelection.delete(suggestion.submissionId);
+      } else if (nextSelection.size < BULK_APPROVAL_LIMIT) {
+        nextSelection.set(suggestion.submissionId, suggestion.currentRevision || 1);
+      }
+      return nextSelection;
+    });
+  }
+
+  function selectAllBulk() {
+    setBulkSelection(new Map(bulkSelectableSuggestions
+      .slice(0, BULK_APPROVAL_LIMIT)
+      .map((suggestion) => [suggestion.submissionId, suggestion.currentRevision || 1])));
+  }
+
+  function refreshQueue() {
+    setBulkSelection(new Map());
+    setQueueRefreshIndex((currentIndex) => currentIndex + 1);
+  }
+
+  function loadMoreQueue() {
+    setBulkSelection(new Map());
+    fetchQueuePage({ cursor: nextCursor, append: true });
+  }
+
+  async function approveSelected() {
+    const items = selectedBulkItems;
+    if (!items.length || bulkState.pending) return;
+    setBulkState({ ...EMPTY_BULK_STATE, pending: true });
+
+    try {
+      const token = await getToken();
+      if (!token) {
+        throw Object.assign(new Error("Your session could not be verified."), { status: 401, code: "UNAUTHORIZED" });
+      }
+      const data = await requestCommunityJson(
+        `${API_BASE_URL}${MODERATION_PATH}/bulk-approve`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ items }),
+        },
+        "The selected suggestions could not be approved.",
+      );
+      const results = Object.fromEntries((data.results || []).map((result) => [result.submissionId, result]));
+      setBulkState({ pending: false, error: null, summary: data.summary || null, results });
+      setBulkSelection(new Map());
+      if (submissionId && results[submissionId]) {
+        setDetailRefreshIndex((currentIndex) => currentIndex + 1);
+      }
+      setQueueRefreshIndex((currentIndex) => currentIndex + 1);
+    } catch (error) {
+      const normalizedError = normalizeCommunityError(error, "The selected suggestions could not be approved.");
+      if (normalizedError.status === 403 || normalizedError.code === "MODERATOR_REQUIRED") {
+        setAccessDenied(true);
+        return;
+      }
+      setBulkState({ ...EMPTY_BULK_STATE, error: normalizedError });
+    }
   }
 
   async function applyCommand(action, body) {
@@ -577,7 +692,7 @@ export function ModerationSuggestions() {
           <button
             className="community-secondary-button"
             disabled={isQueueLoading || isQueueLoadingMore}
-            onClick={() => setQueueRefreshIndex((currentIndex) => currentIndex + 1)}
+            onClick={refreshQueue}
             type="button"
           >
             Refresh queue
@@ -693,6 +808,42 @@ export function ModerationSuggestions() {
             <span>{queueSuggestions.length} loaded</span>
           </div>
 
+          {bulkSelectableSuggestions.length > 0 || bulkState.summary || bulkState.error ? (
+            <div className="moderation-bulk-bar" aria-label="Bulk approval">
+              {bulkSelectableSuggestions.length > 0 ? (
+                <div className="moderation-bulk-actions">
+                  <span>{selectedBulkItems.length} selected</span>
+                  <button
+                    className="community-text-button"
+                    disabled={bulkState.pending}
+                    onClick={selectedBulkItems.length ? () => setBulkSelection(new Map()) : selectAllBulk}
+                    type="button"
+                  >
+                    {selectedBulkItems.length ? "Clear" : "Select all"}
+                  </button>
+                  <button
+                    className="community-primary-button"
+                    disabled={!selectedBulkItems.length || bulkState.pending}
+                    onClick={approveSelected}
+                    type="button"
+                  >
+                    {bulkState.pending ? "Approving…" : "Approve selected"}
+                  </button>
+                </div>
+              ) : null}
+              {bulkState.summary ? (
+                <p className="community-message" role="status">{bulkSummaryLabel(bulkState.summary)}</p>
+              ) : null}
+              {bulkState.error ? (
+                <div className="community-message community-message-error" role="alert">
+                  <strong>{bulkState.error.message}</strong>
+                  {bulkState.error.code ? <code>{bulkState.error.code}</code> : null}
+                  {retryAfterLabel(bulkState.error.retryAfterSeconds) ? <small>{retryAfterLabel(bulkState.error.retryAfterSeconds)}</small> : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="moderation-queue" aria-busy={isQueueLoading || isQueueLoadingMore}>
             {isQueueLoading && queueSuggestions.length === 0 ? (
               <div className="community-loading moderation-queue-loading" role="status">
@@ -720,9 +871,22 @@ export function ModerationSuggestions() {
             ) : null}
 
             {queueSuggestions.length > 0 ? (
-              <ol className="moderation-queue-list">
+              <ol className={`moderation-queue-list${bulkSelectableSuggestions.length ? " moderation-queue-list-selectable" : ""}`}>
                 {queueSuggestions.map((suggestion) => (
-                  <li key={suggestion.submissionId}>
+                  <li className="moderation-queue-item" key={suggestion.submissionId}>
+                    {bulkSelectableSuggestions.length ? (
+                      <span className="moderation-bulk-select">
+                        {isBulkSelectable(suggestion) ? (
+                          <input
+                            aria-label={`Select ${queueTitle(suggestion)} for bulk approval`}
+                            checked={bulkSelection.has(suggestion.submissionId)}
+                            disabled={bulkState.pending || (!bulkSelection.has(suggestion.submissionId) && selectedBulkItems.length >= BULK_APPROVAL_LIMIT)}
+                            onChange={() => toggleBulkSelection(suggestion)}
+                            type="checkbox"
+                          />
+                        ) : null}
+                      </span>
+                    ) : null}
                     <button
                       aria-current={submissionId === suggestion.submissionId ? "true" : undefined}
                       className={`moderation-queue-card${submissionId === suggestion.submissionId ? " moderation-queue-card-selected" : ""}`}
@@ -753,6 +917,11 @@ export function ModerationSuggestions() {
                       ) : null}
                       <code>{suggestion.submittedByUserId}</code>
                     </button>
+                    {bulkState.results[suggestion.submissionId] && !bulkState.results[suggestion.submissionId].ok ? (
+                      <p className="moderation-bulk-result" role="status">
+                        {bulkFailureLabel(bulkState.results[suggestion.submissionId])}
+                      </p>
+                    ) : null}
                   </li>
                 ))}
               </ol>
@@ -762,7 +931,7 @@ export function ModerationSuggestions() {
               <button
                 className="community-secondary-button moderation-load-more"
                 disabled={isQueueLoading || isQueueLoadingMore}
-                onClick={() => fetchQueuePage({ cursor: nextCursor, append: true })}
+                onClick={loadMoreQueue}
                 type="button"
               >
                 {isQueueLoadingMore ? "Loading next page…" : "Load more"}
