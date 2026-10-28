@@ -11116,3 +11116,10 @@ label.moderation-candidate-choice {
   min-width: 1.4rem;
   color: var(--app-muted);
 }
+
+.moderation-detail-controls {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}

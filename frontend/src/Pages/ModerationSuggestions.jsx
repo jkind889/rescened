@@ -180,6 +180,7 @@ export function ModerationSuggestions() {
   const [bulkState, setBulkState] = useState(EMPTY_BULK_STATE);
   const [accessDenied, setAccessDenied] = useState(false);
   const queueRequestIdRef = useRef(0);
+  const mutationInFlightRef = useRef(false);
   const isNarrowWorkspace = useMediaQuery("(max-width: 900px)");
   const isMobileDecisionLayout = useMediaQuery("(max-width: 640px)");
 
@@ -315,6 +316,7 @@ export function ModerationSuggestions() {
 
   function applyFilters(event) {
     event.preventDefault();
+    if (bulkState.pending) return;
     if (filterDraft.statuses.length === 0) {
       setFilterError("Select at least one queue status.");
       return;
@@ -334,6 +336,7 @@ export function ModerationSuggestions() {
   }
 
   function clearFilters() {
+    if (bulkState.pending) return;
     const clearedFilters = { ...INITIAL_FILTERS, statuses: ["pending"] };
     setFilterDraft(clearedFilters);
     setAppliedFilters(clearedFilters);
@@ -383,7 +386,8 @@ export function ModerationSuggestions() {
 
   async function approveSelected() {
     const items = selectedBulkItems;
-    if (!items.length || bulkState.pending) return;
+    if (!items.length || mutationInFlightRef.current || baselineBusy) return;
+    mutationInFlightRef.current = true;
     setBulkState({ ...EMPTY_BULK_STATE, pending: true });
 
     try {
@@ -406,9 +410,8 @@ export function ModerationSuggestions() {
       const results = Object.fromEntries((data.results || []).map((result) => [result.submissionId, result]));
       setBulkState({ pending: false, error: null, summary: data.summary || null, results });
       setBulkSelection(new Map());
-      if (submissionId && results[submissionId]) {
-        setDetailRefreshIndex((currentIndex) => currentIndex + 1);
-      }
+      // Navigation may have changed the open record while this batch ran.
+      setDetailRefreshIndex((currentIndex) => currentIndex + 1);
       setQueueRefreshIndex((currentIndex) => currentIndex + 1);
     } catch (error) {
       const normalizedError = normalizeCommunityError(error, "The selected suggestions could not be approved.");
@@ -417,13 +420,15 @@ export function ModerationSuggestions() {
         return;
       }
       setBulkState({ ...EMPTY_BULK_STATE, error: normalizedError });
+    } finally {
+      mutationInFlightRef.current = false;
     }
   }
 
   async function applyCommand(action, body) {
     const endpoint = COMMAND_ENDPOINTS[action];
     const targetSubmissionId = submissionId;
-    if (!endpoint || !targetSubmissionId || activeCommandState.pendingAction) return;
+    if (!endpoint || !targetSubmissionId || mutationInFlightRef.current) return;
     if (baselineBusy) {
       setCommandState({
         submissionId: targetSubmissionId,
@@ -434,6 +439,7 @@ export function ModerationSuggestions() {
       return;
     }
 
+    mutationInFlightRef.current = true;
     setCommandState({
       submissionId: targetSubmissionId,
       pendingAction: action,
@@ -507,6 +513,8 @@ export function ModerationSuggestions() {
         setDetailRefreshIndex((currentIndex) => currentIndex + 1);
         setQueueRefreshIndex((currentIndex) => currentIndex + 1);
       }
+    } finally {
+      mutationInFlightRef.current = false;
     }
   }
 
@@ -618,7 +626,11 @@ export function ModerationSuggestions() {
           </div>
         ) : null}
 
-        {detailChildren ? <div className="moderation-detail-content">{detailChildren}</div> : null}
+        {detailChildren ? (
+          <fieldset className="moderation-detail-content moderation-detail-controls" disabled={bulkState.pending}>
+            {detailChildren}
+          </fieldset>
+        ) : null}
       </section>
     );
   }
@@ -709,7 +721,7 @@ export function ModerationSuggestions() {
                 <p className="community-eyebrow">Queue controls</p>
                 <h2>Filter records</h2>
               </div>
-              <button className="community-text-button" onClick={clearFilters} type="button">Reset</button>
+              <button className="community-text-button" disabled={bulkState.pending} onClick={clearFilters} type="button">Reset</button>
             </div>
 
             <fieldset className="moderation-status-filter">
@@ -798,7 +810,7 @@ export function ModerationSuggestions() {
             </div>
 
             {filterError ? <p className="community-message community-message-error" role="alert">{filterError}</p> : null}
-            <button className="community-primary-button moderation-apply-filters" disabled={isQueueLoading} type="submit">
+            <button className="community-primary-button moderation-apply-filters" disabled={isQueueLoading || bulkState.pending} type="submit">
               Apply filters
             </button>
           </form>
@@ -823,7 +835,7 @@ export function ModerationSuggestions() {
                   </button>
                   <button
                     className="community-primary-button"
-                    disabled={!selectedBulkItems.length || bulkState.pending}
+                    disabled={!selectedBulkItems.length || bulkState.pending || baselineBusy || Boolean(commandState.pendingAction)}
                     onClick={approveSelected}
                     type="button"
                   >
