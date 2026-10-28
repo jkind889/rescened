@@ -7,7 +7,9 @@ const { MongoMemoryReplSet } = require("mongodb-memory-server");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
 const { createCoverArtResolver } = require("../lib/coverArtArchive");
+const Notification = require("../models/Notification");
 const { approveAlbumSubmission } = require("../routes/utils/approval");
+const { bulkApprove } = require("../routes/utils/bulkApproval");
 const {
   findDuplicateSignals,
   normalizeCorrectionPayload,
@@ -92,7 +94,7 @@ function providerResponse(data, status = 200, headers = {}) {
 async function setup() {
   replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(replSet.getUri(), { dbName: "rescened_phase2b" });
-  await Promise.all([AlbumCatalog.syncIndexes(), AlbumSubmission.syncIndexes()]);
+  await Promise.all([AlbumCatalog.syncIndexes(), AlbumSubmission.syncIndexes(), Notification.syncIndexes()]);
 }
 
 async function teardown() {
@@ -197,6 +199,97 @@ async function automaticCoverApprovalTest() {
   assert.equal(retry.idempotent, true);
   assert.equal(retry.album.albumId, first.album.albumId);
   assert.equal(calls.length, 2);
+}
+
+// Bulk tests never reach the live Cover Art Archive.
+function approveWithoutArtwork(args) {
+  return approveAlbumSubmission({ ...args, coverResolver: null });
+}
+
+function bulkItem(submission) {
+  return { submissionId: submission.submissionId, expectedRevision: submission.currentRevision };
+}
+
+async function bulkPartialFailureTest() {
+  const eligible = await createSubmission("Bulk Eligible Album");
+  const stale = await createSubmission("Bulk Stale Album");
+  const original = await createSubmission("Bulk Twin Album");
+  const twin = await createSubmission("Bulk Twin Album");
+  assert.ok(twin.duplicateSignals.length, "the second submission records its duplicate signal");
+  const target = await AlbumCatalog.create({
+    albumId: crypto.randomUUID(),
+    title: "Bulk Correction Target",
+    artistDisplayName: "Bulk Artist",
+    artistCredits: [{ name: "Bulk Artist", role: "main" }],
+    releaseType: "album",
+    releaseDate: "2021",
+    releaseDatePrecision: "year",
+    releaseYear: 2021,
+    label: "Old label",
+    catalogSource: "import",
+    catalogRevision: 1,
+  });
+  const correction = await createCorrection(target, { title: "Bulk Corrected", label: "New label" });
+
+  const outcome = await bulkApprove({
+    items: [bulkItem(eligible), { ...bulkItem(stale), expectedRevision: 2 }, bulkItem(twin), bulkItem(correction), bulkItem(original)],
+    reason: "Bulk check",
+    actorUserId: "bulk-moderator",
+    approve: approveWithoutArtwork,
+  });
+  const codes = outcome.results.map((result) => (result.ok ? "ok" : result.error.code));
+  // The original has no stored signal, but its pending twin is found by the
+  // duplicate check inside its own transaction.
+  assert.deepEqual(codes, ["ok", "STATE_CONFLICT", "BULK_REVIEW_REQUIRED", "ok", "POSSIBLE_DUPLICATE_CONFIRMATION_REQUIRED"]);
+  assert.deepEqual(outcome.summary, { requested: 5, approved: 2, alreadyApproved: 0, failed: 3 });
+
+  const rows = await AlbumSubmission.find({ submissionId: { $in: [eligible, stale, twin, correction, original].map((row) => row.submissionId) } }).lean();
+  const status = Object.fromEntries(rows.map((row) => [row.submissionId, row]));
+  assert.equal(status[eligible.submissionId].status, "approved");
+  assert.equal(status[eligible.submissionId].moderationHistory.at(-1).reason, "Bulk check");
+  assert.equal(status[stale.submissionId].status, "pending");
+  assert.equal(status[stale.submissionId].moderationHistory.length, 1, "failures append no history");
+  assert.equal(status[twin.submissionId].status, "pending");
+  assert.equal(await AlbumCatalog.countDocuments({ title: "Bulk Stale Album" }), 0);
+  assert.equal(status[original.submissionId].status, "pending");
+  assert.equal(await AlbumCatalog.countDocuments({ title: "Bulk Twin Album" }), 0);
+
+  const corrected = await AlbumCatalog.findById(target._id).lean();
+  assert.deepEqual([corrected.title, corrected.label, corrected.catalogRevision], ["Bulk Corrected", "New label", 2]);
+  assert.deepEqual(status[correction.submissionId].moderationHistory.at(-1).application.appliedFields, ["title", "label"]);
+
+  // Retrying the same batch is idempotent for the approved items.
+  const retry = await bulkApprove({ items: [bulkItem(eligible), bulkItem(correction)], actorUserId: "bulk-moderator", approve: approveWithoutArtwork });
+  assert.deepEqual(retry.summary, { requested: 2, approved: 0, alreadyApproved: 2, failed: 0 });
+  assert.equal(await AlbumCatalog.countDocuments({ title: "Bulk Eligible Album" }), 1);
+}
+
+async function bulkSameFingerprintTest() {
+  // Two suggestions for the same release submitted before either could see
+  // the other: neither has a stored signal, so both look bulk-eligible. Each
+  // must still stop at the in-transaction duplicate check.
+  const first = await createSubmission("Bulk Race Album");
+  const second = await createSubmission("Bulk Race Album");
+  await AlbumSubmission.collection.updateOne({ _id: second._id }, { $set: { duplicateSignals: [], candidateSubmissionIds: [], candidateAlbumCatalogId: null } });
+  const outcome = await bulkApprove({ items: [bulkItem(first), bulkItem(second)], actorUserId: "bulk-moderator", approve: approveWithoutArtwork });
+  assert.deepEqual(outcome.results.map((result) => result.error?.code), ["POSSIBLE_DUPLICATE_CONFIRMATION_REQUIRED", "POSSIBLE_DUPLICATE_CONFIRMATION_REQUIRED"]);
+  assert.equal(await AlbumCatalog.countDocuments({ title: "Bulk Race Album" }), 0);
+  const rows = await AlbumSubmission.find({ _id: { $in: [first._id, second._id] } }).lean();
+  assert.deepEqual(rows.map((row) => row.status), ["pending", "pending"]);
+}
+
+async function bulkConcurrentWithSingleTest() {
+  const submission = await createSubmission("Bulk Concurrent Album");
+  const [bulk, single] = await Promise.all([
+    bulkApprove({ items: [bulkItem(submission)], actorUserId: "moderator-a", approve: approveWithoutArtwork }),
+    approveWithoutArtwork({ submissionId: submission.submissionId, actorUserId: "moderator-b" }),
+  ]);
+  assert.equal(bulk.results[0].ok, true, JSON.stringify(bulk.results[0]));
+  assert.equal(bulk.results[0].albumId, single.album.albumId);
+  assert.equal(await AlbumCatalog.countDocuments({ title: "Bulk Concurrent Album" }), 1);
+  const persisted = await AlbumSubmission.findById(submission._id).lean();
+  assert.equal(persisted.moderationHistory.filter((event) => event.action === "approved").length, 1);
+  assert.equal(await Notification.countDocuments({ type: "suggestion_status", submissionId: submission._id }), 1);
 }
 
 async function rollbackTest() {
@@ -348,6 +441,9 @@ if (integrationEnabled) {
   test("catalog corrections apply selected fields and record the result revision", correctionApprovalTest);
   test("stale catalog corrections are rejected without changing the submission", staleCorrectionTest);
   test("corrections apply to legacy albums without a stored catalog revision", legacyRevisionCorrectionTest);
+  test("bulk approval commits eligible items and leaves failures untouched", bulkPartialFailureTest);
+  test("bulk approval rechecks duplicates inside each item's transaction", bulkSameFingerprintTest);
+  test("bulk and single approval of one suggestion publish one album and one notification", bulkConcurrentWithSingleTest);
 } else {
   test("transactional approval publishes a usable catalog album and keeps pending data private", { skip: "Set RUN_MONGO_INTEGRATION=true in an environment that permits local Mongo processes" }, () => {});
   test("concurrent approval retries are idempotent and create one album", { skip: "Set RUN_MONGO_INTEGRATION=true in an environment that permits local Mongo processes" }, () => {});
@@ -356,4 +452,7 @@ if (integrationEnabled) {
   test("submission query updates preserve status and append-only invariants", { skip: "Set RUN_MONGO_INTEGRATION=true in an environment that permits local Mongo processes" }, () => {});
   test("catalog corrections apply selected fields and record the result revision", { skip: "Set RUN_MONGO_INTEGRATION=true in an environment that permits local Mongo processes" }, () => {});
   test("stale catalog corrections are rejected without changing the submission", { skip: "Set RUN_MONGO_INTEGRATION=true in an environment that permits local Mongo processes" }, () => {});
+  test("bulk approval commits eligible items and leaves failures untouched", { skip: "Set RUN_MONGO_INTEGRATION=true in an environment that permits local Mongo processes" }, () => {});
+  test("bulk approval rechecks duplicates inside each item's transaction", { skip: "Set RUN_MONGO_INTEGRATION=true in an environment that permits local Mongo processes" }, () => {});
+  test("bulk and single approval of one suggestion publish one album and one notification", { skip: "Set RUN_MONGO_INTEGRATION=true in an environment that permits local Mongo processes" }, () => {});
 }

@@ -232,7 +232,7 @@ AlbumCatalog (new fields)
 4. Update the album conditionally on `{ _id, albumId, genresRevision }`, increment `genresRevision`, and set `fieldProvenance.genres`. A concurrent genre approval fails the guard and returns `409 GENRES_CHANGED`. Re-opening the item shows the new current state.
 5. Transition the submission and append one `approved` event with an `application` object: applied and skipped indexes, no-ops, created and mapped `genreId`s, and the base and result `genresRevision`. A retry is idempotent and appends nothing.
 
-**Volume.** Genre suggestions will be the highest-volume item in the queue. They are the natural first user of the deferred bulk-approval work, where each item keeps its own transaction and reports its own conflicts. Until then, the detail view gets a one-click "Approve all as proposed" when every new name has an exact or alias match.
+**Volume.** Genre suggestions will be the highest-volume item in the queue. Bulk approval is built: moderators select pending suggestions in the queue and approve them as proposed, each in its own transaction with its own result. A genre suggestion qualifies when every new name has an exact or alias match, so the interim one-click button was not needed. See [Bulk approval](MODERATOR_IMPLEMENTATION_GUIDE.md#bulk-approval).
 
 ### Vocabulary maintenance
 

@@ -10,6 +10,8 @@ const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
 const BaselineService = require("../lib/baselines/service");
 const Notification = require("../models/Notification");
+const { Genre } = require("../models/Genre");
+const BaselineModels = require("../models/AlbumBaseline");
 
 const ORIGINALS = {
   startSession: mongoose.startSession,
@@ -22,6 +24,8 @@ const ORIGINALS = {
   publishSubmissionBaseline: BaselineService.publishSubmissionBaseline,
   invalidateAlbumBaseline: BaselineService.invalidateAlbumBaseline,
   notificationUpdateOne: Notification.updateOne,
+  genreFind: Genre.find,
+  headFind: BaselineModels.Head.find,
 };
 
 function validMetadata(title = "Kind of Blue") {
@@ -108,7 +112,14 @@ async function callRoute(router, method, path, req = {}) {
   return { status: res.statusCode, body: res.body, headers: res.headers };
 }
 
-function installMocks({ userId = "user_mod", documents = [], catalogs = [] } = {}) {
+function leanChain(rows) {
+  return {
+    select() { return this; },
+    lean() { return Promise.resolve(rows); },
+  };
+}
+
+function installMocks({ userId = "user_mod", documents = [], catalogs = [], genres = [], heads = [] } = {}) {
   let currentDocuments = documents;
   let currentCatalogs = catalogs;
   const notifications = [];
@@ -133,8 +144,19 @@ function installMocks({ userId = "user_mod", documents = [], catalogs = [] } = {
     id: rateLimitPath,
     filename: rateLimitPath,
     loaded: true,
-    exports: { moderationMutationRateLimit: pass },
+    exports: { moderationMutationRateLimit: pass, moderationBulkRateLimit: pass },
   };
+  // Bulk eligibility looks up active genres by exact name or alias and
+  // reviewed submission baselines.
+  Genre.find = (query = {}) => {
+    const keys = query.$or?.[0]?.normalizedName?.$in || [];
+    return leanChain(genres.filter((genre) => genre.status === "active" && (
+      keys.includes(genre.normalizedName) || (genre.aliases || []).some((alias) => keys.includes(alias.normalizedName))
+    )));
+  };
+  BaselineModels.Head.find = (query = {}) => leanChain(heads.filter((head) => (
+    head.targetKind === query.targetKind && query.targetId.$in.includes(head.targetId) && head.status === query.status
+  )));
   AlbumCatalog.find = () => createChain(currentCatalogs);
   AlbumCatalog.findOne = (query = {}) => {
     const found = currentCatalogs.find((row) => (
@@ -209,6 +231,8 @@ test.afterEach(() => {
   BaselineService.publishSubmissionBaseline = ORIGINALS.publishSubmissionBaseline;
   BaselineService.invalidateAlbumBaseline = ORIGINALS.invalidateAlbumBaseline;
   Notification.updateOne = ORIGINALS.notificationUpdateOne;
+  Genre.find = ORIGINALS.genreFind;
+  BaselineModels.Head.find = ORIGINALS.headFind;
   delete require.cache[moderationPath];
   delete require.cache[clerkPath];
   delete require.cache[rateLimitPath];
@@ -569,7 +593,7 @@ test("moderator mutation rate limiting happens before persistence", async () => 
     id: rateLimitPath,
     filename: rateLimitPath,
     loaded: true,
-    exports: { moderationMutationRateLimit: rateLimited },
+    exports: { moderationMutationRateLimit: rateLimited, moderationBulkRateLimit: rateLimited },
   };
   delete require.cache[moderationPath];
   const router = require("../routes/moderation");
@@ -588,4 +612,183 @@ test("mark-duplicate notes are optional and default to a standard note", () => {
   assert.equal(normalizeCommandBody({ duplicateOfSubmissionId: target, reason: "  Same release  " }, "mark_duplicate").reason, "Same release");
   assert.throws(() => normalizeCommandBody({ reason: "" }, "reject"), /reason is required/);
   assert.throws(() => normalizeCommandBody({ reason: "" }, "request_changes"), /reason is required/);
+});
+
+function bulkItem(document) {
+  return { submissionId: document.submissionId, expectedRevision: document.currentRevision };
+}
+
+function distinctMetadata(title) {
+  return { ...validMetadata(title), barcode: "", catalogNumber: "" };
+}
+
+test("bulk approval validates the whole request before any write", async () => {
+  const document = makeSubmission();
+  const state = installMocks({ documents: [document] });
+  const cases = [
+    [{ items: [] }, "INVALID_MODERATION_REQUEST"],
+    [{ items: [bulkItem(document)], status: "approved" }, "INVALID_MODERATION_REQUEST"],
+    [{ items: [{ ...bulkItem(document), genreDecisions: {} }] }, "INVALID_MODERATION_REQUEST"],
+    [{ items: [{ submissionId: document.submissionId }] }, "INVALID_MODERATION_REQUEST"],
+    [{ items: [bulkItem(document), bulkItem(document)] }, "INVALID_MODERATION_REQUEST"],
+    [{ items: Array.from({ length: 21 }, () => ({ submissionId: crypto.randomUUID(), expectedRevision: 1 })) }, "BULK_LIMIT_EXCEEDED"],
+  ];
+  for (const [body, code] of cases) {
+    const result = await callRoute(state.router, "post", "/bulk-approve", { body });
+    assert.equal(result.status, 400, JSON.stringify(body).slice(0, 80));
+    assert.equal(result.body.code, code);
+  }
+  assert.equal(document.status, "pending");
+  assert.equal(state.catalogs.length, 0);
+});
+
+test("bulk approval is gated by sign-in, the moderator list, and the moderation flag", async () => {
+  const document = makeSubmission({ proposedMetadata: distinctMetadata("Gated") });
+  for (const [userId, status, code] of [[null, 401, "UNAUTHORIZED"], ["user_other", 403, "MODERATOR_REQUIRED"]]) {
+    installMocks({ userId, documents: [document] });
+    const result = await callRoute(require("../routes/moderation"), "post", "/bulk-approve", { body: { items: [bulkItem(document)] } });
+    assert.equal(result.status, status);
+    assert.equal(result.body.code, code);
+  }
+  const state = installMocks({ documents: [document] });
+  process.env.COMMUNITY_MODERATION_ENABLED = "false";
+  const disabled = await callRoute(state.router, "post", "/bulk-approve", { body: { items: [bulkItem(document)] } });
+  assert.equal(disabled.status, 503);
+  assert.equal(disabled.body.code, "MODERATION_DISABLED");
+  assert.equal(document.status, "pending");
+  assert.equal(state.notifications.length, 0);
+
+  const order = state.router.stack.find((layer) => layer.route?.path === "/bulk-approve").route.stack.map((layer) => layer.handle.name);
+  assert.ok(order.indexOf("bulkApprovalBody") > order.indexOf("moderationEnabled"));
+  assert.ok(order.indexOf("bulkApprovalBody") < order.indexOf("pass"), "the body is validated before the per-item rate limit");
+});
+
+test("bulk approval reports each item on its own and commits the eligible ones", async () => {
+  const eligible = makeSubmission({ proposedMetadata: distinctMetadata("Eligible"), normalizedFingerprint: "a".repeat(64) });
+  const album = { _id: new mongoose.Types.ObjectId(), albumId: crypto.randomUUID(), title: "Already", artistDisplayName: "Artist" };
+  const approved = makeSubmission({ status: "approved", approvedAlbumCatalogId: album._id, proposedMetadata: distinctMetadata("Already") });
+  const stale = makeSubmission({ currentRevision: 2, proposedMetadata: distinctMetadata("Stale") });
+  const rejected = makeSubmission({ status: "rejected", proposedMetadata: distinctMetadata("Rejected") });
+  const duplicate = makeSubmission({ proposedMetadata: distinctMetadata("Duplicate") });
+  duplicate.duplicateSignals = [{ targetType: "submission", matchType: "fingerprint", key: "private" }];
+  const missing = { submissionId: crypto.randomUUID(), expectedRevision: 1 };
+  const state = installMocks({ documents: [eligible, approved, stale, rejected, duplicate], catalogs: [album] });
+  // Other suggestions in this queue must not register as duplicates of the
+  // eligible one; the duplicate check only finds what the mock returns.
+  AlbumSubmission.find = () => createChain([]);
+
+  const result = await callRoute(state.router, "post", "/bulk-approve", {
+    body: {
+      items: [bulkItem(eligible), bulkItem(approved), { ...bulkItem(stale), expectedRevision: 1 }, bulkItem(rejected), bulkItem(duplicate), missing],
+      reason: "  Checked together  ",
+    },
+  });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  const byId = new Map(result.body.results.map((entry) => [entry.submissionId, entry]));
+  assert.equal(byId.get(eligible.submissionId).ok, true);
+  assert.equal(byId.get(eligible.submissionId).idempotent, false);
+  assert.match(byId.get(eligible.submissionId).albumUrl, /^\/album\/[0-9a-f-]{36}$/);
+  assert.equal(byId.get(approved.submissionId).ok, true);
+  assert.equal(byId.get(approved.submissionId).idempotent, true);
+  assert.equal(byId.get(approved.submissionId).albumId, album.albumId);
+  assert.equal(byId.get(stale.submissionId).error.code, "STATE_CONFLICT");
+  assert.equal(byId.get(rejected.submissionId).error.code, "INVALID_SUBMISSION_STATE");
+  assert.equal(byId.get(duplicate.submissionId).error.code, "BULK_REVIEW_REQUIRED");
+  assert.deepEqual(byId.get(duplicate.submissionId).error.details, ["possible_duplicate"]);
+  assert.equal(byId.get(missing.submissionId).error.code, "SUGGESTION_NOT_FOUND");
+  assert.deepEqual(result.body.summary, { requested: 6, approved: 1, alreadyApproved: 1, failed: 4 });
+  assert.deepEqual(result.body.results.map((entry) => entry.submissionId), [eligible, approved, stale, rejected, duplicate, missing].map((entry) => entry.submissionId), "results keep request order");
+
+  assert.equal(eligible.status, "approved");
+  assert.equal(eligible.moderationHistory.at(-1).reason, "Checked together");
+  assert.equal(eligible.moderationHistory.filter((event) => event.action === "approved").length, 1);
+  assert.equal(approved.moderationHistory.length, 0, "an idempotent retry appends no history");
+  assert.deepEqual([stale.status, rejected.status, duplicate.status], ["pending", "rejected", "pending"]);
+  assert.equal(state.catalogs.length, 2);
+  assert.equal(state.notifications.length, 1);
+});
+
+test("bulk approval fails the whole request with 503 when transactions are unavailable", async () => {
+  const first = makeSubmission({ proposedMetadata: distinctMetadata("First") });
+  const second = makeSubmission({ proposedMetadata: distinctMetadata("Second") });
+  const state = installMocks({ documents: [first, second] });
+  AlbumSubmission.find = () => createChain([]);
+  mongoose.startSession = async () => { throw Object.assign(new Error("Transaction numbers are only allowed on a replica set member or mongos"), { code: 20 }); };
+  const result = await callRoute(state.router, "post", "/bulk-approve", { body: { items: [bulkItem(first), bulkItem(second)] } });
+  assert.equal(result.status, 503);
+  assert.equal(result.body.code, "APPROVAL_UNAVAILABLE");
+  assert.deepEqual([first.status, second.status], ["pending", "pending"]);
+  assert.equal(state.catalogs.length, 0);
+});
+
+test("bulk approval derives as-proposed bodies and flags items that need review", async () => {
+  const { bulkApprovalPlans } = require("../routes/utils/bulkApproval");
+  const jazz = { genreId: crypto.randomUUID(), normalizedName: "jazz", status: "active", aliases: [] };
+  const hipHop = { genreId: crypto.randomUUID(), normalizedName: "hip hop", status: "active", aliases: [{ normalizedName: "rap" }] };
+  const retired = { genreId: crypto.randomUUID(), normalizedName: "lounge", status: "retired", aliases: [] };
+  const existing = { genreId: crypto.randomUUID(), slug: "soul", name: "Soul" };
+  const newGenre = (name) => ({ name, normalizedName: name, slug: name.replace(/ /g, "-"), parent: null });
+  const genreSuggestion = (additions, extra = {}) => ({
+    submissionId: crypto.randomUUID(),
+    submissionType: "genre_suggestion",
+    status: "pending",
+    currentRevision: 1,
+    genreChanges: { additions, removals: [existing], primary: { addIndex: 0, genre: null }, ...extra },
+  });
+  const matched = genreSuggestion([{ genre: null, newGenre: newGenre("jazz") }, { genre: null, newGenre: newGenre("rap") }, { genre: existing, newGenre: null }]);
+  const unmatched = genreSuggestion([{ genre: null, newGenre: newGenre("vaporwave") }]);
+  const retiredOnly = genreSuggestion([{ genre: null, newGenre: newGenre("lounge") }]);
+  const correction = {
+    submissionId: crypto.randomUUID(),
+    submissionType: "catalog_correction",
+    status: "pending",
+    currentRevision: 1,
+    proposedChanges: { label: "Blue Note", title: "Corrected" },
+  };
+  const staleBaseline = makeSubmission({ currentRevision: 2 });
+  const freshBaseline = makeSubmission();
+  const notPending = makeSubmission({ status: "needs_changes" });
+  installMocks({
+    genres: [jazz, hipHop, retired],
+    heads: [
+      { targetKind: "submissions", targetId: staleBaseline.submissionId, status: "reviewed", targetRevision: 1 },
+      { targetKind: "submissions", targetId: freshBaseline.submissionId, status: "reviewed", targetRevision: 1 },
+    ],
+  });
+
+  const plans = await bulkApprovalPlans([matched, unmatched, retiredOnly, correction, staleBaseline, freshBaseline, notPending]);
+  assert.deepEqual(plans.get(matched.submissionId), {
+    eligible: true,
+    body: {
+      genreDecisions: {
+        add: [
+          { decision: "apply", resolution: { action: "map", genreId: jazz.genreId } },
+          { decision: "apply", resolution: { action: "map", genreId: hipHop.genreId } },
+          { decision: "apply" },
+        ],
+        remove: [{ decision: "apply" }],
+        primary: "apply",
+      },
+    },
+  });
+  assert.deepEqual(plans.get(unmatched.submissionId), { eligible: false, reason: "unmatched_genre_name" });
+  assert.deepEqual(plans.get(retiredOnly.submissionId), { eligible: false, reason: "unmatched_genre_name" }, "a retired genre is not a match");
+  assert.deepEqual(plans.get(correction.submissionId), { eligible: true, body: { applyFields: ["title", "label"] } });
+  assert.deepEqual(plans.get(staleBaseline.submissionId), { eligible: false, reason: "stale_baseline_selection" });
+  assert.deepEqual(plans.get(freshBaseline.submissionId), { eligible: true, body: {} });
+  assert.equal(plans.has(notPending.submissionId), false);
+
+  // The as-proposed genre decisions pass the genre approval's own validation.
+  const { normalizeGenreDecisions } = require("../lib/genres/approval");
+  assert.doesNotThrow(() => normalizeGenreDecisions(plans.get(matched.submissionId).body.genreDecisions, matched.genreChanges));
+});
+
+test("the moderator queue marks which pending suggestions bulk approval can take", async () => {
+  const eligible = makeSubmission({ updatedAt: new Date("2026-08-01T00:00:00.000Z") });
+  const duplicate = makeSubmission({ updatedAt: new Date("2026-08-02T00:00:00.000Z") });
+  duplicate.duplicateSignals = [{ targetType: "submission", matchType: "fingerprint", key: "private" }];
+  const state = installMocks({ documents: [eligible, duplicate] });
+  const result = await callRoute(state.router, "get", "/", { query: {} });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.suggestions.map((entry) => entry.bulkApproval), [{ eligible: true }, { eligible: false, reason: "possible_duplicate" }]);
 });

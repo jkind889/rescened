@@ -18,7 +18,8 @@ const {
   parseSubmissionTypeFilter,
   parseStatusFilter,
 } = require("./utils/moderation");
-const { moderationMutationRateLimit } = require("./utils/rateLimit");
+const { bulkApprovalSummaries, bulkApprove, normalizeBulkApprovalBody } = require("./utils/bulkApproval");
+const { moderationBulkRateLimit, moderationMutationRateLimit } = require("./utils/rateLimit");
 
 const router = express.Router();
 
@@ -234,12 +235,36 @@ router.get("/", authenticate, moderatorOnly, async (req, res) => {
     const hasNextPage = rows.length > limit;
     const page = hasNextPage ? rows.slice(0, limit) : rows;
     const last = page[page.length - 1];
+    const bulkApproval = await bulkApprovalSummaries(page);
     return res.json({
-      suggestions: page.map(moderatorSummary),
+      suggestions: page.map((submission) => {
+        const summary = moderatorSummary(submission);
+        if (bulkApproval.has(summary.submissionId)) summary.bulkApproval = bulkApproval.get(summary.submissionId);
+        return summary;
+      }),
       nextCursor: hasNextPage && last ? encodeModerationCursor(last.updatedAt, last._id) : null,
     });
   } catch (error) {
     return sendError(res, error, "Failed to fetch moderation queue");
+  }
+});
+
+// Validated before the rate limit so it can charge one point per item, and
+// before any write. Registered before /:submissionId.
+function bulkApprovalBody(req, res, next) {
+  try {
+    req.bulkApproval = normalizeBulkApprovalBody(req.body);
+    return next();
+  } catch (error) {
+    return sendError(res, error, "Failed to approve suggestions");
+  }
+}
+
+router.post("/bulk-approve", authenticate, moderatorOnly, moderationEnabled, bulkApprovalBody, moderationBulkRateLimit, async (req, res) => {
+  try {
+    return res.json(await bulkApprove({ ...req.bulkApproval, actorUserId: req.userId }));
+  } catch (error) {
+    return sendError(res, error, "Failed to approve suggestions");
   }
 });
 

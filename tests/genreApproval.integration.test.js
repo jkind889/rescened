@@ -361,3 +361,57 @@ integration("a catalog correction keeps the album's genre provenance", async () 
   assert.equal(after.fieldProvenance.genres.submissionId, suggestion.submissionId);
   assert.equal(after.genresRevision, 1);
 });
+
+function bulkApprove(suggestions, reason) {
+  return call("POST", "/moderation/album-suggestions/bulk-approve", MODERATOR, {
+    items: suggestions.map((suggestion) => ({ submissionId: suggestion.submissionId, expectedRevision: suggestion.currentRevision })),
+    ...(reason ? { reason } : {}),
+  });
+}
+
+integration("bulk approval maps new names that now exist and leaves the rest for review", async () => {
+  const first = await suggest(await newAlbum(), { add: [{ newGenre: { name: "Chillwave" } }] });
+  const second = await suggest(await newAlbum(), { add: [{ newGenre: { name: "Chillwave" } }] });
+  const unmatched = await suggest(await newAlbum(), { add: [{ newGenre: { name: "Shoegaze" } }] });
+
+  const before = await bulkApprove([first, second, unmatched]);
+  assert.equal(before.status, 200, JSON.stringify(before.body));
+  assert.deepEqual(before.body.results.map((result) => result.error?.code), ["BULK_REVIEW_REQUIRED", "BULK_REVIEW_REQUIRED", "BULK_REVIEW_REQUIRED"]);
+  assert.deepEqual(before.body.results[0].error.details, ["unmatched_genre_name"]);
+
+  // A moderator creates the name while reviewing one suggestion; the other
+  // suggestion for the same name is then bulk-approvable as a mapping.
+  const created = await approve(first.submissionId, { add: [{ decision: "apply", resolution: { action: "create" } }] });
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  const chillwave = await Genre.findOne({ slug: "chillwave" }).lean();
+  const queue = await call("GET", "/moderation/album-suggestions?submissionType=genre_suggestion&limit=50", MODERATOR);
+  const listed = new Map(queue.body.suggestions.map((entry) => [entry.submissionId, entry.bulkApproval]));
+  assert.deepEqual(listed.get(second.submissionId), { eligible: true });
+  assert.deepEqual(listed.get(unmatched.submissionId), { eligible: false, reason: "unmatched_genre_name" });
+
+  const genresBefore = await Genre.countDocuments();
+  const after = await bulkApprove([second, unmatched], "Same name as an approved genre");
+  assert.equal(after.status, 200, JSON.stringify(after.body));
+  assert.equal(after.body.results[0].ok, true, JSON.stringify(after.body.results[0]));
+  assert.equal(after.body.results[1].error.code, "BULK_REVIEW_REQUIRED");
+  assert.equal(await Genre.countDocuments(), genresBefore, "bulk approval never creates genres");
+  const stored = await AlbumSubmission.findOne({ submissionId: second.submissionId }).lean();
+  const event = stored.moderationHistory.at(-1);
+  assert.equal(event.reason, "Same name as an approved genre");
+  assert.deepEqual(event.genreApplication.add.map((entry) => [entry.decision, entry.genre.genreId, entry.resolution]), [["applied", chillwave.genreId, "mapped"]]);
+  assert.equal((await AlbumSubmission.findOne({ submissionId: unmatched.submissionId }).lean()).status, "pending");
+});
+
+integration("bulk approval applies suggestions for one album in order and enforces the cap per item", async () => {
+  const album = await newAlbum(["hip-hop", "jazz", "disco"]);
+  const fits = await suggest(album, { add: [{ genreId: genres.soul.genreId }] });
+  const overflows = await suggest(album, { add: [{ genreId: genres.funk.genreId }, { genreId: genres.electronic.genreId }] });
+  const result = await bulkApprove([fits, overflows]);
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.results[0].ok, true);
+  assert.equal(result.body.results[1].error.code, "GENRE_LIMIT_EXCEEDED");
+  const after = await albumGenres(album);
+  assert.deepEqual(after.slugs, ["hip-hop", "jazz", "disco", "soul"]);
+  assert.equal(after.revision, 2);
+  assert.equal((await AlbumSubmission.findOne({ submissionId: overflows.submissionId }).lean()).status, "pending");
+});

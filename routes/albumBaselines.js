@@ -15,6 +15,12 @@ function moderatorOnly(req, res, next) {
   if (!isModerator(req.userId)) return res.status(403).json({ error: "Moderator access required", code: "MODERATOR_REQUIRED" });
   return next();
 }
+// The service checks this too; checking here also stops a disabled command
+// before it spends a moderation rate-limit point, like other moderator routes.
+function moderationEnabled(req, res, next) {
+  if (!service.flags().moderation) return res.status(503).json({ error: "Tracklist baseline moderation is currently disabled", code: "TRACKLIST_BASELINE_MODERATION_DISABLED" });
+  return next();
+}
 function allowedKeys(value, keys, path) {
   if (!value || typeof value !== "object" || Array.isArray(value)) { const error = new service.BaselineError(`${path} must be an object`, "INVALID_BASELINE_REQUEST"); throw error; }
   Object.keys(value).forEach((key) => { if (!keys.has(key)) throw new service.BaselineError(`${path}.${key} is not allowed`, "INVALID_BASELINE_REQUEST"); });
@@ -58,6 +64,6 @@ router.post("/:kind/:id/preview", authenticate, moderatorOnly, externalSearchRat
 async function command(req, res, action) {
   try { return res.json(await service.performCommand({ kind: req.params.kind, id: req.params.id, action, body: req.body || {}, actorUserId: req.userId })); } catch (error) { return sendError(res, error); }
 }
-["confirm", "replace", "defer", "revoke"].forEach((action) => router.post(`/:kind/:id/${action}`, authenticate, moderatorOnly, moderationMutationRateLimit, (req, res) => command(req, res, action)));
+["confirm", "replace", "defer", "revoke"].forEach((action) => router.post(`/:kind/:id/${action}`, authenticate, moderatorOnly, moderationEnabled, moderationMutationRateLimit, (req, res) => command(req, res, action)));
 
 module.exports = router;

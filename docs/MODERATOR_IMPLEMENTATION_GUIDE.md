@@ -103,7 +103,7 @@ The backend checks are:
 | Membership in comma-separated `MODERATOR_USER_IDS` | Every moderator route | `403 MODERATOR_REQUIRED` |
 | `COMMUNITY_MODERATION_ENABLED=true` | Commands only | `503 MODERATION_DISABLED` |
 | Global limit: 300 requests per IP per five minutes | All API routes except `/health` | `429 RATE_LIMITED` |
-| Moderator limit: 120 commands per user per ten minutes | Moderator commands only | `429 RATE_LIMITED` |
+| Moderator limit: 120 commands per user per ten minutes | Moderator commands only; bulk approval charges one point per item | `429 RATE_LIMITED` |
 
 The two read routes deliberately ignore `COMMUNITY_MODERATION_ENABLED`, so moderators can inspect the queue and history while writes are paused. Moderator commands do not consult `COMMUNITY_SUBMISSIONS_ENABLED`; that separate flag controls contributor mutations.
 
@@ -175,6 +175,7 @@ One current route-level quirk is `normalizeCommandBody(req.body || {}, action)`:
 | `POST /:submissionId/mark-duplicate` | `{ duplicateOfSubmissionId, reason }` | `pending → duplicate` |
 | `POST /:submissionId/approve` for `new_album` | `{ albumId?, confirmPossibleDuplicate?, reason? }` | `pending → approved` plus catalog create/link |
 | `POST /:submissionId/approve` for `catalog_correction` | `{ applyFields, reason? }` | `pending → approved` plus guarded field patch |
+| `POST /bulk-approve` | `{ items: [{ submissionId, expectedRevision }], reason? }` | Up to 20 approvals as proposed, one transaction each. See [Bulk approval](#bulk-approval). |
 
 Reasons are trimmed and capped at 1,000 characters. They are required for request changes and reject. Approval and mark-duplicate reasons are optional; a blank duplicate reason is stored as "Duplicate of an approved suggestion." Public IDs must be UUID v4 values. Correction `applyFields` must be a non-empty, duplicate-free subset of the correction's proposed field groups. A correction approval rejects `albumId` and any supplied duplicate-confirmation option. The approval service rejects `applyFields` on a new-album request, so the two approval contracts cannot be mixed.
 
@@ -269,6 +270,30 @@ There are four related concurrency protections:
 
 Existing catalog rows must be reconciled to an explicit positive `catalogRevision` before correction rollout. Likewise, historical approvals need reviewed `approvedAt` and publication-type backfill before they can appear in the feed. The runtime does not guess either value.
 
+### Bulk approval
+
+`POST /moderation/album-suggestions/bulk-approve` approves up to 20 pending suggestions of any type as proposed. It is registered before `/:submissionId` and uses the same authentication, moderator, and `COMMUNITY_MODERATION_ENABLED` checks as the single commands. The service is `routes/utils/bulkApproval.js`.
+
+**Request.** The body is `{ items: [{ submissionId, expectedRevision }], reason? }`. Unknown keys, an empty list, a repeated `submissionId`, or a missing positive `expectedRevision` return `400 INVALID_MODERATION_REQUEST`. More than 20 items return `400 BULK_LIMIT_EXCEEDED`. The body is validated before the rate limit, which then charges one point per item to the moderation bucket, so a bulk approval costs the same as approving each item alone. Both happen before any write. The optional `reason` is recorded on every item's own `approved` event; there is no batch identifier in the history.
+
+**Processing.** Items run one at a time, in request order. Each calls `approveAlbumSubmission()` with the body bulk derives for it, so each has its own transaction, revision guard, duplicate recheck, notification, and idempotent retry, exactly as a single approval. A failure in one item never rolls back another. The batch is never wrapped in one transaction: new-album artwork resolution runs outside the transaction, genre approval relies on `withTransaction` retries, and a single transaction would approach Atlas's time and size limits.
+
+**Revision guard.** `expectedRevision` is the revision the moderator saw in the queue. A pending item at another revision returns `STATE_CONFLICT`, and `approveAlbumSubmission()` repeats the check after its own read, so a revision submitted in between is never approved in its place.
+
+**Eligibility.** Bulk never makes a moderator's call. It derives each item's approval body, or refuses the item with `BULK_REVIEW_REQUIRED` and one reason in `details`:
+
+| Type | Bulk approval body | Refused when (`details`) |
+| --- | --- | --- |
+| `new_album` | `{}`: create a new album, never `albumId` or `confirmPossibleDuplicate` | The suggestion has stored duplicate signals (`possible_duplicate`), or a reviewed tracklist baseline was chosen for an older revision (`stale_baseline_selection`) |
+| `catalog_correction` | Every proposed field group as `applyFields` | It proposes no field groups (`no_proposed_fields`) |
+| `genre_suggestion` | Apply every addition, removal, and primary change. Each new name maps to the active genre whose name or alias matches it exactly, without adding an alias. | A new name has no exact active match (`unmatched_genre_name`). Bulk never creates a genre. |
+
+Single approval's own checks still apply inside each transaction. A new album with no stored signal can still return `POSSIBLE_DUPLICATE_CONFIRMATION_REQUIRED` or `EXACT_CATALOG_MATCH`, for example when two pending suggestions for the same release were submitted at the same time. A genre item can still return `GENRE_LIMIT_EXCEEDED` after an earlier item in the same batch filled the album.
+
+**Response.** `200` with `{ results: [{ submissionId, ok, idempotent?, albumId?, albumUrl?, error?: { code, message, details? } }], summary: { requested, approved, alreadyApproved, failed } }`, in request order. Per-item errors use the single-approval codes. An already-approved item is `ok` with `idempotent: true`; another non-pending item is `INVALID_SUBMISSION_STATE`. If transactions are unavailable before any item is approved, the whole request returns `503 APPROVAL_UNAVAILABLE`; if that happens partway, the remaining items report `APPROVAL_UNAVAILABLE`.
+
+**Queue summary.** `GET /` adds `bulkApproval: { eligible, reason? }` to each pending suggestion, computed by the same rules with one genre lookup and one baseline lookup per page. It is a hint for the UI; the server applies the rules again for every item.
+
 The model's `findOneAndUpdate`/`updateOne` middleware rejects updates that replace, unset, pull, pop, or non-append-position the `revisions` and `moderationHistory` arrays. Route behavior plus this middleware protects maintained query-update paths. Replacement APIs and raw database writers are outside that safeguard, so direct database access must still be restricted.
 
 ## Frontend mental model
@@ -295,6 +320,7 @@ The related React routes are:
 - Sends every command as `POST`, merges the returned suggestion into local state, and refreshes the queue.
 - Treats a `403` from either queue or detail as loss of moderator access for the whole workspace.
 - Refreshes detail after ordinary `409` conflicts, while keeping exact/advisory duplicate conflicts in place so the moderator can resolve them in the form.
+- Shows a checkbox beside each pending suggestion whose `bulkApproval.eligible` is true, outside the card button. Selection is capped at 20, stores the revision shown when it was selected, and clears when filters change, the queue is refreshed, or another page loads. **Approve selected** sends one bulk request, shows the summary and each failed item's reason under its card, then refreshes the queue once. It never retries automatically. Bulk approval waits for any active detail command or baseline preview/decision. While a batch is running, filter application/reset and detail mutation controls are disabled; completion refreshes the currently open detail even if the moderator navigated to it during the batch.
 
 If Clerk reports a signed-in session but `getToken()` returns no token, the page shows its normal request error/retry state; it does not perform another sign-in redirect. Signed-out routing is handled earlier by `ProtectedRoute`.
 
@@ -392,7 +418,7 @@ For real Mongo transaction behavior:
 npm run test:integration
 ```
 
-The integration runner enables `RUN_MONGO_INTEGRATION=true` and starts an in-memory replica set. The moderation integration file proves create/link atomicity, retries, rollback, provenance, append-only invariants, selected-field correction publication, and stale-revision rejection. Reference-conflict, concurrent-correction, and idempotent-correction cases remain sensible follow-up coverage if those behaviors are expanded.
+The integration runner enables `RUN_MONGO_INTEGRATION=true` and starts an in-memory replica set. The moderation integration file proves create/link atomicity, retries, rollback, provenance, append-only invariants, selected-field correction publication, and stale-revision rejection. It also covers bulk approval: a partial failure commits only the eligible items, two same-release suggestions both stop at the in-transaction duplicate check, and a concurrent bulk and single approval publish one album and one notification. `tests/genreApproval.integration.test.js` covers bulk genre mapping and the per-item genre cap. Mocked bulk validation, gating, mixed results, eligibility, and `503` coverage are in `tests/moderation.test.js`, and the per-item rate-limit charge is in `tests/routeRateLimits.test.js`. Reference-conflict, concurrent-correction, and idempotent-correction cases remain sensible follow-up coverage if those behaviors are expanded.
 
 For any album-bearing or identity change, also run:
 

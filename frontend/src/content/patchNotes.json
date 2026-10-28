@@ -1,5 +1,17 @@
 [
   {
+    "id": "bulk-approval",
+    "date": "2026-10-28",
+    "title": "Approve suggestions in bulk",
+    "summary": "Moderators can approve several community suggestions at once from the suggestion queue.",
+    "changes": [
+      "Tick the box beside a pending suggestion, or use Select all, then choose Approve selected. Up to 20 can be approved at a time.",
+      "Each suggestion is approved as proposed: new albums are added, corrections apply every proposed change, and genre suggestions apply every change.",
+      "Suggestions that need a closer look, such as possible duplicates or genre names that don't exist yet, have no checkbox and still need to be opened and approved on their own.",
+      "Each suggestion succeeds or fails on its own. Anything that wasn't approved shows the reason under its card, and contributors are notified for each approval as usual."
+    ]
+  },
+  {
     "id": "review-editing",
     "date": "2026-10-27",
     "title": "Edit your reviews",

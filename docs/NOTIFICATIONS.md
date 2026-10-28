@@ -17,7 +17,7 @@ Each key is a partial unique index on `Notification`. Followed-review delivery a
 
 ### Suggestion updates
 
-`suggestion_status` rows are inserted in the same transaction as the status change and its audit event. Approval already ran in a transaction. Request changes, reject, and mark duplicate now do too (`applyModerationCommand` in `routes/utils/moderationCommands.js`), and return `503 MODERATION_UNAVAILABLE` on standalone MongoDB instead of writing without the notification. See the [moderator guide](MODERATOR_IMPLEMENTATION_GUIDE.md).
+`suggestion_status` rows are inserted in the same transaction as the status change and its audit event. Approval already ran in a transaction. Request changes, reject, and mark duplicate now do too (`applyModerationCommand` in `routes/utils/moderationCommands.js`), and return `503 MODERATION_UNAVAILABLE` on standalone MongoDB instead of writing without the notification. Bulk approval runs each item through the same approval, so each approved item gets its own notification and a failed item gets none. See the [moderator guide](MODERATOR_IMPLEMENTATION_GUIDE.md).
 
 The key includes the moderated revision, so approving twice or concurrently writes one row, while a decision on a later revision of the same suggestion notifies again. Non-approval commands retain their first observed revision across transaction retries; if a contributor revises the suggestion meanwhile, the stale command returns `409 STATE_CONFLICT`. Notifications name the fixed actor `rescened:moderation`, which the page shows as "Rescened moderators". A moderator's account deletion never matches it, so contributors keep their notifications. The suggestion's detail page keeps the full history; the notification only points to it.
 

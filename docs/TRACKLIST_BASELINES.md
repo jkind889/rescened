@@ -24,7 +24,7 @@ A pending submission's selection remains private and binds to its revision. Appr
 
 ## Controls and API
 
-`TRACKLIST_ENRICHMENT_ENABLED=true` permits new provider discovery/preview. `TRACKLIST_BASELINE_MODERATION_ENABLED=true` plus `COMMUNITY_MODERATION_ENABLED=true` permits baseline decisions. All default disabled; persisted moderator reads remain available. Clerk authentication and the existing `MODERATOR_USER_IDS` allowlist apply to every endpoint. Configure the existing identifying `MUSICBRAINZ_USER_AGENT` server-side.
+`TRACKLIST_ENRICHMENT_ENABLED=true` permits new provider discovery/preview. `TRACKLIST_BASELINE_MODERATION_ENABLED=true` plus `COMMUNITY_MODERATION_ENABLED=true` permits baseline decisions; with either off, a decision returns `503 TRACKLIST_BASELINE_MODERATION_DISABLED` before it uses a moderation rate-limit point. All default disabled; persisted moderator reads remain available. Clerk authentication and the existing `MODERATOR_USER_IDS` allowlist apply to every endpoint. Configure the existing identifying `MUSICBRAINZ_USER_AGENT` server-side.
 
 Moderator API prefix: `/moderation/album-baselines`.
 

@@ -35,6 +35,34 @@ test('persisted moderator reads remain available while discovery and decisions a
   assert.equal(result.statusCode, 200);
   assert.equal(result.body.status, 'reviewed');
 });
+test('decisions are refused before the rate limit while either moderation flag is off', async () => {
+  const saved = { community: process.env.COMMUNITY_MODERATION_ENABLED, baseline: process.env.TRACKLIST_BASELINE_MODERATION_ENABLED };
+  const original = service.performCommand;
+  let called = false;
+  service.performCommand = async () => { called = true; return {}; };
+  try {
+    for (const [community, baseline] of [['false', 'true'], ['true', 'false']]) {
+      process.env.COMMUNITY_MODERATION_ENABLED = community;
+      process.env.TRACKLIST_BASELINE_MODERATION_ENABLED = baseline;
+      for (const action of ['confirm', 'replace', 'defer', 'revoke']) {
+        const route = router.stack.find((layer) => layer.route?.path === `/:kind/:id/${action}`);
+        const names = route.route.stack.map((layer) => layer.handle.name);
+        // authenticate, moderatorOnly, the flag check, the rate limit, then the handler.
+        assert.deepEqual(names.slice(0, 3), ['authenticate', 'moderatorOnly', 'moderationEnabled']);
+        assert.equal(names.length, 5);
+        const result = await invoke('post', `/:kind/:id/${action}`, { testUserId: 'baseline-moderator' });
+        assert.equal(result.statusCode, 503);
+        assert.equal(result.body.code, 'TRACKLIST_BASELINE_MODERATION_DISABLED');
+      }
+    }
+    assert.equal(called, false);
+  } finally {
+    service.performCommand = original;
+    for (const [key, value] of [['COMMUNITY_MODERATION_ENABLED', saved.community], ['TRACKLIST_BASELINE_MODERATION_ENABLED', saved.baseline]]) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+});
 test('unknown query keys are rejected before queue reads', async () => {
   let called = false;
   service.list = async () => { called = true; return { items: [] }; };
