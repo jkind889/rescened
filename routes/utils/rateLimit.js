@@ -97,6 +97,13 @@ const RATE_LIMITS = {
     duration: 10 * 60,
     message: "Too many stats requests. Please try again soon.",
   },
+  // Each export reads a user's whole dataset, so the budget is small.
+  dataExport: {
+    keyPrefix: "rescened:data-export",
+    points: 10,
+    duration: 60 * 60,
+    message: "Too many exports. Please try again later.",
+  },
   submissionCreate: {
     keyPrefix: "rescened:submission-create",
     points: 6,
@@ -267,6 +274,7 @@ const reviewMutationLimiter = createRateLimiter(RATE_LIMITS.reviewMutation);
 const likeMutationLimiter = createRateLimiter(RATE_LIMITS.likeMutation);
 const trackRankingMutationLimiter = createRateLimiter(RATE_LIMITS.trackRankingMutation);
 const profileStatsLimiter = createRateLimiter(RATE_LIMITS.profileStats);
+const dataExportLimiter = createRateLimiter(RATE_LIMITS.dataExport);
 const commentCreateLimiter = createRateLimiter(RATE_LIMITS.commentCreate);
 const commentMutationLimiter = createRateLimiter(RATE_LIMITS.commentMutation);
 const commentReportLimiter = createRateLimiter(RATE_LIMITS.commentReport);
@@ -332,6 +340,10 @@ module.exports = {
   profileStatsRateLimit: createRateLimitMiddleware(profileStatsLimiter, {
     keyGenerator: getUserOrIpRateLimitKey,
     message: RATE_LIMITS.profileStats.message,
+  }),
+  dataExportRateLimit: createRateLimitMiddleware(dataExportLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.dataExport.message,
   }),
   queueMutationRateLimit: createRateLimitMiddleware(queueMutationLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,

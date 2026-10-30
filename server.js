@@ -56,6 +56,7 @@ app.use("/search", searchRoutes);
 app.use("/albums", albumRoutes);
 app.use("/reviews", reviewRoutes);
 app.use("/reviews", require("./routes/reviewComments"));
+app.use("/profile/me/export", require("./routes/dataExport"));
 app.use("/profile", profileRoutes)
 app.use("/boards", boardRoutes)
 app.use("/diary", require("./routes/diary"));
