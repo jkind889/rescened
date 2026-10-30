@@ -206,3 +206,212 @@ test("no rendered page carries an internal Mongo _id", () => {
     assert.ok(!html.includes("user_secret"));
   }
 });
+
+// Route tests: models and Clerk are stubbed; requests go to a local listener.
+const express = require("express");
+const mongoose = require("mongoose");
+const AlbumCatalog = require("../models/AlbumCatalog");
+const Review = require("../models/Reviews");
+const UserProfile = require("../models/UserProfile");
+const { RATE_LIMITS, sharePreviewRateLimit } = require("../routes/utils/rateLimit");
+
+const clerkPath = require.resolve("@clerk/express");
+const sharePreviewPath = require.resolve("../routes/sharePreview");
+const ALBUM_OBJECT_ID = new mongoose.Types.ObjectId();
+const REVIEW_OBJECT_ID = new mongoose.Types.ObjectId();
+
+function lean(value) {
+  return { lean: async () => value };
+}
+
+function withEnv(t, values) {
+  const previous = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
+  Object.entries(values).forEach(([key, value]) => {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  });
+  t.after(() => Object.entries(previous).forEach(([key, value]) => {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }));
+}
+
+function stubClerk(t, users) {
+  const previous = require.cache[clerkPath];
+  require.cache[clerkPath] = {
+    id: clerkPath,
+    filename: clerkPath,
+    loaded: true,
+    exports: { clerkClient: { users: { async getUserList() { return { data: users }; } } } },
+  };
+  t.after(() => {
+    if (previous) require.cache[clerkPath] = previous;
+    else delete require.cache[clerkPath];
+  });
+}
+
+function stubData(t, { storedAlbum = { _id: ALBUM_OBJECT_ID, ...album() }, storedReview, profile = null } = {}) {
+  const calls = { album: [], review: [], profile: [] };
+  t.mock.method(AlbumCatalog, "findOne", (filter, fields) => {
+    calls.album.push({ filter, fields });
+    const matches = storedAlbum && (filter.albumId === storedAlbum.albumId || String(filter._id) === String(storedAlbum._id));
+    return lean(matches ? storedAlbum : null);
+  });
+  t.mock.method(Review, "findOne", (filter, fields) => {
+    calls.review.push({ filter, fields });
+    return lean(storedReview && filter.reviewId === storedReview.reviewId ? storedReview : null);
+  });
+  t.mock.method(UserProfile, "findOne", (filter, fields) => {
+    calls.profile.push({ filter, fields });
+    return lean(profile);
+  });
+  return calls;
+}
+
+async function request(t, path) {
+  delete require.cache[sharePreviewPath];
+  const app = express();
+  app.use("/share", require("../routes/sharePreview"));
+  const server = await new Promise((resolve) => { const listener = app.listen(0, "127.0.0.1", () => resolve(listener)); });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const response = await fetch(`http://127.0.0.1:${server.address().port}${path}`);
+  return { status: response.status, headers: response.headers, body: await response.text() };
+}
+
+function storedReview(overrides = {}) {
+  return { _id: REVIEW_OBJECT_ID, ...review(), userId: "user_author", albumCatalogId: ALBUM_OBJECT_ID, ...overrides };
+}
+
+test("share routes return a non-cached 404 while SHARE_PREVIEWS_ENABLED is off", async (t) => {
+  withEnv(t, { SHARE_PREVIEWS_ENABLED: undefined });
+  const calls = stubData(t);
+
+  for (const path of [`/share/album/${ALBUM_ID}`, `/share/review/${REVIEW_ID}`]) {
+    const response = await request(t, path);
+    assert.equal(response.status, 404, path);
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.match(response.headers.get("content-type"), /^text\/html/);
+    assert.ok(response.body.includes('<meta name="robots" content="noindex">'));
+  }
+  assert.equal(calls.album.length + calls.review.length, 0, "no reads while disabled");
+});
+
+test("an album share page renders from the catalog with a short public cache", async (t) => {
+  withEnv(t, { SHARE_PREVIEWS_ENABLED: "true", PUBLIC_SITE_URL: "https://rescened.com" });
+  const calls = stubData(t);
+
+  const response = await request(t, `/share/album/${ALBUM_ID.toUpperCase()}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "public, max-age=300");
+  assert.match(response.headers.get("content-type"), /^text\/html; charset=utf-8/);
+  assert.deepEqual(calls.album[0].filter, { albumId: ALBUM_ID });
+  assert.ok(response.body.includes(`<link rel="canonical" href="https://rescened.com/album/${ALBUM_ID}">`));
+  assert.ok(response.body.includes('<meta name="twitter:card" content="summary">'));
+  assert.ok(!response.body.includes(String(ALBUM_OBJECT_ID)));
+});
+
+test("an unknown or malformed album id returns a non-cached 404", async (t) => {
+  withEnv(t, { SHARE_PREVIEWS_ENABLED: "true" });
+  const calls = stubData(t, { storedAlbum: null });
+
+  for (const path of ["/share/album/33333333-3333-4333-8333-333333333333", "/share/album/not-a-uuid", `/share/album/${String(ALBUM_OBJECT_ID)}`]) {
+    const response = await request(t, path);
+    assert.equal(response.status, 404, path);
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+  }
+  assert.equal(calls.album.length, 1, "malformed ids never reach the database");
+});
+
+test("a review share page shows the author's username and links the catalog album", async (t) => {
+  withEnv(t, { SHARE_PREVIEWS_ENABLED: "true", PUBLIC_SITE_URL: undefined });
+  stubClerk(t, [{ id: "user_author", username: "listener", imageUrl: "" }]);
+  const calls = stubData(t, { storedReview: storedReview(), profile: { isPrivate: false } });
+
+  const response = await request(t, `/share/review/${REVIEW_ID}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "public, max-age=300");
+  assert.ok(response.body.includes("listener&#39;s review of Blue Rooms"));
+  assert.ok(response.body.includes(`<link rel="canonical" href="https://rescened.com/review/${REVIEW_ID}">`));
+  assert.ok(!response.body.includes('content="noindex"'));
+  assert.deepEqual(calls.profile[0].filter, { userId: "user_author" });
+  for (const secret of [String(ALBUM_OBJECT_ID), String(REVIEW_OBJECT_ID), "user_author", "_id"]) {
+    assert.ok(!response.body.includes(secret), secret);
+  }
+  assert.ok(!/comment/i.test(response.body), "no comment count");
+});
+
+test("a review by a private profile keeps the username and is noindex", async (t) => {
+  withEnv(t, { SHARE_PREVIEWS_ENABLED: "true" });
+  stubClerk(t, [{ id: "user_author", username: "quietlistener", imageUrl: "" }]);
+  stubData(t, { storedReview: storedReview(), profile: { isPrivate: true } });
+
+  const response = await request(t, `/share/review/${REVIEW_ID}`);
+
+  assert.equal(response.status, 200);
+  assert.ok(response.body.includes("quietlistener&#39;s review"));
+  assert.ok(response.body.includes('<meta name="robots" content="noindex">'));
+});
+
+test("a review by a deleted account reads as deleted user without a Clerk or profile lookup", async (t) => {
+  withEnv(t, { SHARE_PREVIEWS_ENABLED: "true" });
+  stubClerk(t, []);
+  const calls = stubData(t, { storedReview: storedReview({ userId: Review.DELETED_AUTHOR_ID }) });
+
+  const response = await request(t, `/share/review/${REVIEW_ID}`);
+
+  assert.equal(response.status, 200);
+  assert.ok(response.body.includes("deleted user&#39;s review"));
+  assert.ok(!response.body.includes(Review.DELETED_AUTHOR_ID));
+  assert.equal(calls.profile.length, 0);
+});
+
+test("a deleted review, or one whose album is gone, returns 404 with no-store", async (t) => {
+  withEnv(t, { SHARE_PREVIEWS_ENABLED: "true" });
+  stubClerk(t, []);
+  stubData(t, { storedReview: null });
+  const missing = await request(t, `/share/review/${REVIEW_ID}`);
+  assert.equal(missing.status, 404);
+  assert.equal(missing.headers.get("cache-control"), "private, no-store");
+  assert.ok(missing.body.includes("<title>rescened</title>"));
+
+  t.mock.restoreAll();
+  stubData(t, { storedAlbum: null, storedReview: storedReview() });
+  const orphaned = await request(t, `/share/review/${REVIEW_ID}`);
+  assert.equal(orphaned.status, 404);
+  assert.equal(orphaned.headers.get("cache-control"), "private, no-store");
+});
+
+test("a database failure returns a non-cached 500 page", async (t) => {
+  withEnv(t, { SHARE_PREVIEWS_ENABLED: "true" });
+  t.mock.method(console, "error", () => {});
+  t.mock.method(AlbumCatalog, "findOne", () => ({ lean: async () => { throw new Error("connection reset"); } }));
+
+  const response = await request(t, `/share/album/${ALBUM_ID}`);
+
+  assert.equal(response.status, 500);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.ok(!response.body.includes("connection reset"));
+});
+
+test("share pages have their own IP-keyed bucket and mount before the global API limiter", async (t) => {
+  assert.equal(RATE_LIMITS.sharePreview.keyPrefix, "rescened:share-preview");
+  assert.notEqual(RATE_LIMITS.sharePreview.keyPrefix, RATE_LIMITS.globalApi.keyPrefix);
+
+  delete require.cache[sharePreviewPath];
+  const router = require("../routes/sharePreview");
+  assert.ok(router.stack.some((layer) => layer.handle === sharePreviewRateLimit), "router applies the share bucket");
+
+  const serverPath = require.resolve("../server");
+  withEnv(t, { MONGO_URI: "mongodb://example.test/rescened", CLERK_SECRET_KEY: "sk_test_share", CLERK_PUBLISHABLE_KEY: "pk_test_share", NODE_ENV: "test" });
+  delete require.cache[serverPath];
+  t.after(() => { delete require.cache[serverPath]; });
+  const { app } = require("../server");
+  const { globalApiRateLimit } = require("../routes/utils/rateLimit");
+  const stack = app.router.stack;
+  const shareIndex = stack.findIndex((layer) => layer.handle === router);
+  const globalIndex = stack.findIndex((layer) => layer.handle === globalApiRateLimit);
+  assert.ok(shareIndex >= 0, "share router is mounted");
+  assert.ok(globalIndex > shareIndex, "share router runs before the global API limiter");
+});

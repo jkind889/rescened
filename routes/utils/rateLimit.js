@@ -13,6 +13,14 @@ const RATE_LIMITS = {
     duration: 5 * 60,
     message: "Too many requests. Please slow down and try again soon.",
   },
+  // Share pages are proxied from Vercel, so many crawlers share each Vercel
+  // address. This bucket keeps them off the global API budget.
+  sharePreview: {
+    keyPrefix: "rescened:share-preview",
+    points: 600,
+    duration: 5 * 60,
+    message: "Too many preview requests. Please try again soon.",
+  },
   search: {
     keyPrefix: "rescened:search",
     points: 90,
@@ -258,6 +266,7 @@ function createRateLimitMiddleware(limiter, options = {}) {
 }
 
 const globalApiLimiter = createRateLimiter(RATE_LIMITS.globalApi);
+const sharePreviewLimiter = createRateLimiter(RATE_LIMITS.sharePreview);
 const searchLimiter = createRateLimiter(RATE_LIMITS.search);
 const externalSearchLimiter = createRateLimiter(RATE_LIMITS.externalSearch);
 const albumSaveLimiter = createRateLimiter(RATE_LIMITS.albumSave);
@@ -321,6 +330,10 @@ module.exports = {
   globalApiRateLimit: createRateLimitMiddleware(globalApiLimiter, {
     keyGenerator: getIpRateLimitKey,
     message: RATE_LIMITS.globalApi.message,
+  }),
+  sharePreviewRateLimit: createRateLimitMiddleware(sharePreviewLimiter, {
+    keyGenerator: getIpRateLimitKey,
+    message: RATE_LIMITS.sharePreview.message,
   }),
   isRateLimitError,
   likeMutationRateLimit: createRateLimitMiddleware(likeMutationLimiter, {

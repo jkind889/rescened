@@ -30,6 +30,8 @@ const trustProxyHops = getTrustProxyHops();
 if (trustProxyHops > 0) {
   app.set("trust proxy", trustProxyHops);
 }
+// Crawler share pages carry their own IP bucket instead of the global budget.
+app.use("/share", require("./routes/sharePreview"));
 app.use(globalApiRateLimit);
 app.use(clerkMiddleware());
 
