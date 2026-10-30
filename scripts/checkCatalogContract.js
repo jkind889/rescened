@@ -10,6 +10,7 @@ const roots = [
   "lib/catalogImport",
   "lib/listeningStudy",
   "lib/listening",
+  "lib/sharePreview",
   "lib/baselines",
   "lib/genres",
   "lib/reviewComments",
