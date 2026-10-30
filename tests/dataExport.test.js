@@ -11,6 +11,7 @@ const Review = require("../models/Reviews");
 const { BOM, csvCell, toCsv } = require("../lib/dataExport/csv");
 const { SCHEMA_VERSION, FIELDS, serializeExport } = require("../lib/dataExport/serializers");
 const { BATCH_SIZE, MAX_EXPORT_ROWS, collectExport } = require("../lib/dataExport/collect");
+const { formatBoards } = require("../routes/utils/boardLibrary");
 
 const EXPORTED_AT = new Date("2026-10-30T12:00:00.000Z");
 const ALBUM = { _id: new mongoose.Types.ObjectId(), albumId: "22222222-2222-4222-8222-222222222222", title: "Album, \"Live\"", artistDisplayName: "=Artist" };
@@ -238,16 +239,53 @@ test("exports above the row cap fail with EXPORT_TOO_LARGE, and the cap itself p
   await assert.rejects(collectExport("reviews", "owner"), { status: 413, code: "EXPORT_TOO_LARGE" });
 });
 
+function mockBoardReads(t, boards, { saves = [], linked = [] } = {}) {
+  const calls = { savesRead: 0, linkedRead: 0, savesClosed: 0, linkedClosed: 0, savesStarted: 0 };
+  const cursor = (docs, kind) => ({
+    async *[Symbol.asyncIterator]() {
+      for (const doc of docs) { calls[`${kind}Read`] += 1; yield doc; }
+    },
+    async close() { calls[`${kind}Closed`] += 1; },
+  });
+  t.mock.method(Board, "find", (filter) => {
+    assert.deepEqual(filter, { userId: "owner" });
+    const chain = {
+      sort(sort) { assert.deepEqual(sort, { isDefault: -1, updatedAt: -1 }); return chain; },
+      limit(limit) { assert.equal(limit, MAX_EXPORT_ROWS + 1); return chain; },
+      lean: async () => boards,
+    };
+    return chain;
+  });
+  t.mock.method(BoardItem, "find", () => {
+    calls.savesStarted += 1;
+    const chain = {
+      populate({ select }) { assert.equal(select, "albumId title artistDisplayName"); return chain; },
+      sort: () => chain, select: () => chain, lean: () => chain,
+      cursor({ batchSize }) { assert.equal(batchSize, BATCH_SIZE); return cursor(saves, "saves"); },
+    };
+    return chain;
+  });
+  t.mock.method(BoardListen, "aggregate", (pipeline) => {
+    const lookup = pipeline.find((stage) => stage.$lookup?.from === "albumcatalogs").$lookup;
+    assert.deepEqual(lookup.pipeline, [{ $project: { albumId: 1, title: 1, artistDisplayName: 1 } }]);
+    return { cursor({ batchSize }) { assert.equal(batchSize, BATCH_SIZE); return cursor(linked, "linked"); } };
+  });
+  return calls;
+}
+
+function exportBoard(overrides = {}) {
+  return { _id: new mongoose.Types.ObjectId(), boardId: "66666666-6666-4666-8666-666666666666", userId: "owner", title: "Ranked", orderMode: "added", ...overrides };
+}
+
+function boundedBoards(boards, maxRows) {
+  return formatBoards(boards, { albums: true, maxRows, albumFields: "albumId title artistDisplayName", batchSize: BATCH_SIZE });
+}
+
 test("board exports use the board library's ordering and keep empty boards", async (t) => {
   const manualBoard = { _id: new mongoose.Types.ObjectId(), boardId: "66666666-6666-4666-8666-666666666666", userId: "owner", title: "Ranked", description: "", isDefault: false, orderMode: "manual", displayStyle: "ranked", albumOrder: [OTHER_ALBUM._id, ALBUM._id] };
   const emptyBoard = { _id: new mongoose.Types.ObjectId(), boardId: "77777777-7777-4777-8777-777777777777", userId: "owner", title: "Empty", description: "", isDefault: true };
-  t.mock.method(Board, "find", (filter) => {
-    assert.deepEqual(filter, { userId: "owner" });
-    return { sort: async (sort) => { assert.deepEqual(sort, { isDefault: -1, updatedAt: -1 }); return [emptyBoard, manualBoard]; } };
-  });
   const saves = [ALBUM, OTHER_ALBUM].map((album, index) => ({ boardId: manualBoard._id, userId: "owner", albumCatalogId: album, savedAt: new Date(Date.UTC(2026, 0, index + 1)) }));
-  t.mock.method(BoardItem, "find", () => ({ populate() { return { sort: async () => saves }; } }));
-  t.mock.method(BoardListen, "aggregate", async () => []);
+  const calls = mockBoardReads(t, [emptyBoard, manualBoard], { saves });
 
   const { items } = await collectExport("boards", "owner");
   const json = JSON.parse(serializeExport("boards", "json", { items }, EXPORTED_AT).body);
@@ -257,4 +295,62 @@ test("board exports use the board library's ordering and keep empty boards", asy
   assert.deepEqual(json.items[0].albums, []);
   assertNoInternalKeys(json);
   assertNoObjectIds(JSON.stringify(json), [manualBoard, emptyBoard, ALBUM, OTHER_ALBUM]);
+  assert.equal(calls.savesClosed, 1);
+  assert.equal(calls.linkedClosed, 1);
+});
+
+test("oversized board exports stop streaming at the row cap and close their cursors", async (t) => {
+  const board = exportBoard();
+  function* saves() {
+    for (let index = 0; index < MAX_EXPORT_ROWS * 2; index += 1) {
+      yield { boardId: board._id, albumCatalogId: { ...ALBUM, albumId: `album-${index}` } };
+    }
+  }
+  const calls = mockBoardReads(t, [board], { saves: saves() });
+  await assert.rejects(collectExport("boards", "owner"), { code: "EXPORT_TOO_LARGE", status: 413 });
+  assert.equal(calls.savesRead, MAX_EXPORT_ROWS + 1, "does not read the remaining account");
+  assert.equal(calls.savesClosed, 1);
+  assert.equal(calls.linkedClosed, 1);
+});
+
+test("linked memberships hit the same cap and close before opening the save cursor", async (t) => {
+  const board = exportBoard();
+  const linked = Array.from({ length: 10 }, (_, index) => ({
+    _id: { board: board._id, album: ALBUM._id, user: "owner" }, album: { ...ALBUM, albumId: `album-${index}` },
+  }));
+  const calls = mockBoardReads(t, [board], { linked });
+  await assert.rejects(boundedBoards([board], 3), { code: "EXPORT_TOO_LARGE" });
+  assert.equal(calls.linkedRead, 4);
+  assert.equal(calls.linkedClosed, 1);
+  assert.equal(calls.savesStarted, 0);
+});
+
+test("the row budget includes empty boards and deduplicates explicit and linked memberships", async (t) => {
+  const board = exportBoard();
+  const empty = exportBoard({ boardId: "77777777-7777-4777-8777-777777777777" });
+  const saves = [ALBUM, OTHER_ALBUM].map((album) => ({ boardId: board._id, albumCatalogId: album }));
+  const linked = [{ _id: { board: board._id, album: ALBUM._id, user: "owner" }, album: ALBUM, listenCount: 2 }];
+  mockBoardReads(t, [board, empty], { saves, linked });
+  const items = await boundedBoards([board, empty], 3);
+  assert.equal(items[0].albums.length, 2);
+  assert.equal(items[0].albums.find((album) => album.albumId === ALBUM.albumId).explicitlySaved, true);
+  assert.deepEqual(items[1].albums, []);
+  await assert.rejects(boundedBoards([board, empty], 2), { code: "EXPORT_TOO_LARGE" });
+});
+
+test("too many empty boards reject before reading any memberships", async (t) => {
+  const calls = mockBoardReads(t, Array(MAX_EXPORT_ROWS + 1).fill(exportBoard()));
+  await assert.rejects(collectExport("boards", "owner"), { code: "EXPORT_TOO_LARGE" });
+  assert.equal(calls.savesStarted, 0);
+  assert.equal(calls.linkedRead, 0);
+  assert.equal(calls.linkedClosed, 0);
+});
+
+test("membership cursor failures still close the active cursor", async (t) => {
+  const board = exportBoard();
+  function* saves() { yield { boardId: board._id, albumCatalogId: ALBUM }; throw new Error("read failed"); }
+  const calls = mockBoardReads(t, [board], { saves: saves() });
+  await assert.rejects(collectExport("boards", "owner"), /read failed/);
+  assert.equal(calls.savesClosed, 1);
+  assert.equal(calls.linkedClosed, 1);
 });

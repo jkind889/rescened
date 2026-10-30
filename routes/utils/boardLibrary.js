@@ -54,36 +54,59 @@ function liveMembershipStages(match) {
   ];
 }
 
-async function linkedAlbums(match, session) {
+async function linkedAlbums(match, session, { albumFields = CATALOG_ALBUM_FIELDS, batchSize } = {}) {
+  const albumProjection = albumFields === CATALOG_ALBUM_FIELDS
+    ? CATALOG_ALBUM_PROJECTION
+    : Object.fromEntries(albumFields.split(" ").map((field) => [field, 1]));
   const query = BoardListen.aggregate([
     ...liveMembershipStages(match),
     { $group: {
       _id: { board: "$boardId", album: "$albumCatalogId", user: "$userId" },
       savedAt: { $min: "$addedAt" }, listenCount: { $sum: 1 }, latestListenedOn: { $max: "$listen.listenedOn" },
     } },
-    { $lookup: { from: "albumcatalogs", localField: "_id.album", foreignField: "_id", pipeline: [{ $project: CATALOG_ALBUM_PROJECTION }], as: "album" } },
+    { $lookup: { from: "albumcatalogs", localField: "_id.album", foreignField: "_id", pipeline: [{ $project: albumProjection }], as: "album" } },
     { $unwind: "$album" },
   ]);
-  return session ? query.session(session) : query;
+  if (session) query.session(session);
+  return batchSize ? query.cursor({ batchSize }) : query;
 }
 
 // One entry per board album: { key, boardKey, albumId, savedAt, album }. key
 // and boardKey are the internal AlbumCatalog and Board _ids for ordering and
 // grouping; only album is ever serialized.
 // Inside a transaction the reads run in its session, one after the other.
-async function collectionEntries(match, session = null) {
-  const loadSaves = () => {
-    const query = BoardItem.find(match).populate({ path: "albumCatalogId", select: CATALOG_ALBUM_FIELDS }).sort({ savedAt: -1 });
-    return session ? query.session(session) : query;
-  };
-  const [saves, linked] = session
-    ? [await loadSaves(), await linkedAlbums(match, session)]
-    : await Promise.all([loadSaves(), linkedAlbums(match)]);
+async function collectionEntries(match, session = null, options = {}) {
+  const bounded = Number.isFinite(options.maxRows);
+  const albumFields = options.albumFields || CATALOG_ALBUM_FIELDS;
+  const batchSize = bounded ? options.batchSize || 500 : undefined;
+  let rows = options.boardCount || 0;
+  const populatedBoards = new Set();
   const entries = new Map();
-  for (const row of linked) {
+  const checkLimit = () => {
+    if (bounded && rows > options.maxRows) {
+      throw fail(413, "EXPORT_TOO_LARGE", `Exports are limited to ${options.maxRows.toLocaleString("en-US")} rows.`);
+    }
+  };
+  checkLimit();
+  const put = (id, entry) => {
+    if (bounded && !entries.has(id)) {
+      // Each board already reserves one row, even when it has no albums.
+      if (populatedBoards.has(entry.boardKey)) rows += 1;
+      checkLimit();
+      populatedBoards.add(entry.boardKey);
+    }
+    entries.set(id, entry);
+  };
+  const loadSaves = () => {
+    const query = BoardItem.find(match).populate({ path: "albumCatalogId", select: albumFields }).sort({ savedAt: -1 });
+    if (session) query.session(session);
+    return bounded ? query.select("boardId userId albumCatalogId savedAt").lean().cursor({ batchSize }) : query;
+  };
+  const loadLinked = () => linkedAlbums(match, session, { albumFields, batchSize });
+  const addLinked = (row) => {
     const album = normalizeCatalogAlbum(row.album);
-    if (!album?.albumId) continue;
-    entries.set(`${row._id.board}:${album.albumId}`, {
+    if (!album?.albumId) return;
+    put(`${row._id.board}:${album.albumId}`, {
       key: String(row._id.album),
       boardKey: String(row._id.board),
       album: {
@@ -91,13 +114,13 @@ async function collectionEntries(match, session = null) {
         listenCount: row.listenCount, latestListenedOn: row.latestListenedOn, explicitlySaved: false,
       },
     });
-  }
-  for (const row of saves) {
+  };
+  const addSave = (row) => {
     const album = normalizeCatalogAlbum(row.albumCatalogId);
-    if (!album?.albumId) continue;
+    if (!album?.albumId) return;
     const id = `${row.boardId}:${album.albumId}`;
     const linkedAlbum = entries.get(id)?.album;
-    entries.set(id, {
+    put(id, {
       key: String(row.albumCatalogId._id),
       boardKey: String(row.boardId),
       album: {
@@ -106,6 +129,22 @@ async function collectionEntries(match, session = null) {
         latestListenedOn: linkedAlbum?.latestListenedOn || null, explicitlySaved: true,
       },
     });
+  };
+  if (bounded) {
+    // Consume one cursor at a time; never load the whole account before the
+    // row guard runs. Always close on limit, read, or normalization failures.
+    const consume = async (cursor, add) => {
+      try { for await (const row of cursor) add(row); }
+      finally { await cursor.close(); }
+    };
+    await consume(await loadLinked(), addLinked);
+    await consume(loadSaves(), addSave);
+  } else {
+    const [saves, linked] = session
+      ? [await loadSaves(), await loadLinked()]
+      : await Promise.all([loadSaves(), loadLinked()]);
+    linked.forEach(addLinked);
+    saves.forEach(addSave);
   }
   return [...entries.values()].map(({ key, boardKey, album }) => ({ key, boardKey, albumId: album.albumId, savedAt: album.savedAt, album }));
 }
@@ -140,7 +179,10 @@ async function formatBoard(board, options = {}) {
 // Each board's albums are ordered exactly as boardEntries orders them.
 async function formatBoards(boards, options = {}) {
   if (!boards.length) return [];
-  const entries = await collectionEntries({ boardId: { $in: boards.map((board) => board._id) } });
+  const entries = await collectionEntries(
+    { boardId: { $in: boards.map((board) => board._id) } }, null,
+    { maxRows: options.maxRows, boardCount: boards.length, albumFields: options.albumFields, batchSize: options.batchSize },
+  );
   const byBoard = new Map();
   for (const entry of entries) {
     if (!byBoard.has(entry.boardKey)) byBoard.set(entry.boardKey, []);

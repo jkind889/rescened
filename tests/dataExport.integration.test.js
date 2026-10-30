@@ -12,6 +12,7 @@ const BoardListen = require("../models/BoardListen");
 const Listen = require("../models/Listen");
 const Review = require("../models/Reviews");
 const UserProfile = require("../models/UserProfile");
+const { formatBoards } = require("../routes/utils/boardLibrary");
 
 const enabled = process.env.RUN_MONGO_INTEGRATION === "true";
 const models = [AlbumCatalog, Board, BoardItem, BoardListen, Listen, Review, UserProfile];
@@ -164,4 +165,38 @@ integration("a listen whose album was deleted is omitted and counted, while revi
     ["Kept", kept.albumId, null],
   ]);
   noInternalIds(reviews.text + listens.text, albums);
+});
+
+integration("bounded board reads count the live deduplicated union and empty boards", async () => {
+  const [first, second, deleted, unrelated] = albums;
+  const board = await Board.create({ userId: owner, title: "Bounded", orderMode: "manual", albumOrder: [second._id, first._id] });
+  const empty = await Board.create({ userId: owner, title: "Empty" });
+  await BoardItem.create([
+    { userId: owner, boardId: board._id, albumCatalogId: first._id, savedAt: at(5) },
+    { userId: owner, boardId: board._id, albumCatalogId: deleted._id },
+  ]);
+  const listens = await Listen.create([
+    { userId: owner, albumCatalogId: first._id, listenedOn: "2026-01-01" },
+    { userId: owner, albumCatalogId: second._id, listenedOn: "2026-01-01" },
+    { userId: owner, albumCatalogId: second._id, listenedOn: "2026-01-02" },
+    { userId: owner, albumCatalogId: deleted._id, listenedOn: "2026-01-01" },
+    { userId: "someone-else", albumCatalogId: unrelated._id, listenedOn: "2026-01-01" },
+    { userId: owner, albumCatalogId: unrelated._id, listenedOn: "2026-01-01" },
+  ]);
+  await BoardListen.create(listens.map((listen, index) => ({
+    userId: owner, boardId: board._id, listenId: listen._id, albumCatalogId: listen.albumCatalogId, addedAt: at(index),
+  })));
+  await Listen.deleteOne({ _id: listens[5]._id });
+  await AlbumCatalog.deleteOne({ _id: deleted._id });
+
+  const options = { albums: true, maxRows: 3, albumFields: "albumId title artistDisplayName", batchSize: 1 };
+  const bounded = await formatBoards([board, empty], options);
+  const displayed = await formatBoards([board, empty], { albums: true });
+  assert.deepEqual(bounded.map((entry) => ids(entry.albums)), displayed.map((entry) => ids(entry.albums)));
+  assert.deepEqual(ids(bounded[0].albums), [second.albumId, first.albumId]);
+  assert.deepEqual(bounded[0].albums.map((album) => [album.explicitlySaved, album.savedAt.toISOString(), album.listenCount]), [
+    [false, at(1).toISOString(), 2], [true, at(5).toISOString(), 1],
+  ]);
+  assert.deepEqual(bounded[1].albums, []);
+  await assert.rejects(formatBoards([board, empty], { ...options, maxRows: 2 }), { code: "EXPORT_TOO_LARGE", status: 413 });
 });

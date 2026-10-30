@@ -22,7 +22,7 @@ The router is mounted in `server.js` before `/profile`, so these paths never rea
 ## Reading the data
 
 - Reviews and listens are read with one cursor per request in batches of 500, along the existing user indexes (`userId, date, _id` and `userId, listenedOn, createdAt, _id`). Each batch resolves its albums with one `AlbumCatalog` read.
-- Boards come from `formatBoards` in `routes/utils/boardLibrary.js`, the same reads the profile's board pages use. Membership (explicit `BoardItem` saves and linked `BoardListen` diary entries), live-membership validation, and manual or date order are therefore identical to what the user sees. Boards are listed default first, then most recently updated.
+- Boards use the membership validation, deduplication, and ordering in `formatBoards` in `routes/utils/boardLibrary.js`. Export reads stream memberships in batches of 500 and select only album ID, title, and artist, without loading tracklists or external references. Each empty board reserves one row; additional distinct albums consume the remaining row budget. Oversized board lists or memberships fail before full formatting, and cursors close on both success and failure. Boards are listed default first, then most recently updated. The linked-listen aggregation still scans and groups matching memberships in MongoDB; the cap bounds records retained by the API, not all database work.
 - Album title and artist come from `AlbumCatalog` at export time, not from when the review or listen was written.
 
 ## Formats
