@@ -96,6 +96,17 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | --- | --- | --- |
 | `INVALID_STATS_REQUEST` | `400` | A stats request used an unsupported field, a `period` other than `2y` or a calendar year inside the two-year window, or an `automatic` value other than `include` or `exclude`. See [the stats guide](LISTENING_STATS.md). |
 
+### Data export
+
+`GET /profile/me/export/:dataset.:format` checks the flag, then Clerk (`401 UNAUTHORIZED`), then the request, then the `dataExport` limit. Errors are always JSON; a failed export never sends a partial file. See [the data export guide](DATA_EXPORT.md).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `DATA_EXPORT_DISABLED` | `503` | `DATA_EXPORT_ENABLED` is off. Returned before authentication, also by the `GET /profile/me/export` availability check. |
+| `INVALID_EXPORT_REQUEST` | `400` | The dataset is not `reviews`, `listens`, or `boards`, the format is not `csv` or `json`, the request has a query parameter, or the path is not an export. Does not spend an export. |
+| `EXPORT_TOO_LARGE` | `413` | The dataset has more than 50,000 rows. Nothing is sent. |
+| `EXPORT_FAILED` | `500` | An unexpected failure while reading or serializing; internal details are not exposed. |
+
 ### Board order
 
 `PATCH /boards/:boardId` and `PUT /boards/:boardId/order` require Clerk authentication and share the `boardMutation` limit. A malformed album ID in a reorder returns `400 INVALID_ALBUM_ID`. See [ordered and ranked boards](BOARD_ORDERING.md).
@@ -228,6 +239,7 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Like mutation | `PUT /likes/album/:albumId`, `PUT /likes/review/:reviewId` | authenticated user | 120 attempts per 10 minutes |
 | Track ranking mutation | `PUT` and `DELETE /track-rankings/album/:albumId` | authenticated user | 60 attempts per 10 minutes |
 | Profile stats | `GET /profile/me/stats`, `GET /profile/:userId/stats` | signed-in user, or IP when anonymous | 60 requests per 10 minutes |
+| Data export | `GET /profile/me/export/:dataset.:format`, after request validation | authenticated user | 10 exports per hour |
 | Board mutation | `PATCH /boards/:boardId`, `PUT /boards/:boardId/order` | authenticated user | 60 attempts per 10 minutes |
 | Queue mutation | `POST`/`PUT /profile/me/queue`, `DELETE /profile/me/queue/:albumId` | authenticated user | 60 attempts per 10 minutes |
 | Suggestion create | `POST /suggestions`, `POST /suggestions/corrections` | authenticated user | 6 attempts per 10 minutes |
