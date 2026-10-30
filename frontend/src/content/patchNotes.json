@@ -1,5 +1,17 @@
 [
   {
+    "id": "link-previews",
+    "date": "2026-10-30",
+    "title": "Better link previews",
+    "summary": "Album and review links now show their title, cover, and rating when you share them.",
+    "changes": [
+      "Paste an album or review link into Discord, Slack, iMessage, X, and other apps to see a preview card with the album cover and details.",
+      "Review previews show who wrote the review, the rating, and the start of the text.",
+      "Album and review pages now show the album or review name in your browser tab.",
+      "Search engines can find album pages more easily. Reviews by people with private profiles are kept out of search results."
+    ]
+  },
+  {
     "id": "bulk-approval",
     "date": "2026-10-28",
     "title": "Approve suggestions in bulk",
