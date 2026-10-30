@@ -1138,7 +1138,6 @@ export function AlbumDetail()
                                     currentUserId={userId}
                                     onRemoveReview={removeReview}
                                     onEditReview={editReview}
-                                onEditReview={editReview}
                                     onToggleReviewLike={toggleReviewLike}
                                     likeMessage={likeMessage}
                                     deletingReviewId={deletingReviewId}
@@ -1155,7 +1154,6 @@ export function AlbumDetail()
                                     currentUserId={userId}
                                     onRemoveReview={removeReview}
                                     onEditReview={editReview}
-                                onEditReview={editReview}
                                     onToggleReviewLike={toggleReviewLike}
                                     likeMessage={likeMessage}
                                     deletingReviewId={deletingReviewId}

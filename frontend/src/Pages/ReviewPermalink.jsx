@@ -22,6 +22,12 @@ function formatDate(value) {
 export function ReviewPermalink() {
   const { reviewId } = useParams();
   const { getToken, isLoaded, userId } = useAuth();
+  // Navigation or a viewer change discards drafts and pending mutation state.
+  // Responses belonging to the old page can only update its unmounted instance.
+  return <ReviewPermalinkContent key={JSON.stringify([reviewId, userId])} reviewId={reviewId} getToken={getToken} isLoaded={isLoaded} userId={userId} />;
+}
+
+function ReviewPermalinkContent({ reviewId, getToken, isLoaded, userId }) {
   const [review, setReview] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
