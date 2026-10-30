@@ -489,3 +489,38 @@ test("the sitemap route is off with the flag and retries after a failure", async
   await fetch(url);
   assert.equal(attempts, 2, "a successful build is reused within its window");
 });
+
+// The SPA's head tags (frontend/src/utils/pageMeta.js) match the share pages.
+const { pathToFileURL } = require("node:url");
+const path = require("node:path");
+
+function pageMetaHelpers() {
+  return import(pathToFileURL(path.join(__dirname, "../frontend/src/utils/pageMeta.js")).href);
+}
+
+test("client album and review head tags match the share pages", async () => {
+  const { albumPageMeta, reviewPageMeta } = await pageMetaHelpers();
+  const albumPage = buildAlbumPage({ album: album() });
+  const albumMeta = albumPageMeta(album());
+  assert.equal(albumMeta.canonical, `https://rescened.com/album/${ALBUM_ID}`);
+  assert.equal(albumMeta.description, metaContent(albumPage, "name", "description"));
+  assert.ok(albumPage.includes(`<title>${escapeHtml(albumMeta.title)}</title>`));
+
+  const sharedReview = { ...review({ reviewText: "word ".repeat(80) }), album: album(), author: { username: "listener" } };
+  const reviewPage = buildReviewPage({ review: sharedReview, album: album(), author: sharedReview.author });
+  const reviewMeta = reviewPageMeta(sharedReview);
+  assert.equal(reviewMeta.canonical, `https://rescened.com/review/${REVIEW_ID}`);
+  assert.equal(reviewMeta.description, metaContent(reviewPage, "name", "description"));
+  assert.ok(reviewPage.includes(`<title>${escapeHtml(reviewMeta.title)}</title>`));
+
+  const deleted = reviewPageMeta({ ...sharedReview, author: { userId: null, username: "deleted user" } });
+  assert.ok(deleted.title.startsWith("deleted user's review of Blue Rooms"));
+});
+
+test("robots.txt disallows private areas and names the absolute sitemap URL", () => {
+  const robots = require("node:fs").readFileSync(path.join(__dirname, "../frontend/public/robots.txt"), "utf8");
+  for (const area of ["/account", "/suggestions", "/moderation", "/notifications", "/collection"]) {
+    assert.match(robots, new RegExp(`^Disallow: ${area}$`, "m"));
+  }
+  assert.match(robots, /^Sitemap: https:\/\/rescened\.com\/sitemap\.xml$/m);
+});

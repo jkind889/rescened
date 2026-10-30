@@ -8,6 +8,7 @@ import { replaceReview, updateReview } from "../features/reviews/reviews";
 import LikeButton from "./LikeButton";
 import TrackRanking from "./TrackRanking";
 import ShareButton from "./ShareButton";
+import PageMeta from "./PageMeta";
 import AlbumMoreActions from "./AlbumMoreActions";
 import { AlbumQueueAction } from "../features/queue/QueueActions";
 import "./Community/GenreSuggestion.css";
@@ -15,6 +16,7 @@ import AsyncState from "./Loading/AsyncState";
 import { SignInButton, useAuth } from "@clerk/react";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import { REVIEW_SORTS, REVIEW_SORT_OPTIONS } from "../utils/reviewSorts";
+import { albumPageMeta } from "../utils/pageMeta";
 
 const RATING_BUCKETS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 function getReviewSort(search) {
@@ -921,6 +923,8 @@ export function AlbumDetail()
     return (
 
         <section className="album-detail-page">
+            {/* /album/:albumId/reviews canonicalizes to the album page. */}
+            <PageMeta {...albumPageMeta(album)} />
             <div className="album-detail-shell">
                 <div className="album-poster-card">
                     {albumArt ? (

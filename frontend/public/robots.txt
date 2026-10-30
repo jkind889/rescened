@@ -1,0 +1,8 @@
+User-agent: *
+Disallow: /account
+Disallow: /suggestions
+Disallow: /moderation
+Disallow: /notifications
+Disallow: /collection
+
+Sitemap: https://rescened.com/sitemap.xml
