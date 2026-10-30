@@ -218,7 +218,8 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 
 | Bucket | Protected routes | Key | Budget |
 | --- | --- | --- | --- |
-| Global API | Every API route except `/health` | IP | 300 requests per 5 minutes |
+| Global API | Every API route except `/health` and `/share` | IP | 300 requests per 5 minutes |
+| Share preview | `GET /share/album/:albumId`, `GET /share/review/:reviewId`, `GET /share/sitemap.xml` (not cumulative with the global bucket) | IP (Vercel's address when proxied) | 600 requests per 5 minutes |
 | Local search | `GET /search/search`, `GET /genres/search`, `GET /genres/:slug/albums` | IP | 90 requests per minute |
 | External search | `GET /search/external`, `GET /search/musicbrainz/release-group/:mbid` | IP | 30 requests per minute |
 | Album save | `POST /boards/:boardId/albums` | authenticated user | 30 attempts per 10 minutes |

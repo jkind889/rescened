@@ -14,6 +14,8 @@ Point the root `.env` file's `MONGO_URI` at a dedicated development database suc
 
 Set `MONGO_URI`, `CLERK_SECRET_KEY`, and either `CLERK_PUBLISHABLE_KEY` or `VITE_CLERK_PUBLISHABLE_KEY`. Spotify credentials are not used or required. Set `COMMUNITY_SUBMISSIONS_ENABLED=true` to enable contributor submission mutations and `COMMUNITY_MODERATION_ENABLED=true` to enable moderator commands; both are disabled by default. Set `MODERATOR_USER_IDS` to a comma-separated Clerk allowlist. Start the API with `npm run devStart` and the frontend from `frontend/` with `npm run dev`.
 
+Set `SHARE_PREVIEWS_ENABLED=true` to serve crawler link-preview pages and the albums sitemap under `/share` (disabled by default), and `PUBLIC_SITE_URL` for their canonical links (default `https://rescened.com`). See [share previews and SEO](./docs/SHARE_PREVIEWS.md) for the Vercel crawler rewrites and rollout order.
+
 `REVIEW_CURSOR_SECRET` is optional but recommended when review-pagination cursors should be rotated independently of the Clerk secret.
 
 The database is intentionally empty after the generation-2 cutover. Phase 2 includes contributor and moderator APIs: approval creates, links, or applies an explicit field-level correction to a usable local catalog album inside a Mongo transaction. Approval commands, review interaction mutations (deletion, review likes, and pinning), and review comment writes require a transaction-capable MongoDB replica set or sharded deployment; standalone Mongo remains safe for reads and non-publication moderation commands only. Transaction-unavailable mutations return an action-specific `503` code and do not fall back to partial writes.

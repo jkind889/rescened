@@ -98,7 +98,7 @@ If a build fails, Mongoose reports it as an `error` event on the model and does 
 
 ## Before the production push
 
-These findings are still open. Items 1 and 2 need an operator action before the push. Three findings from the original list are now fixed (see above): the worker's error handling, account deletion waiting on the worker, and the "people to follow" scan.
+These findings are still open. Items 1, 2, and 4 need an operator action before the push. Three findings from the original list are now fixed (see above): the worker's error handling, account deletion waiting on the worker, and the "people to follow" scan.
 
 1. **Run the worker under a supervisor.** A failed pass no longer stops the worker, but startup failures still exit with code 1. Run `npm run listening:worker` under a process manager that restarts it, and alert on repeated `Listening worker pass failed` lines. On Railway, set it up as its own service:
    - **Source:** the same repo, with start command `npm run listening:worker`.
@@ -117,6 +117,7 @@ These findings are still open. Items 1 and 2 need an operator action before the 
    - Account deletion (`CLEANUP_UNAVAILABLE`).
 
    A popular-review cursor expires after `minSnapshotHistoryWindowInSeconds` (300 s by default) and returns `400 INVALID_REVIEW_CURSOR`. The frontend has no special handling for this, so the user sees the server's reload message.
+4. **Turn on share previews before their rewrites deploy.** `vercel.json` sends crawler requests for album and review pages to the API's `/share` routes, which return `404 noindex` while `SHARE_PREVIEWS_ENABLED` is off. Set `SHARE_PREVIEWS_ENABLED=true` on the Railway API before the rewrites reach production, and confirm `https://rescened.com` serves the frontend: that origin must be in `CORS_ALLOWED_ORIGINS` (or `FRONTEND_URL`) and in Clerk's allowed origins. Follow the [share previews rollout](SHARE_PREVIEWS.md#rollout), then check real unfurls in Discord, Slack, and iMessage.
 
 ## Performance follow-ups
 
