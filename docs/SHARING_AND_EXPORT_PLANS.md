@@ -1,6 +1,6 @@
 # Plans: link previews and SEO, data exports
 
-Status: proposed, October 2026. Neither plan is started. Each plan ends with open decisions; the plan text uses the recommended default for each, so the text changes only where a decision goes the other way.
+Status: proposed, October 2026. Decisions confirmed October 30, 2026 and recorded below. Neither plan is started; both remain planned with disabled-by-default flags.
 
 | Plan | Size | Depends on |
 | --- | --- | --- |
@@ -40,6 +40,8 @@ Link-preview crawlers (Discord, Slack, iMessage, X, and others) do not run JavaS
   - JSON-LD: `MusicAlbum` for albums; `Review` with `reviewRating` and `itemReviewed` for reviews
   - a visible heading and a link to the real page, with the same content the SPA shows, so search engines do not treat it as cloaking
 - `/album/:albumId/reviews` canonicalizes to `/album/:albumId`.
+- Proxy destinations use the public, credential-free Railway API origin committed in `vercel.json`. Update the `PC_HANDOFF.md` convention when implementing these rewrites; credentials remain server-side.
+- Canonical URLs use `https://rescened.com`, and Twitter cards use `summary` for the square 500px covers.
 
 **Cover art.** `og:image` points at the existing Cover Art Archive URL, and only when it is `https:`. Rescened does not proxy, resize, or composite artwork, because linked artwork is not licensed for copying or rehosting. Generated preview images are out of scope for the same reason. Text-only generated cards would need a new rendering dependency and are not worth it yet.
 
@@ -47,11 +49,11 @@ Link-preview crawlers (Discord, Slack, iMessage, X, and others) do not run JavaS
 
 - Only `AlbumCatalog` records appear. Submissions never reach the catalog until approval, so they never get a preview.
 - A missing or deleted review returns `404` with generic site tags and `Cache-Control: no-store`.
-- A review by a private profile gets an anonymous card: no author name, `noindex`, and no sitemap entry.
+- A review by a private profile shows the user's username in its preview: reviews are public community interactions, while access to the profile remains restricted. Keep `noindex` and no review sitemap entry; profile privacy alone must not anonymize the author.
 - No Mongo `_id` appears in any output.
 - No comment count appears, whatever `REVIEW_COMMENTS_ENABLED` is set to.
 
-**Escaping.** Every attribute value escapes `& < > " '` and drops control characters. Text is truncated before escaping. JSON-LD writes `<` as `<`, so review text cannot close the `<script>` tag.
+**Escaping.** Every attribute value escapes `& < > " '` and drops control characters. Text is truncated before escaping. JSON-LD writes each `<` as the literal Unicode escape sequence `\u003c`, so review text cannot close the `<script>` tag.
 
 **Caching.** Responses use a short public TTL (about 300 seconds) through `routes/utils/cacheHeaders.js`. Platforms cache unfurls on their own side, so deleting a review cannot retract a card that was already shown.
 
@@ -59,12 +61,12 @@ Link-preview crawlers (Discord, Slack, iMessage, X, and others) do not run JavaS
 
 **Sitemap.** Albums only, from catalog `albumId` and `updatedAt`. The catalog is far below the 50,000-URL limit, so one file is enough.
 
-**Client side.** React 19 hoists `<title>`, `<meta>`, and `<link>` rendered by components, so no helmet library is needed. `AlbumDetail` and `ReviewPermalink` render their own title, description, and canonical link. `index.html` gets a default description. A static `frontend/public/robots.txt` disallows `/account`, `/suggestions`, `/moderation`, `/notifications`, and `/collection`, and points at `/sitemap.xml`.
+**Client side.** React 19 hoists `<title>`, `<meta>`, and `<link>` rendered by components, so no helmet library is needed. `AlbumDetail` and `ReviewPermalink` render their own title, description, and canonical link. `index.html` gets a default description. A static `frontend/public/robots.txt` disallows `/account`, `/suggestions`, `/moderation`, `/notifications`, and `/collection`, and points at `https://rescened.com/sitemap.xml` (the `Sitemap:` directive must be an absolute URL).
 
 **Configuration.**
 
 - `SHARE_PREVIEWS_ENABLED`, off by default. When off, the share routes return `404`.
-- `PUBLIC_SITE_URL`, used for canonical links, `og:url`, and sitemap entries.
+- `PUBLIC_SITE_URL=https://rescened.com`, used for canonical links, `og:url`, and sitemap entries.
 
 ### Slices
 
@@ -80,7 +82,9 @@ Link-preview crawlers (Discord, Slack, iMessage, X, and others) do not run JavaS
 - **Unit tests** (`tests/sharePreview.test.js`, offline, with models and Clerk stubbed):
   - escaping, including a `</script>` breakout in review text
   - a missing or non-`https:` cover
-  - private and deleted authors
+  - private-profile authors retain their username, with `noindex` and no review sitemap entry
+  - deleted authors
+  - canonical URLs use `https://rescened.com` and Twitter cards use `summary`
   - a deleted review returns `404` with `no-store`
   - no `_id` in any output
   - the flag-off response
@@ -88,13 +92,13 @@ Link-preview crawlers (Discord, Slack, iMessage, X, and others) do not run JavaS
 - **Manual check** after deployment to a preview environment: paste real links into Discord, Slack, and iMessage. `front-500` redirects to archive.org; most unfurlers follow it, but confirm.
 - Run `npm test`, `npm run check:catalog-contract`, and frontend lint and build.
 
-### Open decisions
+### Decisions confirmed October 30, 2026
 
-1. **API origin in `vercel.json`.** Rewrites cannot read environment variables, so the proxy destination has to commit the Railway API origin to the repository. The origin is already public in the shipped bundle, but this changes the "no production API URL committed" rule. The alternative is Vercel middleware, which runs on every page load and is harder to test offline. Recommended: commit the origin and update `PC_HANDOFF.md`.
-2. **Canonical domain.** `rescened.vercel.app` or a custom domain. This sets `PUBLIC_SITE_URL`.
-3. **Private-profile reviews.** An anonymous card (recommended), or no review card at all with album-only tags.
-4. **Reviews in the sitemap.** Albums only to start (recommended), or public-profile reviews as well.
-5. **Twitter card type.** `summary` (recommended; covers are square at 500px) or `summary_large_image`.
+1. **API origin in `vercel.json`.** Use the public, credential-free Railway API origin in committed rewrites. It is already visible in frontend network requests. Update the "no production API URL committed" convention in `PC_HANDOFF.md` during implementation; this decision does not authorize committing credentials.
+2. **Canonical domain.** `https://rescened.com`, configured through `PUBLIC_SITE_URL`.
+3. **Private-profile reviews.** Show the user's username in the preview because reviews are public community interactions. Profile access remains restricted. Retain `noindex` and no review sitemap entry.
+4. **Reviews in the sitemap.** Albums only for the initial release.
+5. **Twitter card type.** `summary`, matching square 500px covers.
 
 ---
 
@@ -124,12 +128,18 @@ Link-preview crawlers (Discord, Slack, iMessage, X, and others) do not run JavaS
 
 - Read in batches of 500 by the existing user indexes, and resolve catalog albums per batch.
 - Build the whole body in memory, then send it once with `Cache-Control: no-store`. Errors stay clean JSON, and a failure never leaves a truncated file.
-- Above about 50,000 rows in one dataset, return `413 EXPORT_TOO_LARGE`. Background export jobs are deferred until someone hits the cap.
+- Above 50,000 rows in one dataset, return `413 EXPORT_TOO_LARGE`. Background export jobs are deferred until someone hits the cap.
 
 **JSON shape.**
 
 ```text
 { schemaVersion: 1, dataset, exportedAt, items: [...] }
+```
+
+Listens JSON also includes `omitted` alongside `items`, counting listens excluded because their album no longer exists (zero when none are excluded):
+
+```text
+{ schemaVersion: 1, dataset: "listens", exportedAt, omitted: 0, items: [...] }
 ```
 
 Public IDs only, ISO-8601 UTC timestamps, `listenedOn` kept as a date. Album title and artist come from `AlbumCatalog` at export time.
@@ -147,7 +157,7 @@ Boards JSON nests each board's albums in display order. Boards CSV has one row p
 - Quote every field (RFC 4180), use CRLF line endings, and start with a UTF-8 byte order mark, so Excel opens it correctly.
 - Prefix `'` on text cells that start with `=`, `+`, `-`, `@`, tab, or carriage return, so spreadsheets do not run them as formulas. Numeric columns are not prefixed.
 
-**Excluded from v1.** Other users' comments on your reviews, scrobbles, and listens whose album no longer exists (no public album ID is left to export).
+**Excluded from v1.** Track rankings, album likes, the listen queue, authored comments, other users' comments on your reviews, scrobbles, and listens whose album no longer exists (no public album ID is left to export). Track rankings are the first planned addition after v1. Missing-album listens contribute to the JSON `omitted` count.
 
 **Flag, rate limit, and errors.**
 
@@ -171,6 +181,7 @@ Boards JSON nests each board's albums in display order. Boards CSV has one row p
   - edited and never-edited reviews
   - an empty board
   - the schema version
+  - listens JSON includes `omitted` alongside `items`, including zero and missing-album cases
   - no `_id` or internal fields in any output
 - **Route tests** with Clerk and models stubbed, as `tests/reviewEdit.test.js` does:
   - unauthenticated requests
@@ -181,12 +192,12 @@ Boards JSON nests each board's albums in display order. Boards CSV has one row p
 - **Integration test** (`tests/dataExport.integration.test.js`, registered in `scripts/runIntegrationTests.js`): board order and the saved-shelf union, and a listen whose album was deleted. No transactions are involved, so this is recommended rather than required.
 - Run `npm test`, `npm run check:catalog-contract`, frontend lint and build, and `npm run test:integration` if the integration test is added.
 
-### Open decisions
+### Decisions confirmed October 30, 2026
 
-1. **Extra datasets in v1.** Track rankings, album likes, the listen queue, and your own authored comments. Recommended: reviews, listens, and boards only, with track rankings as the first addition.
-2. **Omitted-row count.** Whether the JSON includes a count of listens left out because their album was deleted. Recommended: yes, as `omitted` next to `items`.
-3. **Filename.** Built on the client (recommended), or sent by the server, which means exposing `Content-Disposition` through CORS.
-4. **Limits.** 10 exports per hour per user and a 50,000-row cap per dataset (recommended), or other values.
+1. **Datasets in v1.** Reviews, diary listens, and boards only, with track rankings as the first addition after v1.
+2. **Omitted-row count.** Listens JSON includes the count of listens left out because their album was deleted as `omitted` next to `items`.
+3. **Filename.** Build it on the client; no `Content-Disposition` CORS exposure is needed.
+4. **Limits.** 10 exports per hour per user and a 50,000-row cap per dataset.
 
 ### Risks
 
