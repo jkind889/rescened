@@ -117,7 +117,7 @@ These findings are still open. Items 1, 2, and 4 need an operator action before 
    - Account deletion (`CLEANUP_UNAVAILABLE`).
 
    A popular-review cursor expires after `minSnapshotHistoryWindowInSeconds` (300 s by default) and returns `400 INVALID_REVIEW_CURSOR`. The frontend has no special handling for this, so the user sees the server's reload message.
-4. **Turn on share previews before their rewrites deploy.** `vercel.json` sends crawler requests for album and review pages to the API's `/share` routes, which return `404 noindex` while `SHARE_PREVIEWS_ENABLED` is off. Set `SHARE_PREVIEWS_ENABLED=true` on the Railway API before the rewrites reach production, and confirm `https://rescened.com` serves the frontend: that origin must be in `CORS_ALLOWED_ORIGINS` (or `FRONTEND_URL`) and in Clerk's allowed origins. Follow the [share previews rollout](SHARE_PREVIEWS.md#rollout), then check real unfurls in Discord, Slack, and iMessage.
+4. **Verify the deployed share API before releasing its rewrites.** Deploy the API code and enable `SHARE_PREVIEWS_ENABLED=true` before the `vercel.json` crawler rewrites reach production; setting the flag on the old API is insufficient. Hold frontend promotion or stage the releases separately until the direct API checks pass. Confirm `https://rescened.com` serves the frontend: that origin must be in `CORS_ALLOWED_ORIGINS` (or `FRONTEND_URL`) and in Clerk's allowed origins. Follow the [share previews rollout](SHARE_PREVIEWS.md#rollout), then check real unfurls in Discord, Slack, and iMessage.
 
 ## Performance follow-ups
 

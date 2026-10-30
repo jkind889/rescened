@@ -1,9 +1,15 @@
 import { useEffect } from "react";
 
-// React 19 hoists the <title> and canonical <link> into <head> and removes
-// them on unmount. The description updates the single default tag from
-// index.html instead of adding a second one, and restores it on unmount.
+// Preserve the defaults from index.html instead of adding a second title or
+// description. React hoists the canonical link and removes it on unmount.
 export function PageMeta({ title, description, canonical }) {
+  useEffect(() => {
+    if (!title) return undefined;
+    const previous = document.title;
+    document.title = title;
+    return () => { document.title = previous; };
+  }, [title]);
+
   useEffect(() => {
     const tag = document.querySelector('meta[name="description"]');
     if (!tag || !description) return undefined;
@@ -12,12 +18,7 @@ export function PageMeta({ title, description, canonical }) {
     return () => tag.setAttribute("content", previous);
   }, [description]);
 
-  return (
-    <>
-      {title ? <title>{title}</title> : null}
-      {canonical ? <link rel="canonical" href={canonical} /> : null}
-    </>
-  );
+  return canonical ? <link rel="canonical" href={canonical} /> : null;
 }
 
 export default PageMeta;

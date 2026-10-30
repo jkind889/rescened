@@ -49,7 +49,7 @@ Each page has a `<title>`, description, canonical link, Open Graph and Twitter t
 - A review by a user with a private profile shows their username, because reviews are public, but the page is `noindex`. Profile privacy does not anonymize review authors.
 - A review by a deleted account shows "deleted user", with no Clerk or profile lookup.
 - No Mongo `_id`, Clerk user ID, or comment count appears in any output.
-- Text is truncated (by code point) before escaping. Every attribute and text value escapes `& < > " '` and drops control characters. JSON-LD writes each `<` as `<`, so review text cannot close the `<script>` tag.
+- Text is truncated (by code point) before escaping. Every attribute and text value escapes `& < > " '` and drops control characters. JSON-LD writes each `<` as the literal Unicode escape sequence `\u003c`, so review text cannot close the `<script>` tag.
 
 ### Sitemap
 
@@ -72,19 +72,21 @@ Proxied requests arrive from Vercel's addresses rather than the crawler's, so `/
 
 ## SPA head tags
 
-React 19 hoists a component's `<title>` and `<link>` into `<head>`. `AlbumDetail` and `ReviewPermalink` render `PageMeta`, which sets the page title and a canonical link to `https://rescened.com`, and updates the default `<meta name="description">` from `index.html` rather than adding a second one. Titles and descriptions match the share pages. Other pages keep the default title and description.
+`AlbumDetail` and `ReviewPermalink` render `PageMeta`, which updates the existing title and description from `index.html` and restores them on unmount. React 19 hoists the canonical link to `https://rescened.com` into `<head>` and removes it on unmount. Other pages keep the default title and description.
+
+The offline rendered regression uses an installed Chromium-compatible browser, without a database or Clerk connection: `BROWSER_EXECUTABLE=/path/to/chrome node --test tests/pageMeta.browser.test.js`. It checks one title, description restoration, and canonical cleanup across detail-page navigation and StrictMode. The normal unit suite skips this check when `BROWSER_EXECUTABLE` is unset.
 
 `robots.txt` disallows `/account`, `/suggestions`, `/moderation`, `/notifications`, and `/collection`, and names `https://rescened.com/sitemap.xml`.
 
 ## Rollout
 
 1. Make sure `https://rescened.com` serves the frontend. Moving to that domain also requires adding `https://rescened.com` to the API's `CORS_ALLOWED_ORIGINS` (or `FRONTEND_URL`) and to Clerk's allowed origins and redirect URLs, or sign-in and API calls fail there.
-2. **Before the `vercel.json` rewrites deploy**, set `SHARE_PREVIEWS_ENABLED=true` (and `PUBLIC_SITE_URL` if not the default) on the Railway API. Merging to `main` deploys the rewrites at once; with the flag off, crawlers, including Googlebot, would get `404 noindex` pages for every album and review. Setting the variable early is harmless: nothing calls `/share` until the rewrites exist. If Vercel finishes deploying before Railway, crawlers get the old API's plain `404` for those few minutes.
-3. Check the API directly: `GET <api origin>/share/album/<albumId>` returns `200` HTML, and `/share/sitemap.xml` lists albums.
+2. **Deploy the API code before the crawler rewrites.** Setting `SHARE_PREVIEWS_ENABLED=true` on the old API does not add the `/share` routes. Stage an API-only release with the rewrites held back, or hold frontend promotion while the API release completes. A single merge that automatically deploys both services does not guarantee this ordering; do not activate the rewrites until the next check passes.
+3. Enable `SHARE_PREVIEWS_ENABLED=true` (and `PUBLIC_SITE_URL` if not the default) on the API containing these routes. Check `/health` reports `status: "ok"`, `GET <api origin>/share/album/<known albumId>` returns `200` HTML, and `/share/sitemap.xml` returns `200` XML listing albums. Only then release the `vercel.json` rewrites. With the flag off or the old API still serving, rewritten crawlers receive `404` responses.
 4. After the frontend deploys, paste real album and review links into Discord, Slack, and iMessage. Cover URLs (`front-500`) redirect to archive.org; most unfurlers follow the redirect, but confirm the image appears.
 5. Submit `https://rescened.com/sitemap.xml` in Google Search Console if wanted.
 
-To turn previews off, set `SHARE_PREVIEWS_ENABLED=false`. Crawlers then get `404` pages until the rewrites are removed from `vercel.json`, so remove them too if previews will stay off.
+For a planned rollback, remove the crawler and sitemap rewrites first, verify the frontend serves its SPA again, then set `SHARE_PREVIEWS_ENABLED=false`. An emergency API disable takes effect immediately, but crawlers receive `404` pages while rewrites still point at the disabled routes.
 
 ## Limits
 
