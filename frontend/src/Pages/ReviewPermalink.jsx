@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "@clerk/react";
 import AsyncState from "../Components/Loading/AsyncState";
+import PageMeta from "../Components/PageMeta";
 import LikeButton from "../Components/LikeButton";
 import ShareButton from "../Components/ShareButton";
 import ReviewComments from "../features/comments/ReviewComments";
@@ -10,6 +11,7 @@ import EditedTag from "../features/reviews/EditedTag";
 import ReviewEditForm from "../features/reviews/ReviewEditForm";
 import { updateReview } from "../features/reviews/reviews";
 import { getApiErrorMessage } from "../utils/apiErrors";
+import { reviewPageMeta } from "../utils/pageMeta";
 
 function formatDate(value) {
   const date = new Date(value);
@@ -128,6 +130,7 @@ function ReviewPermalinkContent({ reviewId, getToken, isLoaded, userId }) {
 
   return (
     <section className="review-permalink-page">
+      <PageMeta {...reviewPageMeta(review)} />
       <article className="review-permalink">
         <Link className="review-permalink-cover" to={`/album/${album.albumId}`}>
           {album.cover ? <img src={album.cover} alt={`${album.title} cover`} /> : <span>No cover</span>}

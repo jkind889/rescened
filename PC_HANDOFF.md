@@ -291,4 +291,4 @@ Avoid making independent unpushed changes to the same branch on both computers. 
 
 ## Deployment reminder
 
-`vercel.json` builds and serves only the Vite frontend. The Express API, MongoDB, and Clerk server settings must be hosted/configured separately. `VITE_API_URL` is the frontend's API target; no production API URL is committed to this repository.
+`vercel.json` builds and serves only the Vite frontend. The Express API, MongoDB, and Clerk server settings must be hosted/configured separately. `VITE_API_URL` is the frontend's API target. The only committed production API URL is the public Railway API origin in `vercel.json`, which link-preview crawler rewrites proxy to (see [share previews](docs/SHARE_PREVIEWS.md#vercel-rewrites)). It is already visible in the frontend's network requests and carries no credentials; credentials and every other server setting stay out of the repository. If the Railway domain changes, update `vercel.json` and `VITE_API_URL` together.

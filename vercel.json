@@ -5,6 +5,43 @@
   "framework": "vite",
   "rewrites": [
     {
+      "source": "/sitemap.xml",
+      "destination": "https://rescened.up.railway.app/share/sitemap.xml"
+    },
+    {
+      "source": "/album/:albumId",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(facebookexternalhit|Twitterbot|Discordbot|Slackbot|LinkedInBot|TelegramBot|WhatsApp|Applebot|Googlebot|bingbot).*"
+        }
+      ],
+      "destination": "https://rescened.up.railway.app/share/album/:albumId"
+    },
+    {
+      "source": "/album/:albumId/reviews",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(facebookexternalhit|Twitterbot|Discordbot|Slackbot|LinkedInBot|TelegramBot|WhatsApp|Applebot|Googlebot|bingbot).*"
+        }
+      ],
+      "destination": "https://rescened.up.railway.app/share/album/:albumId"
+    },
+    {
+      "source": "/review/:reviewId",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(facebookexternalhit|Twitterbot|Discordbot|Slackbot|LinkedInBot|TelegramBot|WhatsApp|Applebot|Googlebot|bingbot).*"
+        }
+      ],
+      "destination": "https://rescened.up.railway.app/share/review/:reviewId"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
