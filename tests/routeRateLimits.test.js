@@ -5,6 +5,7 @@ const clerkPath = require.resolve("@clerk/express");
 const rateLimitPath = require.resolve("../routes/utils/rateLimit");
 const routePaths = {
   boards: require.resolve("../routes/boards"),
+  dataExport: require.resolve("../routes/dataExport"),
   likes: require.resolve("../routes/likes"),
   notifications: require.resolve("../routes/notifications"),
   profile: require.resolve("../routes/profile"),
@@ -64,6 +65,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
   const calls = {
     albumSave: 0,
     boardMutation: 0,
+    dataExport: 0,
     likeMutation: 0,
     notificationMutation: 0,
     profileStats: 0,
@@ -90,6 +92,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
     diaryMutationRateLimit: (req, res, next) => next(),
     albumSaveRateLimit: blocker("albumSave", 51),
     boardMutationRateLimit: blocker("boardMutation", 60),
+    dataExportRateLimit: blocker("dataExport", 61),
     externalSearchRateLimit: (req, res, next) => next(),
     likeMutationRateLimit: blocker("likeMutation", 52),
     notificationMutationRateLimit: blocker("notificationMutation", 59),
@@ -124,6 +127,7 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
     limiters,
     routers: {
       boards: require("../routes/boards"),
+      dataExport: require("../routes/dataExport"),
       likes: require("../routes/likes"),
       notifications: require("../routes/notifications"),
       profile: require("../routes/profile"),
@@ -137,7 +141,15 @@ function installBlockedRoutes(initialUserId = "user_rate_limit_test") {
   };
 }
 
+// The export route answers 503 before authentication while its flag is off.
+const previousDataExportFlag = process.env.DATA_EXPORT_ENABLED;
+test.beforeEach(() => {
+  process.env.DATA_EXPORT_ENABLED = "true";
+});
+
 test.afterEach(() => {
+  if (previousDataExportFlag === undefined) delete process.env.DATA_EXPORT_ENABLED;
+  else process.env.DATA_EXPORT_ENABLED = previousDataExportFlag;
   Object.values(routePaths).forEach((path) => delete require.cache[path]);
   delete require.cache[clerkPath];
   delete require.cache[rateLimitPath];
@@ -208,6 +220,7 @@ test("routes register the intended limiter after authentication where required",
     [routers.trackRankings, "put", "/album/:albumId", 1, limiters.trackRankingMutationRateLimit],
     [routers.trackRankings, "delete", "/album/:albumId", 1, limiters.trackRankingMutationRateLimit],
     [routers.profile, "get", "/me/stats", 1, limiters.profileStatsRateLimit],
+    [routers.dataExport, "get", "/:dataset.:format", 3, limiters.dataExportRateLimit],
     [routers.profile, "get", "/:userId/stats", 0, limiters.profileStatsRateLimit],
     [routers.profile, "post", "/me/queue", 1, limiters.queueMutationRateLimit],
     [routers.profile, "put", "/me/queue", 1, limiters.queueMutationRateLimit],
@@ -238,6 +251,7 @@ test("route-specific limiters stop work and preserve 429 response metadata", asy
     [routers.trackRankings, "put", "/album/:albumId", { body: {}, headers: {}, params: { albumId: "album" } }, "trackRankingMutation", 56],
     [routers.trackRankings, "delete", "/album/:albumId", { headers: {}, params: { albumId: "album" } }, "trackRankingMutation", 56],
     [routers.profile, "get", "/me/stats", { query: {}, headers: {} }, "profileStats", 57],
+    [routers.dataExport, "get", "/:dataset.:format", { query: {}, headers: {}, params: { dataset: "reviews", format: "csv" } }, "dataExport", 61],
     [routers.profile, "get", "/:userId/stats", { query: {}, headers: {}, params: { userId: "user_public" } }, "profileStats", 57],
     [routers.profile, "post", "/me/queue", { body: {}, headers: {} }, "queueMutation", 58],
     [routers.profile, "put", "/me/queue", { body: {}, headers: {} }, "queueMutation", 58],
@@ -274,6 +288,7 @@ test("authentication rejects mutations before consuming their route-specific lim
     [installed.routers.profile, "delete", "/me/queue/:albumId", { headers: {}, params: { albumId: "album" } }],
     [installed.routers.trackRankings, "delete", "/album/:albumId", { headers: {}, params: { albumId: "album" } }],
     [installed.routers.profile, "get", "/me/stats", { query: {}, headers: {} }],
+    [installed.routers.dataExport, "get", "/:dataset.:format", { query: {}, headers: {}, params: { dataset: "reviews", format: "csv" } }],
     [installed.routers.profile, "patch", "/me/notification-preferences", { body: {}, headers: {} }],
     [installed.routers.notifications, "post", "/read", { body: {}, headers: {} }],
     [installed.routers.notifications, "post", "/clear", { body: {}, headers: {} }],
@@ -286,6 +301,7 @@ test("authentication rejects mutations before consuming their route-specific lim
   assert.deepEqual(installed.calls, {
     albumSave: 0,
     boardMutation: 0,
+    dataExport: 0,
     likeMutation: 0,
     notificationMutation: 0,
     profileStats: 0,

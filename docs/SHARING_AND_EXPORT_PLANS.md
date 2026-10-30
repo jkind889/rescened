@@ -1,6 +1,6 @@
 # Plans: link previews and SEO, data exports
 
-Status: proposed, October 2026. Decisions confirmed October 30, 2026 and recorded below. Neither plan is started; both remain planned with disabled-by-default flags.
+Status: October 2026. Decisions confirmed October 30, 2026 and recorded below. Data exports are implemented behind the disabled-by-default flag; see [the maintained data export guide](DATA_EXPORT.md) for the current behavior and rollout. Link previews remain a separate workstream.
 
 | Plan | Size | Depends on |
 | --- | --- | --- |

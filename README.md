@@ -18,6 +18,8 @@ Set `SHARE_PREVIEWS_ENABLED=true` to serve crawler link-preview pages and the al
 
 `REVIEW_CURSOR_SECRET` is optional but recommended when review-pagination cursors should be rotated independently of the Clerk secret.
 
+Set `DATA_EXPORT_ENABLED=true` to let signed-in users download their reviews, diary listens, and boards as CSV or JSON from `/account/edit`; it is disabled by default. See [the data export guide](docs/DATA_EXPORT.md).
+
 The database is intentionally empty after the generation-2 cutover. Phase 2 includes contributor and moderator APIs: approval creates, links, or applies an explicit field-level correction to a usable local catalog album inside a Mongo transaction. Approval commands, review interaction mutations (deletion, review likes, and pinning), and review comment writes require a transaction-capable MongoDB replica set or sharded deployment; standalone Mongo remains safe for reads and non-publication moderation commands only. Transaction-unavailable mutations return an action-specific `503` code and do not fall back to partial writes.
 
 ## Catalog contract

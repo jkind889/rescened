@@ -14,6 +14,7 @@ const roots = [
   "lib/baselines",
   "lib/genres",
   "lib/reviewComments",
+  "lib/dataExport",
   "scripts/lastfmStudy.js",
   "scripts/listeningWorker.js",
   "scripts/listeningMappingSeeds.js",
