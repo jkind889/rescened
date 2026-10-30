@@ -12,10 +12,16 @@ const { CATALOG_ALBUM_FIELDS, UUID_V4, normalizeCatalogAlbum } = require("./util
 const { cacheSharePreview, noStore } = require("./utils/cacheHeaders");
 const { sharePreviewRateLimit } = require("./utils/rateLimit");
 const { DEFAULT_AUTHOR, lookupAuthors } = require("../lib/clerkAuthors");
-const { buildAlbumPage, buildNotFoundPage, buildReviewPage, resolveSiteUrl } = require("../lib/sharePreview/render");
+const { buildAlbumPage, buildNotFoundPage, buildReviewPage, buildSitemap, resolveSiteUrl } = require("../lib/sharePreview/render");
 
 const router = express.Router();
 const REVIEW_FIELDS = "reviewId userId albumCatalogId rating reviewText date editedAt";
+// One sitemap file holds at most 50,000 URLs; the catalog is far below that.
+const SITEMAP_URL_LIMIT = 50000;
+// The sitemap reads the whole catalog, so it is built at most once per window
+// per process, and concurrent requests share one build.
+const SITEMAP_TTL_MS = 15 * 60 * 1000;
+let sitemapCache = null;
 
 // Read per request, so the flag and site URL follow the environment.
 function isSharePreviewsEnabled(env = process.env) {
@@ -93,6 +99,36 @@ router.get("/review/:reviewId", async (req, res) => {
     }));
   } catch (error) {
     return sendFailure(res, error);
+  }
+});
+
+async function loadSitemap(site) {
+  const albums = await AlbumCatalog.find({}, "albumId updatedAt").sort({ _id: 1 }).limit(SITEMAP_URL_LIMIT).lean();
+  if (albums.length >= SITEMAP_URL_LIMIT) {
+    console.warn("[share-preview] sitemap reached the 50,000 URL limit; split it into a sitemap index");
+  }
+  return buildSitemap({ albums, siteUrl: site });
+}
+
+function readSitemap(site, now = Date.now()) {
+  if (sitemapCache && sitemapCache.site === site && sitemapCache.expiresAt > now) return sitemapCache.xml;
+  const entry = { site, expiresAt: now + SITEMAP_TTL_MS, xml: loadSitemap(site) };
+  sitemapCache = entry;
+  // A failed build is not reused; the next request tries again.
+  entry.xml.catch(() => { if (sitemapCache === entry) sitemapCache = null; });
+  return entry.xml;
+}
+
+// Albums only. Review permalinks, including private-profile reviews, are never listed.
+router.get("/sitemap.xml", async (req, res) => {
+  try {
+    const xml = await readSitemap(siteUrl());
+    cacheSharePreview(res);
+    return res.status(200).type("application/xml").send(xml);
+  } catch (error) {
+    console.error("[share-preview] sitemap failed", { message: error?.message });
+    noStore(res);
+    return res.status(500).type("text/plain").send("Sitemap unavailable");
   }
 });
 

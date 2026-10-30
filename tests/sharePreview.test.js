@@ -415,3 +415,77 @@ test("share pages have their own IP-keyed bucket and mount before the global API
   assert.ok(shareIndex >= 0, "share router is mounted");
   assert.ok(globalIndex > shareIndex, "share router runs before the global API limiter");
 });
+
+test("the sitemap lists catalog albums only, with canonical URLs and lastmod", () => {
+  const xml = require("../lib/sharePreview/render").buildSitemap({
+    siteUrl: "https://rescened.com",
+    albums: [
+      { albumId: ALBUM_ID, updatedAt: new Date("2026-10-01T12:00:00.000Z") },
+      { albumId: "44444444-4444-4444-8444-444444444444", updatedAt: null },
+      { albumId: "65f1c2a3b4c5d6e7f8091a2b", updatedAt: new Date() },
+      { albumId: "" },
+    ],
+  });
+
+  assert.ok(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>'));
+  assert.ok(xml.includes(`<url><loc>https://rescened.com/album/${ALBUM_ID}</loc><lastmod>2026-10-01T12:00:00.000Z</lastmod></url>`));
+  assert.ok(xml.includes("<url><loc>https://rescened.com/album/44444444-4444-4444-8444-444444444444</loc></url>"));
+  assert.equal((xml.match(/<url>/g) || []).length, 2);
+  assert.ok(!xml.includes("65f1c2a3b4c5d6e7f8091a2b"));
+  assert.ok(!xml.includes("/review/"));
+});
+
+test("the sitemap route reads only public album fields and serves XML", async (t) => {
+  withEnv(t, { SHARE_PREVIEWS_ENABLED: "true", PUBLIC_SITE_URL: "https://rescened.com" });
+  const calls = [];
+  t.mock.method(AlbumCatalog, "find", (filter, fields) => {
+    calls.push({ filter, fields });
+    const query = {
+      sort(order) { calls.push({ sort: order }); return query; },
+      limit(count) { calls.push({ limit: count }); return query; },
+      lean: async () => [{ _id: ALBUM_OBJECT_ID, albumId: ALBUM_ID, updatedAt: new Date("2026-10-01T12:00:00.000Z") }],
+    };
+    return query;
+  });
+  t.mock.method(Review, "find", () => { throw new Error("reviews must not be read for the sitemap"); });
+
+  const response = await request(t, "/share/sitemap.xml");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /^application\/xml/);
+  assert.equal(response.headers.get("cache-control"), "public, max-age=300");
+  assert.deepEqual(calls[0], { filter: {}, fields: "albumId updatedAt" });
+  assert.deepEqual(calls.find((call) => call.limit), { limit: 50000 });
+  assert.ok(response.body.includes(`<loc>https://rescened.com/album/${ALBUM_ID}</loc>`));
+  assert.ok(!response.body.includes(String(ALBUM_OBJECT_ID)));
+});
+
+test("the sitemap route is off with the flag and retries after a failure", async (t) => {
+  withEnv(t, { SHARE_PREVIEWS_ENABLED: "false" });
+  const off = await request(t, "/share/sitemap.xml");
+  assert.equal(off.status, 404);
+  assert.equal(off.headers.get("cache-control"), "private, no-store");
+
+  process.env.SHARE_PREVIEWS_ENABLED = "true";
+  t.mock.method(console, "error", () => {});
+  let attempts = 0;
+  t.mock.method(AlbumCatalog, "find", () => {
+    attempts += 1;
+    const query = { sort: () => query, limit: () => query, lean: async () => { if (attempts === 1) throw new Error("timeout"); return []; } };
+    return query;
+  });
+  delete require.cache[sharePreviewPath];
+  const app = express();
+  app.use("/share", require("../routes/sharePreview"));
+  const server = await new Promise((resolve) => { const listener = app.listen(0, "127.0.0.1", () => resolve(listener)); });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const url = `http://127.0.0.1:${server.address().port}/share/sitemap.xml`;
+
+  const failed = await fetch(url);
+  assert.equal(failed.status, 500);
+  assert.equal(failed.headers.get("cache-control"), "private, no-store");
+  const retried = await fetch(url);
+  assert.equal(retried.status, 200);
+  await fetch(url);
+  assert.equal(attempts, 2, "a successful build is reused within its window");
+});
