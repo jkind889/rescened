@@ -524,3 +524,66 @@ test("robots.txt disallows private areas and names the absolute sitemap URL", ()
   }
   assert.match(robots, /^Sitemap: https:\/\/rescened\.com\/sitemap\.xml$/m);
 });
+
+// vercel.json routes crawler requests to the share pages before the SPA catch-all.
+test("vercel crawler rewrites precede the catch-all and match only the listed bots", () => {
+  const config = JSON.parse(require("node:fs").readFileSync(path.join(__dirname, "../vercel.json"), "utf8"));
+  const rewrites = config.rewrites;
+  const catchAll = rewrites.findIndex((rule) => rule.source === "/(.*)");
+  assert.equal(catchAll, rewrites.length - 1, "the SPA catch-all is last");
+  assert.equal(rewrites[catchAll].destination, "/index.html");
+
+  const bySource = Object.fromEntries(rewrites.map((rule) => [rule.source, rule]));
+  const api = new URL(bySource["/sitemap.xml"].destination);
+  assert.equal(api.protocol, "https:");
+  assert.equal(api.username + api.password + api.search + api.hash, "");
+  assert.equal(bySource["/sitemap.xml"].has, undefined, "the sitemap is proxied for every user agent");
+  assert.equal(bySource["/sitemap.xml"].destination, `${api.origin}/share/sitemap.xml`);
+  assert.deepEqual(
+    Object.fromEntries(["/album/:albumId", "/album/:albumId/reviews", "/review/:reviewId"].map((source) => [source, bySource[source]?.destination])),
+    {
+      "/album/:albumId": `${api.origin}/share/album/:albumId`,
+      "/album/:albumId/reviews": `${api.origin}/share/album/:albumId`,
+      "/review/:reviewId": `${api.origin}/share/review/:reviewId`,
+    },
+  );
+
+  const crawlerRules = rewrites.filter((rule) => rule.has);
+  assert.equal(crawlerRules.length, 3);
+  const [pattern] = new Set(crawlerRules.map((rule) => {
+    assert.equal(rule.has.length, 1);
+    assert.equal(rule.has[0].type, "header");
+    assert.equal(rule.has[0].key, "user-agent");
+    return rule.has[0].value;
+  }));
+  assert.equal(new Set(crawlerRules.map((rule) => rule.has[0].value)).size, 1, "every crawler rule uses one pattern");
+  // Vercel matches the whole header value.
+  const matches = (userAgent) => new RegExp(`^(?:${pattern})$`).test(userAgent);
+
+  const crawlers = [
+    "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_1) AppleWebKit/601.2.4 (KHTML, like Gecko) Version/9.0.1 Safari/601.2.4 facebookexternalhit/1.1 Facebot Twitterbot/1.0",
+    "Twitterbot/1.0",
+    "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)",
+    "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+    "LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)",
+    "TelegramBot (like TwitterBot)",
+    "WhatsApp/2.23.20.0 A",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 Safari/605.1.15 (Applebot/0.1; +http://www.apple.com/go/applebot)",
+    "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)",
+  ];
+  for (const userAgent of crawlers) assert.ok(matches(userAgent), userAgent);
+
+  const browsers = [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0.0.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+  ];
+  for (const userAgent of browsers) assert.ok(!matches(userAgent), userAgent);
+});
