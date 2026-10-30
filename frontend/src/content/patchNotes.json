@@ -1,5 +1,18 @@
 [
   {
+    "id": "data-export",
+    "date": "2026-10-30",
+    "title": "Download your data",
+    "summary": "Export your reviews, diary listens, and boards as CSV or JSON from your profile settings.",
+    "changes": [
+      "Open Edit Profile and choose CSV or JSON next to Reviews, Listens, or Boards. The file downloads straight away.",
+      "CSV files open cleanly in Excel, Numbers, and Google Sheets. JSON keeps everything exactly as written.",
+      "Board exports list albums in the same order as the board, and empty boards are included.",
+      "Album titles and artists match the catalog as it is today. Listens of albums that have since been removed are left out, and the JSON file says how many.",
+      "You can download up to 10 exports an hour."
+    ]
+  },
+  {
     "id": "bulk-approval",
     "date": "2026-10-28",
     "title": "Approve suggestions in bulk",

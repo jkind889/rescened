@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { RedirectToSignIn, Show, useAuth, useUser } from "@clerk/react";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import Cover from "../Components/Cover";
+import DataExport from "../features/export/DataExport";
 
 const MAX_BIO_LENGTH = 280;
 const MAX_FAVORITES = 5;
@@ -738,6 +739,8 @@ export function EditProfile() {
                 {passwordError && <p className="edit-profile-error">{passwordError}</p>}
                 <button className="album-action-button" type="submit">Update Password</button>
               </form>
+
+              <DataExport />
 
               <Link className="edit-profile-footer-link" to="/account">
                 Return to profile

@@ -20,6 +20,10 @@ function isGenresEnabled(env = process.env) {
   return String(env.GENRES_ENABLED || "").trim().toLowerCase() === "true";
 }
 
+function isDataExportEnabled(env = process.env) {
+  return String(env.DATA_EXPORT_ENABLED || "").trim().toLowerCase() === "true";
+}
+
 function parseOriginList(value) {
   return String(value || "")
     .split(",")
@@ -123,6 +127,7 @@ module.exports = {
   buildCorsOptions,
   getAllowedOrigins,
   getConfiguredOrigins,
+  isDataExportEnabled,
   isExternalAlbumSearchEnabled,
   isGenresEnabled,
   normalizeOrigin,
