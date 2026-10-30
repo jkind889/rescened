@@ -1,0 +1,19 @@
+.data-export-list {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.data-export-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.data-export-actions {
+  display: flex;
+  gap: 0.5rem;
+}

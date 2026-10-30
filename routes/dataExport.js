@@ -34,6 +34,10 @@ function validateRequest(req, res, next) {
   next();
 }
 
+// Lets the settings page show the section only while exports are enabled,
+// without spending an export.
+router.get("/", requireEnabled, auth, (req, res) => res.json({ datasets: DATASETS, formats: FORMATS }));
+
 router.get("/:dataset.:format", requireEnabled, auth, validateRequest, dataExportRateLimit, async (req, res) => {
   const { dataset, format } = req.params;
   try {

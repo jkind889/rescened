@@ -72,12 +72,26 @@ function mockData(t, { reviews = [], listens = [] } = {}) {
 test("the export is unavailable while DATA_EXPORT_ENABLED is off, before any read", async (t) => {
   const calls = mockData(t);
   const get = await serve(t, { enabled: false });
-  for (const [file, user] of [["reviews.csv", "owner"], ["reviews.csv", ""], ["nope.txt", "owner"]]) {
+  for (const [file, user] of [["reviews.csv", "owner"], ["reviews.csv", ""], ["nope.txt", "owner"], ["", "owner"]]) {
     const response = await get(file, user);
     assert.equal(response.status, 503, file);
     assert.equal(response.body.code, "DATA_EXPORT_DISABLED");
   }
   assert.equal(calls.reviewFilters.length, 0);
+});
+
+test("the availability check lists what can be exported without spending the budget", async (t) => {
+  const calls = mockData(t);
+  const get = await serve(t);
+  const userId = nextUser();
+  for (let index = 0; index < 12; index += 1) {
+    const response = await get("", userId);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { datasets: ["reviews", "listens", "boards"], formats: ["csv", "json"] });
+  }
+  assert.equal(calls.reviewFilters.length, 0);
+  assert.equal((await get("reviews.csv", userId)).status, 200);
+  assert.equal((await get("", "")).status, 401);
 });
 
 test("unauthenticated requests get 401 UNAUTHORIZED", async (t) => {
