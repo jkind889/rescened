@@ -22,6 +22,10 @@ Set `DATA_EXPORT_ENABLED=true` to let signed-in users download their reviews, di
 
 The database is intentionally empty after the generation-2 cutover. Phase 2 includes contributor and moderator APIs: approval creates, links, or applies an explicit field-level correction to a usable local catalog album inside a Mongo transaction. Approval commands, review interaction mutations (deletion, review likes, and pinning), and review comment writes require a transaction-capable MongoDB replica set or sharded deployment; standalone Mongo remains safe for reads and non-publication moderation commands only. Transaction-unavailable mutations return an action-specific `503` code and do not fall back to partial writes.
 
+## Account updates
+
+The custom `/account/edit` page sends username, email, and password changes directly to Clerk. Each sensitive operation uses Clerk's `useReverification` hook to prompt for recent identity verification when required, then retry that operation. Cancelling leaves the form editable without claiming success; other Clerk errors remain visible. Account actions are disabled while an update or verification prompt is pending. Email-code verification is retained separately from primary-email promotion, so retrying promotion after cancellation or failure does not reuse a consumed code. Offline regression coverage is in `tests/accountUpdatesClient.test.js`.
+
 ## Catalog contract
 
 Catalog responses expose `albumId`, `title`, `artistDisplayName`, `artistCredits`, `releaseType`, release date fields, `releaseYear`, `cover`, `tracks`, `label`, and normalized external references. Album-bearing social records resolve their current metadata from the catalog, so edits to an approved catalog record are reflected in reviews and activity.
