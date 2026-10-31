@@ -1,7 +1,8 @@
 import { API_BASE_URL } from "../config/api";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { RedirectToSignIn, Show, useAuth, useUser } from "@clerk/react";
+import { RedirectToSignIn, Show, useAuth, useReverification, useUser } from "@clerk/react";
+import { isReverificationCancelledError } from "@clerk/react/errors";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import Cover from "../Components/Cover";
 import DataExport from "../features/export/DataExport";
@@ -110,11 +111,33 @@ export function EditProfile() {
   const [newPassword, setNewPassword] = useState("");
   const [passwordStatus, setPasswordStatus] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  const [isAccountBusy, setIsAccountBusy] = useState(false);
+  const accountActionInFlight = useRef(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searchStatus, setSearchStatus] = useState("");
   const [searchError, setSearchError] = useState("");
   const usernameValidationError = validateUsername(username);
+  const isEmailVerified = pendingEmailAddress?.verification?.status === "verified";
+
+  // Only retry the sensitive operation, with the original account and values.
+  const updateUsername = useReverification((account, value) => account.update({ username: value }));
+  const createEmail = useReverification((account, email) => account.createEmailAddress({ email }));
+  const updatePrimaryEmail = useReverification((account, id) => account.update({ primaryEmailAddressId: id }));
+  const updatePassword = useReverification((account, params) => account.updatePassword(params));
+
+  function beginAccountAction() {
+    // State alone cannot block two submissions before the next render.
+    if (accountActionInFlight.current) return false;
+    accountActionInFlight.current = true;
+    setIsAccountBusy(true);
+    return true;
+  }
+
+  function finishAccountAction() {
+    accountActionInFlight.current = false;
+    setIsAccountBusy(false);
+  }
 
   useEffect(() => {
     if (isLoaded && user) {
@@ -227,23 +250,26 @@ export function EditProfile() {
       return;
     }
 
+    if (!beginAccountAction()) return;
     try {
       setUsernameError("");
       setUsernameStatus("Saving username...");
 
-      await user.update({ username: username.trim() });
+      await updateUsername(user, username.trim());
       await user.reload();
       setUsernameStatus("Username updated.");
     } catch (error) {
       setUsernameStatus("");
-      setUsernameError(getClerkUsernameError(error));
+      if (!isReverificationCancelledError(error)) setUsernameError(getClerkUsernameError(error));
+    } finally {
+      finishAccountAction();
     }
   }
 
   async function handleEmailStart(event) {
     event.preventDefault();
 
-    if (!user) {
+    if (!user || isEmailVerified || !beginAccountAction()) {
       return;
     }
 
@@ -251,29 +277,45 @@ export function EditProfile() {
       setEmailError("");
       setEmailStatus("Sending verification code...");
 
-      const emailAddress = await user.createEmailAddress({ email: newEmail.trim() });
+      const email = newEmail.trim();
+      // Editing the email input clears the pending resource.
+      const emailAddress = pendingEmailAddress || await createEmail(user, email);
+      // Keep the created address if sending the code fails, so retrying Send Code
+      // does not attempt to add the same address again.
+      setPendingEmailAddress(emailAddress);
       const preparedEmailAddress = await emailAddress.prepareVerification({ strategy: "email_code" });
       setPendingEmailAddress(preparedEmailAddress);
       setEmailStatus("Check your new email for a verification code.");
     } catch (error) {
       setEmailStatus("");
-      setEmailError(getErrorMessage(error, "Could not start email verification."));
+      if (!isReverificationCancelledError(error)) setEmailError(getErrorMessage(error, "Could not start email verification."));
+    } finally {
+      finishAccountAction();
     }
   }
 
   async function handleEmailVerify(event) {
     event.preventDefault();
 
-    if (!user || !pendingEmailAddress) {
+    if (!user || !pendingEmailAddress || !beginAccountAction()) {
       return;
     }
 
     try {
       setEmailError("");
-      setEmailStatus("Verifying email...");
+      setEmailStatus(isEmailVerified ? "Updating primary email..." : "Verifying email...");
 
-      const verifiedEmail = await pendingEmailAddress.attemptVerification({ code: emailCode.trim() });
-      await user.update({ primaryEmailAddressId: verifiedEmail.id });
+      const verifiedEmail = isEmailVerified
+        ? pendingEmailAddress
+        : await pendingEmailAddress.attemptVerification({ code: emailCode.trim() });
+      if (verifiedEmail.verification?.status !== "verified") {
+        throw new Error("Email verification is incomplete. Try again.");
+      }
+      // Promotion can require a separate session verification. Preserve success
+      // here so cancellation or retry never consumes the email code twice.
+      setPendingEmailAddress(verifiedEmail);
+      setEmailCode("");
+      await updatePrimaryEmail(user, verifiedEmail.id);
       await user.reload();
 
       setNewEmail("");
@@ -282,14 +324,16 @@ export function EditProfile() {
       setEmailStatus("Primary email updated.");
     } catch (error) {
       setEmailStatus("");
-      setEmailError(getErrorMessage(error, "Could not verify that email."));
+      if (!isReverificationCancelledError(error)) setEmailError(getErrorMessage(error, "Could not verify that email."));
+    } finally {
+      finishAccountAction();
     }
   }
 
   async function handlePasswordSubmit(event) {
     event.preventDefault();
 
-    if (!user) {
+    if (!user || !beginAccountAction()) {
       return;
     }
 
@@ -297,7 +341,7 @@ export function EditProfile() {
       setPasswordError("");
       setPasswordStatus("Updating password...");
 
-      await user.updatePassword({
+      await updatePassword(user, {
         currentPassword: user.passwordEnabled ? currentPassword : undefined,
         newPassword,
         signOutOfOtherSessions: true,
@@ -309,7 +353,9 @@ export function EditProfile() {
       setPasswordStatus("Password updated.");
     } catch (error) {
       setPasswordStatus("");
-      setPasswordError(getErrorMessage(error, "Could not update password."));
+      if (!isReverificationCancelledError(error)) setPasswordError(getErrorMessage(error, "Could not update password."));
+    } finally {
+      finishAccountAction();
     }
   }
 
@@ -645,6 +691,7 @@ export function EditProfile() {
                   <span>Username</span>
                   <input
                     value={username}
+                    disabled={isAccountBusy}
                     onChange={(event) => {
                       setUsername(event.target.value);
                       setUsernameStatus("");
@@ -664,7 +711,7 @@ export function EditProfile() {
                 <button
                   className="album-action-button"
                   type="submit"
-                  disabled={!!usernameValidationError}
+                  disabled={isAccountBusy || !!usernameValidationError}
                 >
                   Save Username
                 </button>
@@ -684,26 +731,38 @@ export function EditProfile() {
                     <input
                       type="email"
                       required
+                      disabled={isAccountBusy}
                       value={newEmail}
-                      onChange={(event) => setNewEmail(event.target.value)}
+                      onChange={(event) => {
+                        setNewEmail(event.target.value);
+                        setPendingEmailAddress(null);
+                        setEmailCode("");
+                        setEmailStatus("");
+                        setEmailError("");
+                      }}
                       placeholder="you@example.com"
                     />
                   </label>
-                  <button className="album-action-button" type="submit">Send Code</button>
+                  <button className="album-action-button" type="submit" disabled={isAccountBusy || isEmailVerified}>Send Code</button>
                 </form>
 
                 {pendingEmailAddress && (
                   <form className="edit-profile-verification-form" onSubmit={handleEmailVerify}>
-                    <label className="edit-profile-field">
-                      <span>Verification code</span>
-                      <input
-                        value={emailCode}
-                        required
-                        onChange={(event) => setEmailCode(event.target.value)}
-                        placeholder="Enter code"
-                      />
-                    </label>
-                    <button className="album-action-button" type="submit">Verify Email</button>
+                    {!isEmailVerified && (
+                      <label className="edit-profile-field">
+                        <span>Verification code</span>
+                        <input
+                          value={emailCode}
+                          required
+                          disabled={isAccountBusy}
+                          onChange={(event) => setEmailCode(event.target.value)}
+                          placeholder="Enter code"
+                        />
+                      </label>
+                    )}
+                    <button className="album-action-button" type="submit" disabled={isAccountBusy}>
+                      {isEmailVerified ? "Set Primary Email" : "Verify Email"}
+                    </button>
                   </form>
                 )}
 
@@ -721,6 +780,7 @@ export function EditProfile() {
                     <input
                       type="password"
                       required
+                      disabled={isAccountBusy}
                       value={currentPassword}
                       onChange={(event) => setCurrentPassword(event.target.value)}
                     />
@@ -731,13 +791,14 @@ export function EditProfile() {
                   <input
                     type="password"
                     required
+                    disabled={isAccountBusy}
                     value={newPassword}
                     onChange={(event) => setNewPassword(event.target.value)}
                   />
                 </label>
                 {passwordStatus && <p className="edit-profile-status">{passwordStatus}</p>}
                 {passwordError && <p className="edit-profile-error">{passwordError}</p>}
-                <button className="album-action-button" type="submit">Update Password</button>
+                <button className="album-action-button" type="submit" disabled={isAccountBusy}>Update Password</button>
               </form>
 
               <DataExport />
