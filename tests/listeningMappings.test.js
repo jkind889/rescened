@@ -117,3 +117,14 @@ test("evidence links reject javascript and credential-bearing URLs", () => {
 test("stale queue filtering accepts only a boolean", async () => {
   await assert.rejects(moderation.listCases({ stale: "yes" }), (error) => error.code === "INVALID_STALE");
 });
+
+test("moderator serialization passes discovery candidate coverage through", () => {
+  const result = moderation.serializeCase({
+    caseId: "8f64f9df-d4cf-4b55-91dc-d0af36bf95ce", provider: "lastfm", artist: "Artist", album: "Album", artistKey: "artist", albumKey: "album", status: "pending", revision: 1, encounterCount: 1,
+    evidence: [{ source: "candidate_discovery", candidatesFound: 9, candidatesShown: 5, candidateLimitReached: true, candidateQueryLimitReached: false }],
+  });
+  assert.deepEqual(
+    [result.evidence[0].candidatesFound, result.evidence[0].candidatesShown, result.evidence[0].candidateLimitReached, result.evidence[0].candidateQueryLimitReached],
+    [9, 5, true, false],
+  );
+});
