@@ -18,6 +18,13 @@ function getErrorMessage(error, fallback) {
     || fallback;
 }
 
+function requireAccountResult(result) {
+  // Clerk can resolve a reverification hint if its single retry is still denied.
+  // Successful User and EmailAddress resources both have an id.
+  if (!result?.id) throw new Error("Could not complete account verification. Please try again.");
+  return result;
+}
+
 function validateUsername(value) {
   const nextUsername = value.trim();
 
@@ -255,7 +262,7 @@ export function EditProfile() {
       setUsernameError("");
       setUsernameStatus("Saving username...");
 
-      await updateUsername(user, username.trim());
+      requireAccountResult(await updateUsername(user, username.trim()));
       await user.reload();
       setUsernameStatus("Username updated.");
     } catch (error) {
@@ -279,7 +286,7 @@ export function EditProfile() {
 
       const email = newEmail.trim();
       // Editing the email input clears the pending resource.
-      const emailAddress = pendingEmailAddress || await createEmail(user, email);
+      const emailAddress = pendingEmailAddress || requireAccountResult(await createEmail(user, email));
       // Keep the created address if sending the code fails, so retrying Send Code
       // does not attempt to add the same address again.
       setPendingEmailAddress(emailAddress);
@@ -315,7 +322,7 @@ export function EditProfile() {
       // here so cancellation or retry never consumes the email code twice.
       setPendingEmailAddress(verifiedEmail);
       setEmailCode("");
-      await updatePrimaryEmail(user, verifiedEmail.id);
+      requireAccountResult(await updatePrimaryEmail(user, verifiedEmail.id));
       await user.reload();
 
       setNewEmail("");
@@ -341,11 +348,11 @@ export function EditProfile() {
       setPasswordError("");
       setPasswordStatus("Updating password...");
 
-      await updatePassword(user, {
+      requireAccountResult(await updatePassword(user, {
         currentPassword: user.passwordEnabled ? currentPassword : undefined,
         newPassword,
         signOutOfOtherSessions: true,
-      });
+      }));
       await user.reload();
 
       setCurrentPassword("");

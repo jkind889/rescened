@@ -20,6 +20,7 @@ const renderSource = `(() => { ${helpers}\n${component}
 const event = { preventDefault() {} };
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const reverifyError = { status: 403, errors: [{ code: "session_reverification_required", longMessage: "Reverification required" }] };
+const reverifyHint = { clerk_error: { type: "forbidden", reason: "reverification-error", metadata: {} } };
 function deferred() {
   let resolve;
   const promise = new Promise((done) => { resolve = done; });
@@ -37,8 +38,8 @@ function harness() {
   let hold = null;
   const invoke = async (operation, payload, result) => {
     calls.push({ operation, payload: payload && clone(payload) });
-    const failure = failures.get(operation);
-    if (failure) { failures.delete(operation); throw failure; }
+    const failure = failures.get(operation)?.shift();
+    if (failure) throw failure;
     return typeof result === "function" ? result() : result;
   };
   const email = {
@@ -47,7 +48,7 @@ function harness() {
     attemptVerification: (params) => invoke("verify", params, () => ({ ...email, verification: { status: "verified" } })),
   };
   const user = {
-    username: "original", passwordEnabled: true,
+    id: "user_fixture", username: "original", passwordEnabled: true,
     update: (params) => invoke(params.username ? "username" : "primary", params, user),
     createEmailAddress: (params) => invoke("create", params, email),
     updatePassword: (params) => invoke("password", params, user),
@@ -67,15 +68,24 @@ function harness() {
       return slots[index];
     },
     useReverification: (operation) => async (...args) => {
-      try { return await operation(...args); }
-      catch (error) {
-        if (error.errors?.[0]?.code !== "session_reverification_required") throw error;
+      // Mirror the installed SDK: both initial and retry errors resolve to a
+      // hint, and only the first hint opens the verification UI.
+      const resolveResult = async () => {
+        try { return await operation(...args); }
+        catch (error) {
+          if (error.errors?.[0]?.code !== "session_reverification_required") throw error;
+          return reverifyHint;
+        }
+      };
+      let result = await resolveResult();
+      if (result === reverifyHint) {
         prompts.push("reverification");
         ask.resolve();
         if (hold) await hold.promise;
         if (cancel) throw new ClerkRuntimeError("Cancelled", { code: "reverification_cancelled" });
-        return operation(...args);
+        result = await resolveResult();
       }
+      return result;
     },
     isReverificationCancelledError,
   });
@@ -85,7 +95,7 @@ function harness() {
   page.setCurrentPassword("fixture-old"); page.setNewPassword("fixture-new");
   return {
     render, calls, prompts, user, email,
-    fail(operation, error = reverifyError) { failures.set(operation, error); },
+    fail(operation, error = reverifyError, count = 1) { failures.set(operation, Array(count).fill(error)); },
     cancel(value = true) { cancel = value; },
     holdPrompt() { hold = deferred(); return { reached: ask.promise, release: hold.resolve }; },
     count(operation) { return calls.filter((call) => call.operation === operation).length; },
@@ -139,6 +149,23 @@ for (const action of actions) {
     await h.render()[action.handler](event);
     assert.equal(h.render()[action.status], action.success);
     if (action.operation === "primary") assert.equal(h.count("verify"), 1, "cancelled promotion preserves the verified address");
+  });
+  test(`${action.name}: another reverification-required response never claims success`, async () => {
+    const h = await prepare(action);
+    h.fail(action.operation, reverifyError, 2);
+    await h.render()[action.handler](event);
+    assert.equal(h.count(action.operation), 2);
+    assert.equal(h.prompts.length, 1, "no automatic prompt loop");
+    assert.equal(h.count("reload"), 0);
+    assert.equal(h.render()[action.status], "");
+    assert.match(h.render()[action.error], /Could not complete account verification/);
+    assert.equal(h.render().isAccountBusy, false);
+    if (action.operation === "primary") assert.equal(h.render().isEmailVerified, true);
+    if (action.operation === "password") assert.equal(h.render().newPassword, "fixture-new");
+    if (action.operation === "create") assert.equal(h.count("prepare"), 0);
+    await h.render()[action.handler](event);
+    assert.equal(h.render()[action.status], action.success);
+    if (action.operation === "primary") assert.equal(h.count("verify"), 1);
   });
   test(`${action.name}: ordinary Clerk failures remain visible and are not retried`, async () => {
     const h = await prepare(action);
