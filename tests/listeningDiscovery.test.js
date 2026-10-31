@@ -69,3 +69,26 @@ test("provider failures preserve local suggestions and signal incomplete discove
   assert.equal(evidence.sharedTrackCount, 2);
   assert.equal("approved" in result, false);
 });
+
+test("discovery reports candidate truncation separately from provider incompleteness", async () => {
+  const rows = Array.from({ length: 7 }, (_, index) => ({ ...row, albumId: `${String(index).padStart(8, "0")}-cc11-478b-832e-60fc8046d949`, externalReferences: [] }));
+  const service = createDiscoveryService({ baselineForAlbum: async () => null, AlbumCatalog: catalog(rows), musicBrainz: { searchReleaseGroups: async () => [] } });
+  const result = await service.discover({ artist: "Artist", album: "Album" });
+  assert.equal(result.candidates.length, 5);
+  assert.equal(result.incomplete, false);
+  assert.equal(result.evidence[0].candidatesFound, 7);
+  assert.equal(result.evidence[0].candidatesShown, 5);
+  assert.equal(result.evidence[0].candidateLimitReached, true);
+  const single = await createDiscoveryService({ baselineForAlbum: async () => null, AlbumCatalog: catalog([row]), musicBrainz: { searchReleaseGroups: async () => [] } }).discover({ artist: "Artist", album: "Album" });
+  assert.equal(single.evidence[0].candidateLimitReached, false);
+});
+
+test("only a full page of relevant search hits counts as a reached limit", async () => {
+  const discover = (title) => createDiscoveryService({ baselineForAlbum: async () => null, AlbumCatalog: catalog([row]), musicBrainz: { searchReleaseGroups: async () => Array.from({ length: 5 }, (_, index) => ({ externalId: `${index}1223344-5566-7788-99aa-bbccddeeff00`, title, artistDisplayName: "Artist" })) } }).discover({ artist: "Artist", album: "Album" });
+  const unrelated = await discover("Other");
+  assert.equal(unrelated.evidence[0].candidateLimitReached, false);
+  const relevant = await discover("Album");
+  assert.equal(relevant.evidence[0].candidatesFound, 1);
+  assert.equal(relevant.evidence[0].candidateLimitReached, true);
+  assert.equal(relevant.evidence[0].candidateQueryLimitReached, true);
+});

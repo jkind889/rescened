@@ -292,14 +292,18 @@ test("recommendation prefers the release group's original year and digital or CD
   assert.equal(result.candidate.releaseMbid, RELEASE_THREE);
 });
 
-test('recommendation is ambiguous only when an equally ranked release has a different track count', async () => {
+test('recommendation is ambiguous only when an equally ranked release has a different ordered tracklist', async () => {
   const same = [
     browseRelease(RELEASE_ONE, { date: '2020-01-01', media: digital, 'release-group': group('2020-01-01') }),
     browseRelease(RELEASE_TWO, { date: '2020-02-01', media: digital, 'release-group': group('2020-01-01') }),
   ];
-  assert.equal((await recommendationClient(same).recommend(GROUP, { title: 'Album' })).ambiguous, false);
-  const differing = [same[0], browseRelease(RELEASE_TWO, { date: '2020-02-01', media: [{ position: 1, format: 'Digital Media', 'track-count': 3 }], 'release-group': group('2020-01-01') })];
-  assert.equal((await recommendationClient(differing).recommend(GROUP, { title: 'Album' })).ambiguous, true);
+  const equivalent = await recommendationClient(same).recommend(GROUP, { title: 'Album' });
+  assert.equal(equivalent.ambiguous, false);
+  assert.equal(equivalent.comparisons[0].equivalent, true);
+  const longer = [rawTrack(1, TRACK_ONE, RECORDING_ONE), rawTrack(2, TRACK_TWO, RECORDING_TWO), rawTrack(3, TRACK_THREE, RECORDING_THREE)];
+  const differing = await tracklistClient(same, { [RELEASE_TWO]: longer }).recommend(GROUP, { title: 'Album' });
+  assert.equal(differing.ambiguous, true);
+  assert.deepEqual(differing.comparisons[0].added.map((track) => track.recordingMbid), [RECORDING_THREE]);
 });
 
 test('invalid complete-release responses are not cached and empty pages cannot loop', async () => {
@@ -338,4 +342,134 @@ test('recommendation preserves malformed-page warnings and rejects invalid calen
   assert.equal(result.incomplete, true);
   assert.equal(result.candidate.date, '');
   assert.equal(result.items[0].date, '');
+});
+
+const TRACK_THREE = '99999999-9999-4999-8999-999999999999';
+const TRACK_FOUR = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const RECORDING_THREE = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const RELEASE_SIX = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+// Hydrates each release with its own tracks so tests can vary recordings at equal track counts.
+function tracklistClient(releases, tracksById = {}, { fail = {} } = {}) {
+  return client(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/release')) return response({ 'release-count': releases.length, releases });
+    const id = parsed.pathname.split('/').at(-1);
+    if (fail[id]) return response({ error: 'gone' }, fail[id]);
+    const tracks = tracksById[id];
+    return response(rawRelease(id, tracks ? { media: [{ position: 1, format: 'Digital Media', 'track-count': tracks.length, tracks }] } : {}));
+  });
+}
+
+test('recommendation reports equally ranked releases left uninspected by the lookup cap', async () => {
+  const releases = [RELEASE_ONE, RELEASE_TWO, RELEASE_THREE, RELEASE_SIX].map((id) => browseRelease(id, { media: digital, 'release-group': group('2020-01-01') }));
+  const result = await tracklistClient(releases).recommend(GROUP, { title: 'Album' });
+  assert.equal(result.coverage.browse.complete, true);
+  assert.equal(result.coverage.hydration.complete, false);
+  assert.equal(result.coverage.hydration.competing, 4);
+  assert.deepEqual(result.coverage.hydration.inspected, [RELEASE_ONE, RELEASE_TWO, RELEASE_THREE]);
+  assert.deepEqual(result.coverage.hydration.uninspected, [RELEASE_SIX]);
+  assert.equal(result.incomplete, true);
+  assert.equal(result.ambiguous, false);
+  assert.match(result.rationale, /1 equally ranked release was not compared/);
+});
+
+test('equal-length releases with different recordings are ambiguous, including repeated recordings', async () => {
+  const releases = [RELEASE_ONE, RELEASE_TWO].map((id) => browseRelease(id, { media: digital, 'release-group': group('2020-01-01') }));
+  const repeatedFirst = [rawTrack(1, TRACK_ONE, RECORDING_ONE), rawTrack(2, TRACK_TWO, RECORDING_TWO), rawTrack(3, TRACK_THREE, RECORDING_ONE)];
+  const repeatedSecond = [rawTrack(1, TRACK_ONE, RECORDING_ONE), rawTrack(2, TRACK_TWO, RECORDING_TWO), rawTrack(3, TRACK_FOUR, RECORDING_TWO)];
+  const result = await tracklistClient(releases, { [RELEASE_ONE]: repeatedFirst, [RELEASE_TWO]: repeatedSecond }).recommend(GROUP, { title: 'Album' });
+  assert.equal(result.candidate.tracks.length, 3);
+  assert.equal(result.comparisons[0].trackCount, 3);
+  assert.equal(result.comparisons[0].equivalent, false);
+  assert.equal(result.comparisons[0].substituted.length, 1);
+  assert.equal(result.ambiguous, true);
+  assert.equal(result.coverage.hydration.complete, true);
+});
+
+test('failed hydration is recorded per release and keeps the recommendation incomplete', async () => {
+  const releases = [RELEASE_ONE, RELEASE_TWO].map((id) => browseRelease(id, { media: digital, 'release-group': group('2020-01-01') }));
+  const result = await tracklistClient(releases, {}, { fail: { [RELEASE_TWO]: 404 } }).recommend(GROUP, { title: 'Album' });
+  assert.equal(result.candidate.releaseMbid, RELEASE_ONE);
+  assert.deepEqual(result.coverage.hydration.failed, [{ releaseMbid: RELEASE_TWO, code: 'MUSICBRAINZ_NOT_FOUND' }]);
+  assert.deepEqual(result.comparisons, []);
+  assert.equal(result.incomplete, true);
+});
+
+test('lower-ranked hydrated releases are kept as non-competing comparisons', async () => {
+  const releases = [
+    browseRelease(RELEASE_ONE, { media: digital, 'release-group': group('2020-01-01') }),
+    browseRelease(RELEASE_SIX, { title: 'Album (Deluxe Edition)', media: digital, 'release-group': group('2020-01-01') }),
+  ];
+  const deluxe = [rawTrack(1, TRACK_ONE, RECORDING_ONE), rawTrack(2, TRACK_TWO, RECORDING_TWO), rawTrack(3, TRACK_THREE, RECORDING_THREE)];
+  const result = await tracklistClient(releases, { [RELEASE_SIX]: deluxe }).recommend(GROUP, { title: 'Album' });
+  assert.equal(result.candidate.releaseMbid, RELEASE_ONE);
+  assert.equal(result.comparisons[0].competing, false);
+  assert.equal(result.ambiguous, false);
+  assert.equal(result.incomplete, false);
+  assert.equal(result.coverage.hydration.complete, true);
+});
+
+test('a competitor that fails to load still makes a differing listed track count ambiguous', async () => {
+  const releases = [
+    browseRelease(RELEASE_ONE, { media: digital, 'release-group': group('2020-01-01') }),
+    browseRelease(RELEASE_TWO, { media: [{ position: 1, format: 'Digital Media', 'track-count': 14 }], 'release-group': group('2020-01-01') }),
+  ];
+  const result = await tracklistClient(releases, {}, { fail: { [RELEASE_TWO]: 404 } }).recommend(GROUP, { title: 'Album' });
+  assert.equal(result.ambiguous, true);
+  assert.equal(result.incomplete, true);
+});
+
+test('an uninspected competitor with a differing listed track count is ambiguous', async () => {
+  const releases = [RELEASE_ONE, RELEASE_TWO, RELEASE_THREE].map((id) => browseRelease(id, { media: digital, 'release-group': group('2020-01-01') }));
+  releases.push(browseRelease(RELEASE_SIX, { media: [{ position: 1, format: 'Digital Media', 'track-count': 14 }], 'release-group': group('2020-01-01') }));
+  const result = await tracklistClient(releases).recommend(GROUP, { title: 'Album' });
+  assert.deepEqual(result.coverage.hydration.uninspected, [RELEASE_SIX]);
+  assert.equal(result.ambiguous, true);
+});
+
+test('a rate limit stops hydration and leaves later competitors uninspected', async () => {
+  const releases = [RELEASE_ONE, RELEASE_TWO, RELEASE_THREE].map((id) => browseRelease(id, { media: digital, 'release-group': group('2020-01-01') }));
+  const result = await tracklistClient(releases, {}, { fail: { [RELEASE_TWO]: 429 } }).recommend(GROUP, { title: 'Album' });
+  assert.deepEqual(result.coverage.hydration.failed, [{ releaseMbid: RELEASE_TWO, code: 'MUSICBRAINZ_RATE_LIMITED' }]);
+  assert.deepEqual(result.coverage.hydration.uninspected, [RELEASE_THREE]);
+  assert.equal(result.incomplete, true);
+});
+
+test('a release from another group is recorded as a failed lookup', async () => {
+  const releases = [RELEASE_ONE, RELEASE_TWO].map((id) => browseRelease(id, { media: digital, 'release-group': group('2020-01-01') }));
+  const api = client(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/release')) return response({ 'release-count': releases.length, releases });
+    const id = parsed.pathname.split('/').at(-1);
+    return response(rawRelease(id, id === RELEASE_TWO ? { 'release-group': { id: RELEASE_SIX } } : {}));
+  });
+  const result = await api.recommend(GROUP, { title: 'Album' });
+  assert.deepEqual(result.coverage.hydration.failed, [{ releaseMbid: RELEASE_TWO, code: 'RELEASE_GROUP_MISMATCH' }]);
+});
+
+test('duplicate browse rows are hydrated once and never compared with themselves', async () => {
+  const release = browseRelease(RELEASE_ONE, { media: digital, 'release-group': group('2020-01-01') });
+  const result = await tracklistClient([release, release]).recommend(GROUP, { title: 'Album' });
+  assert.deepEqual(result.coverage.hydration.inspected, [RELEASE_ONE]);
+  assert.deepEqual(result.comparisons, []);
+  assert.equal(result.coverage.browse.listed, 1);
+});
+
+test('a different disc layout makes an equally ranked release ambiguous', async () => {
+  const releases = [RELEASE_ONE, RELEASE_TWO].map((id) => browseRelease(id, { media: digital, 'release-group': group('2020-01-01') }));
+  const api = client(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/release')) return response({ 'release-count': releases.length, releases });
+    const id = parsed.pathname.split('/').at(-1);
+    if (id !== RELEASE_TWO) return response(rawRelease(id));
+    return response(rawRelease(id, { media: [
+      { position: 1, format: 'CD', 'track-count': 1, tracks: [rawTrack(1, TRACK_ONE, RECORDING_ONE)] },
+      { position: 2, format: 'CD', 'track-count': 1, tracks: [rawTrack(1, TRACK_TWO, RECORDING_TWO)] },
+    ] }));
+  });
+  const result = await api.recommend(GROUP, { title: 'Album' });
+  assert.equal(result.comparisons[0].discLayoutDiffers, true);
+  assert.deepEqual(result.comparisons[0].discs, { base: [2], other: [1, 1] });
+  assert.equal(result.ambiguous, true);
 });
