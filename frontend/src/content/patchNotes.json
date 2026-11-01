@@ -1,5 +1,16 @@
 [
   {
+    "id": "album-mapping-rediscovery",
+    "date": "2026-11-01",
+    "title": "New albums reach the mapping queue",
+    "summary": "When an album joins the catalog, unmatched Last.fm album names come back to moderators with it suggested.",
+    "changes": [
+      "Album names from Last.fm that had no match in the catalog are checked again when a matching album is added, whether it comes from a community suggestion or a catalog import.",
+      "A deluxe or expanded edition name, like \"(Deluxe Edition)\", also matches the album without the label.",
+      "Moderators see the new album as a suggested match in the album mapping queue instead of searching for it. Listens are logged once the match is approved."
+    ]
+  },
+  {
     "id": "link-previews",
     "date": "2026-10-30",
     "title": "Better link previews",
