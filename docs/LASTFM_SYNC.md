@@ -125,6 +125,21 @@ The report scans audit collections by date without an index, so run it against a
 npm run listening:queue-report -- --environment pilot --days 30
 ```
 
+`listening:measurement` is the read-only snapshot collector for the [deterministic mapping metrics plan](DETERMINISTIC_MAPPING_METRICS_PLAN.md). It reads a versioned exposure manifest and prints aggregates only. Print a blank manifest with `--template`, fill in the verified deployment revisions, activation times (with how each was verified), flags, allowlist scope and frozen windows, then check it offline with `--validate-only`. Validation rejects unknown fields and connection strings. Unverified activation stays `null` and limits the report to prospective claims; `windows: null` means the intake/follow-up windows are not yet confirmed, so no cohort bounds are printed. The manifest's `environment` is a label: verify the database `MONGO_URI` selects separately, without printing it.
+
+```sh
+npm run --silent listening:measurement -- --template > ~/rescened-ops/measurement/manifest.json
+npm run --silent listening:measurement -- --manifest ~/rescened-ops/measurement/manifest.json --validate-only
+npm run --silent listening:measurement -- --manifest ~/rescened-ops/measurement/manifest.json
+```
+
+- `mappingEvidence` is a case-level snapshot of pending mapping evidence. Cases whose discovery predates coverage fields count as unknown coverage, not complete. Problem reasons (provider incompleteness, other failures, candidates retained after a failed refresh, query or candidate caps, candidates bound to an old catalog revision) overlap and are not summed.
+- `demandReadiness` uses the `listening:metrics` name denominator, then partitions the distinct catalog albums those mapped names reach into ready pending, unprepared pending, reviewed, stale, deferred, revoked and unknown. Every partition prints its total and whether it reconciles.
+- `rediscoveryCensus` traverses the whole catalog to list every case/album pair the versioned rediscovery matcher accepts now, then classifies each pair's catalog job (not enqueued, queued, retrying, running, done without error, terminal error) and whether the album is already a usable candidate. `doneWithoutError` includes safe skips. Catalog jobs whose pair left the cohort are counted by exit reason.
+- Snapshot sections are not windowed outcomes. Reach, candidate gain and delay by follow-up window need discovery-attempt and eligibility records the worker does not write yet, and baseline recommendation coverage is not persisted, so the report lists these as limitations.
+
+The collector reads projected pages of 500 records, at most 10,000 records in total, with a 5-second server time limit per query and a 60-second wall budget. It never retries. If a budget runs out, that section and every later one report `collected: false` with the reason, and `collection.complete` is false; a partial cohort is never printed. It fails if output would contain a record identifier. Run it against a replica or off-peak, at most once per environment per day, and keep manifests and outputs outside the repository with the manifest checksum each report prints.
+
 Normal checks remain offline:
 
 ```sh
