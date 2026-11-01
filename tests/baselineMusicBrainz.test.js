@@ -454,6 +454,45 @@ test('duplicate browse rows are hydrated once and never compared with themselves
   assert.deepEqual(result.coverage.hydration.inspected, [RELEASE_ONE]);
   assert.deepEqual(result.comparisons, []);
   assert.equal(result.coverage.browse.listed, 1);
+  assert.equal(result.coverage.browse.complete, false);
+  assert.equal(result.incomplete, true);
+});
+
+test('overlapping browse pages cannot imply complete coverage from consumed row counts', async () => {
+  const releases = Array.from({ length: 50 }, (_, index) => browseRelease(`${String(index + 1).padStart(8, '0')}-1111-4111-8111-111111111111`, { status: index < 3 ? 'Official' : 'Promotion' }));
+  const offsets = [];
+  const api = client(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/release')) {
+      const offset = Number(parsed.searchParams.get('offset'));
+      offsets.push(offset);
+      return response({ 'release-count': 51, releases: offset === 0 ? releases : [releases[0]] });
+    }
+    return response(rawRelease(parsed.pathname.split('/').at(-1)));
+  });
+  const result = await api.recommend(GROUP, { title: 'Album' });
+  assert.deepEqual(offsets, [0, 50]);
+  assert.equal(result.nextOffset, null);
+  assert.deepEqual(result.coverage.browse, { complete: false, listed: 50, total: 51 });
+  assert.equal(result.coverage.hydration.complete, true);
+  assert.equal(result.incomplete, true);
+  assert.equal(result.ambiguous, false);
+});
+
+test('changing browse totals remain incomplete even when the final unique count matches', async () => {
+  const releases = Array.from({ length: 50 }, (_, index) => browseRelease(`${String(index + 1).padStart(8, '0')}-1111-4111-8111-111111111111`, { status: index < 3 ? 'Official' : 'Promotion' }));
+  const api = client(async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/release')) {
+      return response(parsed.searchParams.get('offset') === '0'
+        ? { 'release-count': 51, releases }
+        : { 'release-count': 50, releases: [] });
+    }
+    return response(rawRelease(parsed.pathname.split('/').at(-1)));
+  });
+  const result = await api.recommend(GROUP, { title: 'Album' });
+  assert.deepEqual(result.coverage.browse, { complete: false, listed: 50, total: 50 });
+  assert.equal(result.incomplete, true);
 });
 
 test('a different disc layout makes an equally ranked release ambiguous', async () => {

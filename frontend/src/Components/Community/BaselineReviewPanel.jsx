@@ -81,7 +81,7 @@ function coverageWarnings(coverage, incomplete) {
   const warnings = [];
   const { browse = {}, hydration = {} } = coverage;
   if (browse.complete === false) {
-    warnings.push(Number.isSafeInteger(browse.total) ? `Listed ${browse.listed} of ${browse.total} releases.` : "The release list is incomplete.");
+    warnings.push(Number.isSafeInteger(browse.total) ? `The release list is incomplete. Listed ${browse.listed} of ${browse.total} releases.` : "The release list is incomplete.");
   }
   if (hydration.uninspected?.length) warnings.push(`${plural(hydration.uninspected.length, "equally ranked release was", "equally ranked releases were")} not compared.`);
   if (hydration.failed?.length) warnings.push(`${plural(hydration.failed.length, "release", "releases")} could not be loaded.`);
