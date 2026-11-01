@@ -69,3 +69,44 @@ test("provider failures preserve local suggestions and signal incomplete discove
   assert.equal(evidence.sharedTrackCount, 2);
   assert.equal("approved" in result, false);
 });
+
+test("discovery reports candidate truncation separately from provider incompleteness", async () => {
+  const rows = Array.from({ length: 7 }, (_, index) => ({ ...row, albumId: `${String(index).padStart(8, "0")}-cc11-478b-832e-60fc8046d949`, externalReferences: [] }));
+  const service = createDiscoveryService({ baselineForAlbum: async () => null, AlbumCatalog: catalog(rows), musicBrainz: { searchReleaseGroups: async () => [] } });
+  const result = await service.discover({ artist: "Artist", album: "Album" });
+  assert.equal(result.candidates.length, 5);
+  assert.equal(result.incomplete, false);
+  assert.equal(result.evidence[0].candidatesFound, 7);
+  assert.equal(result.evidence[0].candidatesShown, 5);
+  assert.equal(result.evidence[0].candidateLimitReached, true);
+  const single = await createDiscoveryService({ baselineForAlbum: async () => null, AlbumCatalog: catalog([row]), musicBrainz: { searchReleaseGroups: async () => [] } }).discover({ artist: "Artist", album: "Album" });
+  assert.equal(single.evidence[0].candidateLimitReached, false);
+});
+
+test("full search pages report the cap regardless of hit relevance", async () => {
+  const discover = (title) => createDiscoveryService({ baselineForAlbum: async () => null, AlbumCatalog: catalog([row]), musicBrainz: { searchReleaseGroups: async () => Array.from({ length: 5 }, (_, index) => ({ externalId: `${index}1223344-5566-7788-99aa-bbccddeeff00`, title, artistDisplayName: "Artist" })) } }).discover({ artist: "Artist", album: "Album" });
+  const unrelated = await discover("Other");
+  assert.equal(unrelated.evidence[0].candidateLimitReached, true);
+  assert.equal(unrelated.evidence[0].candidateQueryLimitReached, true);
+  const relevant = await discover("Album");
+  assert.equal(relevant.evidence[0].candidatesFound, 1);
+  assert.equal(relevant.evidence[0].candidateLimitReached, true);
+  assert.equal(relevant.evidence[0].candidateQueryLimitReached, true);
+});
+
+test("a mixed capped search warns when a sixth hit would find the only local candidate", async () => {
+  const remote = Array.from({ length: 6 }, (_, index) => ({ externalId: index === 5 ? group : `9000000${index}-5566-4788-89aa-bbccddeeff00`, title: index === 4 ? "Other" : "Album", artistDisplayName: "Artist" }));
+  const local = { ...row, title: "原題" };
+  const discover = (hits) => createDiscoveryService({
+    AlbumCatalog: catalog([local]), baselineForAlbum: async () => null,
+    musicBrainz: { searchReleaseGroups: async (_, limit) => { assert.equal(limit, 5); return hits; } },
+  }).discover({ artist: "Artist", album: "Album" });
+  const capped = await discover(remote.slice(0, 5));
+  assert.equal(capped.candidates.length, 0);
+  assert.equal(capped.incomplete, false); // Keep the existing candidate-snapshot persistence policy.
+  assert.equal(capped.evidence[0].candidateLimitReached, true);
+  assert.equal(capped.evidence[0].candidateQueryLimitReached, true);
+  const found = await discover([remote[5]]);
+  assert.deepEqual(found.candidates.map((item) => item.albumId), [local.albumId]);
+  assert.equal(found.evidence[0].candidateLimitReached, false);
+});

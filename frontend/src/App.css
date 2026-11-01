@@ -10342,6 +10342,17 @@ label.moderation-candidate-choice {
   line-height: 1.55;
 }
 
+.mapping-warning {
+  margin: 0;
+  border-left: 2px solid #c99a24;
+  border-radius: 0.55rem;
+  padding: 0.55rem 0.7rem;
+  background: color-mix(in srgb, #c99a24 12%, var(--app-surface));
+  color: var(--app-text);
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+
 .mapping-candidate-list {
   display: grid;
   gap: 0.5rem;
