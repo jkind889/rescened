@@ -88,7 +88,7 @@ async function mappingDecisions(Listening, since) {
     if (shape.singleVerified && albumId === shape.topAlbumId) approvals.singleVerifiedCandidate += 1;
     if (shape.editionLabel) approvals.editionLabel += 1;
   }
-  return { ...result, firstDecisionSeconds: percentiles(waits), approvals };
+  return { ...result, firstDecisionSeconds: percentiles(waits), approvalCandidateBasis: "latest_stored_discovery", approvals };
 }
 
 async function baselineDecisions(Baselines, since) {
@@ -117,6 +117,19 @@ async function baselineDecisions(Baselines, since) {
   return { ...result, queued: { ...queue, decisionSeconds: percentiles(waits) } };
 }
 
+async function catalogRediscoveryJobs(Job) {
+  const rows = await Job.aggregate([
+    { $match: { type: "discovery", "payload.catalogAlbumId": { $exists: true } } },
+    { $group: { _id: { status: "$status", failed: { $ne: ["$error", ""] } }, count: { $sum: 1 } } },
+  ]);
+  const result = { pending: 0, running: 0, completed: 0, failed: 0 };
+  for (const row of rows) {
+    const key = row._id.status === "done" ? (row._id.failed ? "failed" : "completed") : row._id.status;
+    if (Object.hasOwn(result, key)) result[key] += row.count;
+  }
+  return result;
+}
+
 async function collectQueueReport({ now = new Date(), days = 30, Listening = require("../models/Listening"), Baselines = require("../models/AlbumBaseline"), reviewStatusCounts = () => require("../lib/baselines/service").reviewStatusCounts() } = {}) {
   const since = new Date(now.getTime() - days * DAY_MS);
   const fields = "createdAt listenerCount encounterCount candidates evidence discoveryError";
@@ -129,6 +142,7 @@ async function collectQueueReport({ now = new Date(), days = 30, Listening = req
     mappingQueue: mappingQueue(pending, now),
     noCatalogMatch: unmatched(noCatalogMatch),
     mappingDecisions: await mappingDecisions(Listening, since),
+    catalogRediscoveryJobs: await catalogRediscoveryJobs(Listening.Job),
     baselineQueue: await reviewStatusCounts(),
     baselineDecisions: await baselineDecisions(Baselines, since),
   };

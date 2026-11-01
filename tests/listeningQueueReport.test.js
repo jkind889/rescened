@@ -65,7 +65,7 @@ function fixtures() {
     { targetKind: "albums", targetId: "b7", action: "confirm", createdAt: ago(40), details: { releaseMbid: "r9" } },
   ];
   return {
-    Listening: { MappingCase: model(cases), MappingAudit: model(mappingAudits) },
+    Listening: { MappingCase: model(cases), MappingAudit: model(mappingAudits), Job: { aggregate: async () => [] } },
     Baselines: { Audit: model(baselineAudits) },
     reviewStatusCounts: async () => ({ albums: { pending: 4 }, submissions: { pending: 1 } }),
   };
@@ -107,7 +107,7 @@ test("baseline decisions compare confirmed releases with the queued recommendati
 });
 
 test("an empty database reports zero counts and null durations", async () => {
-  const empty = { Listening: { MappingCase: model([]), MappingAudit: model([]) }, Baselines: { Audit: model([]) }, reviewStatusCounts: async () => ({}) };
+  const empty = { Listening: { MappingCase: model([]), MappingAudit: model([]), Job: { aggregate: async () => [] } }, Baselines: { Audit: model([]) }, reviewStatusCounts: async () => ({}) };
   const report = await collectQueueReport({ now, days: 7, ...empty });
   assert.equal(report.mappingQueue.pending, 0);
   assert.deepEqual(report.mappingQueue.ageSeconds, { count: 0, p50: null, p90: null, max: null });
@@ -129,4 +129,17 @@ test("percentiles use nearest rank and arguments are validated", () => {
   for (const argv of [[], ["--environment"], ["--environment", "a b"], ["--environment", "dev", "--days", "0"], ["--environment", "dev", "--days", "400"], ["--environment", "dev", "--extra", "1"], ["--environment", "dev", "--environment", "prod"]]) {
     assert.throws(() => parseArgs(argv), /Usage/);
   }
+});
+
+
+test("report labels current candidate comparisons and counts terminal catalog failures without identifiers", async () => {
+  const data = fixtures();
+  data.Listening.Job.aggregate = async () => [
+    { _id: { status: "pending", failed: true }, count: 2 },
+    { _id: { status: "done", failed: true }, count: 3 },
+    { _id: { status: "done", failed: false }, count: 5 },
+  ];
+  const report = await collectQueueReport({ now, ...data });
+  assert.equal(report.mappingDecisions.approvalCandidateBasis, "latest_stored_discovery");
+  assert.deepEqual(report.catalogRediscoveryJobs, { pending: 2, running: 0, completed: 5, failed: 3 });
 });

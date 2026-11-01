@@ -103,13 +103,9 @@ const mappingCaseSchema = new mongoose.Schema({
   evidenceHash: { type: String, default: "" },
   discoveryError: { type: String, default: "" },
   refreshedAt: { type: Date, default: null },
-  // Last complete discovery. refreshedAt also moves on refresh requests, failures and incomplete runs.
-  discoveredAt: { type: Date, default: null },
-  // Newest catalog album matching this name; a later complete discovery has seen it.
-  catalogChangedAt: { type: Date, default: null },
-  // Retries of a failed or incomplete rerun since catalogChangedAt last moved.
-  catalogRetries: { type: Number, min: 0, default: 0 },
 }, { timestamps: true });
+// Bounded catalog rediscovery scans one artist and resumes by immutable internal ID.
+mappingCaseSchema.index({ artistKey: 1, status: 1, _id: 1 });
 mappingCaseSchema.index({ status: 1, encounterCount: -1, updatedAt: 1 });
 // The moderator queue ranks albums heard by the most listeners first.
 mappingCaseSchema.index({ status: 1, listenerCount: -1, encounterCount: -1, updatedAt: 1 });
@@ -161,8 +157,18 @@ const jobSchema = new mongoose.Schema({
   error: { type: String, default: "" },
 }, { timestamps: true });
 jobSchema.index({ status: 1, runAt: 1, leaseUntil: 1 });
+// Bound the active catalog backlog without scanning historical discovery jobs.
+jobSchema.index({ type: 1, status: 1 }, { partialFilterExpression: { "payload.catalogAlbumId": { $exists: true } } });
 // Connection cleanup retires that connection's other jobs.
 jobSchema.index({ "payload.connectionId": 1 }, { sparse: true });
+
+// A single leased scanner owns the bounded recent/full cursors. Jobs are independently leased.
+const catalogScanSchema = new mongoose.Schema({
+  key: { type: String, required: true, unique: true, immutable: true },
+  state: { type: mongoose.Schema.Types.Mixed, default: {} },
+  leaseUntil: { type: Date, default: null },
+  leaseToken: { type: String, default: "" },
+}, { timestamps: true });
 
 // Private detected sessions. Never serialized into public activity.
 const DETECTION_HOLDS = ["sync_incomplete", "stale_baseline", "stale_mapping", "stale_rule", "evidence_expired", "reconciliation_required"];
@@ -263,6 +269,7 @@ module.exports = {
   AlbumMapping: model("ListeningAlbumMapping", albumMappingSchema),
   MappingAudit: model("ListeningMappingAudit", mappingAuditSchema),
   Job: model("ListeningJob", jobSchema),
+  CatalogScan: model("ListeningCatalogScan", catalogScanSchema),
   Detection: model("ListeningDetection", detectionSchema),
   DetectionEvidence: model("ListeningDetectionEvidence", detectionEvidenceSchema),
   ProviderBudget: model("ListeningProviderBudget", providerBudgetSchema),

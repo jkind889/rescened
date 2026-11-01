@@ -5,7 +5,7 @@ const mongoose = require("mongoose");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const Listen = require("../models/Listen");
-const { Connection, Scrobble, MappingCase, AlbumMapping, Job, ProviderBudget } = require("../models/Listening");
+const { Connection, Scrobble, MappingCase, AlbumMapping, Job, CatalogScan, ProviderBudget } = require("../models/Listening");
 const { enqueueJob, persistPage, runWorkerOnce, scheduleCatalogRediscoveryJobs, scheduleDueSyncJobs, scheduleStaleMappingJobs, RETENTION_MS } = require("../lib/listening/worker");
 const { mappingKey, normalize } = require("../lib/listening/common");
 const { createLastfmProvider } = require("../lib/listening/provider");
@@ -17,7 +17,7 @@ let replSet;
 async function setup() {
   replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(replSet.getUri(), { dbName: "rescened_listening_worker" });
-  await Promise.all([Connection.syncIndexes(), Scrobble.syncIndexes(), MappingCase.syncIndexes(), AlbumMapping.syncIndexes(), Job.syncIndexes(), ProviderBudget.syncIndexes(), AlbumCatalog.syncIndexes()]);
+  await Promise.all([Connection.syncIndexes(), Scrobble.syncIndexes(), MappingCase.syncIndexes(), AlbumMapping.syncIndexes(), Job.syncIndexes(), CatalogScan.syncIndexes(), ProviderBudget.syncIndexes(), AlbumCatalog.syncIndexes()]);
 }
 async function teardown() {
   if (mongoose.connection.readyState === 1) { await mongoose.connection.dropDatabase(); await mongoose.disconnect(); }
@@ -390,63 +390,84 @@ test("listening worker MongoDB integration", { skip: !enabled }, async (t) => {
     assert.equal(await scheduleStaleMappingJobs({ clock: () => new Date("2026-09-26T14:00:00Z") }), 0);
   });
 
-  await t.test("a new catalog album sends matching unresolved cases back through discovery until one completes", async () => {
+  await t.test("catalog observations are durable, status-filtered and idempotent across overlapping scans", async () => {
     await reset();
     const openCase = (album, status, fields = {}) => MappingCase.create({
-      key: mappingKey(fields.artist || "Artist", album), provider: "lastfm", artist: fields.artist || "Artist", album, artistKey: normalize(fields.artist || "Artist"), albumKey: normalize(album),
-      status, revision: 1, encounterCount: 1, listenerCount: 1, candidates: [], evidence: [], evidenceHash: "empty", refreshedAt: new Date(Date.now() - 86_400_000), ...fields,
+      key: mappingKey(fields.artist || "Artist", album), artist: fields.artist || "Artist", album,
+      artistKey: normalize(fields.artist || "Artist"), albumKey: normalize(album), status,
+      revision: 1, encounterCount: 1, listenerCount: 1, candidates: [], evidence: [], evidenceHash: "empty", ...fields,
     });
     const unmatched = await openCase("Born To Die", "no_catalog_match");
     const deluxe = await openCase("Born To Die (Deluxe Edition)", "pending");
     await openCase("Born To Die (Expanded Edition)", "approved");
+    await openCase("Born To Die (Bonus Track Version)", "rejected");
     await openCase("Born To Die", "no_catalog_match", { artist: "Other Artist" });
-    const seen = await openCase("Born To Die (Bonus Track Version)", "no_catalog_match", { discoveredAt: new Date(Date.now() + 3_600_000) });
-    const albumId = crypto.randomUUID();
-    await AlbumCatalog.create({ albumId, title: "Born to Die", artistDisplayName: "Artist", artistCredits: [{ name: "Artist", role: "main" }], catalogRevision: 1 });
-
-    assert.equal(await scheduleCatalogRediscoveryJobs({ env: { LASTFM_DISCOVERY_ENABLED: "false" }, state: {} }), 0);
-    const state = {};
+    const album = await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Born to Die", artistDisplayName: "Artist", catalogRevision: 1 });
     const env = { LASTFM_DISCOVERY_ENABLED: "true" };
-    assert.equal(await scheduleCatalogRediscoveryJobs({ env, state }), 2);
-    assert.deepEqual((await Job.find({ type: "discovery" }).lean()).map((job) => job.payload.caseId).sort(), [unmatched.caseId, deluxe.caseId].sort());
-    assert.ok((await MappingCase.findOne({ caseId: seen.caseId }).lean()).catalogChangedAt, "a case that already saw the album is marked but not queued");
-    // Overlapping scans leave the pending jobs alone.
-    assert.equal(await scheduleCatalogRediscoveryJobs({ env, state }), 2);
+    assert.equal(await scheduleCatalogRediscoveryJobs({ env: {}, state: {} }), 0);
+    await Promise.all([scheduleCatalogRediscoveryJobs({ env, state: {} }), scheduleCatalogRediscoveryJobs({ env, state: {} })]);
     assert.equal(await Job.countDocuments({ type: "discovery" }), 2);
-
-    // Rerun jobs are staggered 15 seconds apart.
+    assert.deepEqual((await Job.find({ type: "discovery" }).lean()).map((job) => job.payload.caseId).sort(), [unmatched.caseId, deluxe.caseId].sort());
     const options = {
       env, provider: {}, types: ["discovery"], clock: () => new Date(Date.now() + 60_000),
-      discovery: { async discover() { return { candidates: [{ albumId, title: "Born to Die", artistDisplayName: "Artist", catalogRevision: 1, evidence: [] }], evidence: [], evidenceHash: "found" }; } },
+      discovery: { async discover() { return { candidates: [{ albumId: album.albumId }], evidence: [], evidenceHash: "found" }; } },
     };
-    await runWorkerOnce(options);
-    await runWorkerOnce(options);
-    const reopened = await MappingCase.findOne({ caseId: unmatched.caseId }).lean();
-    assert.equal(reopened.status, "pending");
-    assert.equal(reopened.candidates[0].albumId, albumId);
-    assert.ok(reopened.discoveredAt >= reopened.catalogChangedAt);
-    assert.equal(await scheduleCatalogRediscoveryJobs({ env, state: {} }), 0, "completed discoveries already saw the album");
+    await runWorkerOnce(options); await runWorkerOnce(options);
+    assert.equal((await MappingCase.findById(unmatched._id)).status, "pending");
+    const before = await Job.find().sort({ key: 1 }).lean();
+    assert.equal(await scheduleCatalogRediscoveryJobs({ env, state: {} }), 0);
+    assert.deepEqual((await Job.find().sort({ key: 1 }).lean()).map((job) => job.updatedAt), before.map((job) => job.updatedAt));
 
-    // A rerun that gave up stays due and is retried once its job has been idle for an hour.
-    const key = `discovery:catalog:${deluxe.caseId}`;
-    await MappingCase.updateOne({ caseId: deluxe.caseId }, { $set: { discoveredAt: null } });
-    await Job.updateOne({ key }, { $set: { status: "done", error: "discovery_incomplete" } });
-    assert.equal(await scheduleCatalogRediscoveryJobs({ env, state }), 1);
-    assert.equal((await Job.findOne({ key }).lean()).status, "done", "a recent failure waits");
-    await Job.collection.updateOne({ key }, { $set: { updatedAt: new Date(Date.now() - 2 * 3_600_000) } });
-    await scheduleCatalogRediscoveryJobs({ env, state });
-    const retried = await Job.findOne({ key }).lean();
-    assert.equal(retried.status, "pending");
-    assert.equal(retried.attempts, 0);
-    assert.equal((await MappingCase.findOne({ caseId: deluxe.caseId }).lean()).catalogRetries, 1);
-    // A name the providers never recognize stops after the retry limit until a newer album matches.
-    await MappingCase.updateOne({ caseId: deluxe.caseId }, { $set: { catalogRetries: 3 } });
-    assert.equal(await scheduleCatalogRediscoveryJobs({ env, state }), 0);
-    await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Born To Die", artistDisplayName: "Artist", artistCredits: [{ name: "Artist", role: "main" }], catalogRevision: 1 });
-    await new Promise((resolve) => setTimeout(resolve, 1_100));
-    await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Born To Die", artistDisplayName: "Artist", artistCredits: [{ name: "Artist", role: "main" }], catalogRevision: 1 });
-    await scheduleCatalogRediscoveryJobs({ env, state: {} });
-    assert.equal((await MappingCase.findOne({ caseId: deluxe.caseId }).lean()).catalogRetries, 0);
+    // A second publication in the same ObjectId second is a distinct observation.
+    const secondId = new mongoose.Types.ObjectId(); secondId.id.writeUInt32BE(album._id.getTimestamp().getTime() / 1_000, 0);
+    await AlbumCatalog.create({ _id: secondId, albumId: crypto.randomUUID(), title: "Born To Die", artistDisplayName: "Artist", catalogRevision: 1 });
+    assert.equal(await scheduleCatalogRediscoveryJobs({ env, state: {} }), 2);
+    // A moderator decision after queueing must survive execution.
+    await MappingCase.updateOne({ _id: unmatched._id }, { $set: { status: "rejected" }, $inc: { revision: 1 } });
+    await runWorkerOnce(options); await runWorkerOnce(options);
+    assert.equal((await MappingCase.findById(unmatched._id)).status, "rejected");
+  });
+
+  await t.test("catalog failures retry hourly through leases and stop after three retries", async () => {
+    await reset();
+    const row = await MappingCase.create({ key: mappingKey("Artist", "Album"), artist: "Artist", album: "Album", artistKey: "artist", albumKey: "album", evidenceHash: "empty" });
+    await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Album", artistDisplayName: "Artist", catalogRevision: 1 });
+    let now = new Date(); const env = { LASTFM_DISCOVERY_ENABLED: "true" }; const state = {};
+    const scan = () => scheduleCatalogRediscoveryJobs({ env, state, clock: () => now });
+    await scan();
+    const options = { env, provider: {}, types: ["discovery"], clock: () => now,
+      discovery: { discover: async () => ({ incomplete: true, candidates: [], evidence: [], evidenceHash: "partial" }) } };
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      assert.equal((await runWorkerOnce(options)).error, "discovery_incomplete");
+      const job = await Job.findOne({ "payload.caseId": row.caseId }).lean();
+      assert.equal(job.attempts, attempt);
+      assert.equal(job.status, attempt === 4 ? "done" : "pending");
+      const updatedAt = job.updatedAt;
+      now = new Date(now.getTime() + 30 * 60_000); await scan();
+      assert.deepEqual((await Job.findById(job._id)).updatedAt, updatedAt);
+      assert.equal((await runWorkerOnce(options)).processed, false);
+      now = new Date(now.getTime() + 30 * 60_000);
+    }
+    assert.equal(await Job.countDocuments(), 1);
+    const report = await require("../scripts/listeningQueueReport").collectQueueReport();
+    assert.equal(report.catalogRediscoveryJobs.failed, 1);
+  });
+
+  await t.test("catalog scan lease persists independent recent and full cursors across calls", async () => {
+    await reset();
+    const albums = await AlbumCatalog.create(Array.from({ length: 30 }, () => ({ albumId: crypto.randomUUID(), title: "Album", artistDisplayName: "Artist", catalogRevision: 1 })));
+    const sorted = albums.sort((a, b) => String(a._id).localeCompare(String(b._id)));
+    const env = { LASTFM_DISCOVERY_ENABLED: "true" };
+    await scheduleCatalogRediscoveryJobs({ env });
+    let checkpoint = await CatalogScan.findOne().lean();
+    assert.equal(String(checkpoint.state.recent.cursor), String(sorted[9]._id));
+    assert.equal(checkpoint.leaseToken, "");
+    await scheduleCatalogRediscoveryJobs({ env });
+    await scheduleCatalogRediscoveryJobs({ env });
+    checkpoint = await CatalogScan.findOne().lean();
+    assert.equal(String(checkpoint.state.recent.cursor), String(sorted[19]._id));
+    assert.equal(String(checkpoint.state.full.cursor), String(sorted[9]._id));
+    assert.equal(await CatalogScan.countDocuments(), 1);
   });
 
   await t.test("sync stays disabled without its flag and owner removal closes ingestion before cleanup", async () => {
