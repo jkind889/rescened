@@ -43,6 +43,9 @@ test('reviewed baseline availability follows confirmation, revocation, and catal
     assert.equal(metrics.baselineReadyNames, 1);
     assert.equal(metrics.baselineUnavailableNames, 0);
     assert.equal(metrics.baselineReviews.albums.reviewed, 1);
+    const report = await require('../scripts/listeningQueueReport').collectQueueReport();
+    assert.equal(report.baselineDecisions.albums.confirm, 1);
+    assert.equal(report.baselineQueue.albums.reviewed, 1);
     const current = await service.detail('albums', album.albumId);
     // A blank reason records the action's standard note.
     await service.performCommand({ kind: 'albums', id: album.albumId, action: 'revoke', actorUserId: 'moderator', body: { expectedRevision: current.revision, expectedTargetRevision: current.target.catalogRevision, reason: '  ', requestId: crypto.randomUUID() } });

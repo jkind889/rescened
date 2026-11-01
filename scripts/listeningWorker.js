@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const mongoose = require("mongoose");
 const ListeningModels = require("../models/Listening");
-const { runWorkerOnce, scheduleDueDetectionJobs, scheduleDueSweepJobs, scheduleDueSyncJobs, scheduleStaleMappingJobs } = require("../lib/listening/worker");
+const { runWorkerOnce, scheduleCatalogRediscoveryJobs, scheduleDueDetectionJobs, scheduleDueSweepJobs, scheduleDueSyncJobs, scheduleStaleMappingJobs } = require("../lib/listening/worker");
 
 const IDLE_DELAY_MS = 5_000;
 const BUSY_DELAY_MS = 250;
@@ -28,7 +28,7 @@ async function main(options = {}) {
   const connect = options.connect || ((uri) => mongoose.connect(uri));
   const disconnect = options.disconnect || (() => mongoose.disconnect());
   const initialize = options.initialize || (() => Promise.all(Object.values(ListeningModels).map((Model) => Model.init())));
-  const schedulers = options.schedulers || [scheduleDueSyncJobs, scheduleDueSweepJobs, scheduleDueDetectionJobs, scheduleStaleMappingJobs];
+  const schedulers = options.schedulers || [scheduleDueSyncJobs, scheduleDueSweepJobs, scheduleDueDetectionJobs, scheduleStaleMappingJobs, scheduleCatalogRediscoveryJobs];
   const runOnce = options.runWorkerOnce || runWorkerOnce;
   const signals = options.signals || process;
 
