@@ -103,6 +103,12 @@ const mappingCaseSchema = new mongoose.Schema({
   evidenceHash: { type: String, default: "" },
   discoveryError: { type: String, default: "" },
   refreshedAt: { type: Date, default: null },
+  // Last complete discovery. refreshedAt also moves on refresh requests, failures and incomplete runs.
+  discoveredAt: { type: Date, default: null },
+  // Newest catalog album matching this name; a later complete discovery has seen it.
+  catalogChangedAt: { type: Date, default: null },
+  // Retries of a failed or incomplete rerun since catalogChangedAt last moved.
+  catalogRetries: { type: Number, min: 0, default: 0 },
 }, { timestamps: true });
 mappingCaseSchema.index({ status: 1, encounterCount: -1, updatedAt: 1 });
 // The moderator queue ranks albums heard by the most listeners first.
