@@ -104,6 +104,20 @@ The apply rechecks all target/case revisions and creates mappings, audit records
 
 `listening:metrics` emits aggregates, not individual names or listening histories. Review sync lag, incomplete windows, deferred jobs/provider errors, unresolved observed names, queue age, revoked mappings, baseline-ready and baseline-unavailable names, and `baselineReviews` status counts ([details](TRACKLIST_BASELINES.md#validation-and-operations)). The coverage denominator is **distinct eligible names observed in retained evidence for active connections**. Its numerator requires an active reviewed mapping with a current existing catalog target. An empty denominator is reported as null coverage.
 
+`listening:queue-report -- --environment NAME [--days N]` is a read-only aggregate report on the mapping and tracklist review queues, for sizing [automated assistance](AI_ASSISTED_MAPPING_PLAN.md#build-order). It prints counts and durations only, with no names, album, release or reviewer IDs. The window defaults to 30 days, and the maximum is 365.
+
+- `mappingQueue` describes pending cases by stored candidates. It counts cases with none, one or several candidates, a verified top candidate, a top candidate with identifier conflicts, and a single clean verified candidate. It also counts cases with an edition-labelled name (for example "Deluxe Edition"), cases whose candidate list hit a cap, and cases whose last discovery failed or was incomplete. Ages are seconds since the case was created, so a case reopened by a revoke or new evidence reports its original age.
+- `noCatalogMatch` counts cases the worker or a moderator closed as having no catalog album, with their listeners and how many have an edition-labelled name. The worker closes these without an audit, so they are read by status rather than by window. Edition-labelled cases here are the missing edition entries.
+- `mappingDecisions` counts moderator decisions in the window; `seededApprovals` counts mapping-seed applies. Worker status changes write no audit and are not counted. `firstDecisionSeconds` times only a case's first decision, so cases decided again after a revoke or seed are not timed. `approvals` compares the approved album with the case's stored candidates. Those candidates come from the last discovery, which a later refresh can replace.
+- `baselineDecisions` counts tracklist commands by target kind. `queued` covers album decisions that followed an enrichment queue entry. Only the first decision after each queue entry counts. It shows whether moderators confirmed the queued release, confirmed a different one, or deferred, and how long that took. Albums never queued by enrichment have no stored recommendation, so they are not included. `replace` changes an already reviewed tracklist; it is not a rejected recommendation.
+- `baselineQueue` repeats the `baselineReviews` status counts from `listening:metrics`.
+
+The report scans audit collections by date without an index, so run it against a replica or off-peak. It needs a database URI the operator names and never writes.
+
+```sh
+npm run listening:queue-report -- --environment pilot --days 30
+```
+
 Normal checks remain offline:
 
 ```sh
