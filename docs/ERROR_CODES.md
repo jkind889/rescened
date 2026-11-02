@@ -689,3 +689,18 @@ The moderator-only `/moderation/album-baselines` API follows the existing `UNAUT
 | `MUSICBRAINZ_RATE_LIMITED` | 503 | MusicBrainz asked the server to slow down; `Retry-After` carries its delay when supplied. |
 
 Provider errors retain bounded error codes without raw responses. Any provider error that carries an upstream delay sets `Retry-After` in seconds. Refresh stale review state before retrying; do not retry automatically from the UI. See [baseline workflow](TRACKLIST_BASELINES.md).
+
+## Review effort timer
+
+The moderator-only `/moderation/review-effort` API follows the existing `UNAUTHORIZED` (401), `MODERATOR_REQUIRED` (403), and rate-limit (429 with `Retry-After`) contracts. See [Last.fm sync monitoring](LASTFM_SYNC.md#monitoring-and-verification).
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `REVIEW_EFFORT_TIMER_DISABLED` | 503 | `REVIEW_EFFORT_TIMER_ENABLED` is off; checked before the rate limit. Status reads still return `{ enabled: false }`. |
+| `REVIEW_EFFORT_OPT_IN_REQUIRED` | 403 | The moderator has not opted in to timing. |
+| `INVALID_REVIEW_EFFORT_REQUEST` | 400 | Unknown field, malformed identifier, kind, outcome, or opt-in value. |
+| `INVALID_REVIEW_EFFORT_INTERVALS` | 400 | Intervals are reversed, overlapping, longer than 4 hours, span over 12 hours, started more than 12 hours ago, or end more than a minute in the future. |
+| `REVIEW_EFFORT_CONFLICT` | 409 | Another moderator already used this `effortId`. |
+| `REVIEW_EFFORT_REQUEST_FAILED` | 500 | Unexpected server failure; no details are returned. |
+
+Review-episode recording never adds an error code: a failed capture or write is logged and leaves the decision's response unchanged.

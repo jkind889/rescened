@@ -10,6 +10,7 @@ import {
 } from "../features/lastfm/lastfm.js";
 import { communityErrorFrom } from "../features/community/community.js";
 import BaselineReviewPanel from "../Components/Community/BaselineReviewPanel.jsx";
+import { useReviewTimer } from "../Components/Community/ReviewTimer.jsx";
 import { candidateCoverageWarning } from "../features/lastfm/mappingCoverage.js";
 
 const STATUS_OPTIONS = [
@@ -116,6 +117,7 @@ export default function AlbumMappings() {
   const [command, setCommand] = useState({ pending: false, error: null, success: "" });
   const [baselineBusy, setBaselineBusy] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
+  const effort = useReviewTimer({ kind: "mapping", targetKind: "cases", targetId: caseId });
 
   const loadQueue = useCallback(async ({ cursor = "", append = false } = {}) => {
     if (!isLoaded || !isSignedIn) {
@@ -259,6 +261,8 @@ export default function AlbumMappings() {
       );
       setDetail(updatedDetail);
       setSelectedAlbumId(updatedDetail?.mapping?.albumId || selectedAlbumId);
+      // Only final decisions end a timed review; refresh and reconfirm keep it running.
+      if (["approve", "reject", "no-catalog-match"].includes(action)) effort.finish(selectedCase.caseId || caseId, selectedCase.revision);
       setCommand({ pending: false, error: null, success: `${ACTIONS.find((item) => item.value === action)?.label || "Decision"} recorded.` });
       setReason("");
       await loadQueue();
@@ -319,7 +323,7 @@ export default function AlbumMappings() {
               <section className="mapping-detail-section"><h3>Provider evidence</h3><Evidence evidence={selectedCase.evidence} /></section>
               {detail?.mapping ? <section className="mapping-detail-section"><h3>Current mapping</h3><p>{candidateLabel(detail.mapping)} · {formatMappingStatus(detail.mapping.status)}</p><p className="mapping-muted">Reviewed catalog revision {detail.mapping.catalogRevision || "unknown"}. Baseline tracklist availability is reviewed separately.</p>{detail.mapping.stale ? <p className="community-message community-message-error" role="status">{detail.mapping.currentCatalogRevision ? `The album changed since review (now catalog revision ${detail.mapping.currentCatalogRevision}), so this mapping resolves no listens. Review the album, then reconfirm it or revoke the mapping.` : "The mapped album is no longer in the catalog, so this mapping resolves no listens. Revoke the mapping."}</p> : null}</section> : null}
               {selectedAlbumId ? <BaselineReviewPanel compact id={selectedAlbumId} kind="albums" onBusyChange={setBaselineBusy} onStateChange={handleBaselineStateChange} target={catalogResults.find((candidate) => candidate.albumId === selectedAlbumId) || candidates.find((candidate) => candidate.albumId === selectedAlbumId) || null} /> : null}
-              <form className="mapping-decision-form" onSubmit={applyAction}><label>Decision<select value={action} onChange={(event) => setAction(event.target.value)}>{ACTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Decision reason <span>optional</span><textarea maxLength={1000} onChange={(event) => setReason(event.target.value)} placeholder="Optional. Leave blank to record a standard note." rows="4" value={reason} /></label>{command.error ? <p className="community-message community-message-error" role="alert">{command.error.message}{command.error.code ? <code>{command.error.code}</code> : null}</p> : null}{command.success ? <p className="community-message community-message-success" role="status">{command.success}</p> : null}<button className="community-primary-button" disabled={command.pending} type="submit">{command.pending ? "Saving decision…" : "Save decision"}</button></form>
+              {effort.panel}<form className="mapping-decision-form" onSubmit={applyAction}><label>Decision<select value={action} onChange={(event) => setAction(event.target.value)}>{ACTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Decision reason <span>optional</span><textarea maxLength={1000} onChange={(event) => setReason(event.target.value)} placeholder="Optional. Leave blank to record a standard note." rows="4" value={reason} /></label>{command.error ? <p className="community-message community-message-error" role="alert">{command.error.message}{command.error.code ? <code>{command.error.code}</code> : null}</p> : null}{command.success ? <p className="community-message community-message-success" role="status">{command.success}</p> : null}<button className="community-primary-button" disabled={command.pending} type="submit">{command.pending ? "Saving decision…" : "Save decision"}</button></form>
               {Array.isArray(detail?.history) && detail.history.length > 0 ? <section className="mapping-detail-section"><h3>Decision history</h3><div className="mapping-history">{detail.history.map((entry, index) => <article key={`${entry.revision || index}-${entry.action || "event"}`}><strong>{formatMappingStatus(entry.action)}</strong><span>{entry.reason || "No reason supplied"}</span><time>{formatLastfmDate(entry.createdAt || entry.at)}</time></article>)}</div></section> : null}
             </div>
           ) : null}

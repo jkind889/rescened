@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const mongoose = require("mongoose");
 const {
-  assertAggregateOnly, cohortWindows, createBudget, followUpStatus, manifestTemplate, observationIntake, partition, ratio, validateManifest, BudgetExceeded, ManifestError,
+  assertAggregateOnly, createBudget, disabledIntervals, followUpStatus, manifestTemplate, partition, prospectiveIntake, ratio, validateManifest, BudgetExceeded, ManifestError,
 } = require("../lib/listening/measurement");
 const { attemptJobKey, rediscoveryMatches, rediscoveryPairs } = require("../lib/listening/worker");
 const { collectMeasurement, jobState, parseArgs } = require("../scripts/listeningMeasurement");
@@ -11,14 +11,15 @@ const { collectMeasurement, jobState, parseArgs } = require("../scripts/listenin
 const DAY = 86_400_000;
 const T = "2026-11-03T00:00:00Z";
 
+const off = () => ({ activatedAt: null, deployedRevision: null, rollbackAt: null, verification: "" });
+const exposuresWith = (fields = {}) => ({ observations: off(), reviewEpisodes: off(), effortTimer: off(), ...fields });
+
 function manifest(overrides = {}) {
   return {
     ...manifestTemplate(),
     environment: "fixture",
     sourceCommit: "d61e508",
-    exposures: { pr32: { activatedAt: T, rollbackAt: null, verification: "deploy log reviewed" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" }, observations: { activatedAt: null, rollbackAt: null, verification: "" } },
-    flags: { LASTFM_DISCOVERY_ENABLED: true },
-    allowlistScopeVersion: "v1",
+    exposures: exposuresWith({ reviewEpisodes: { activatedAt: T, deployedRevision: "7b6a247", rollbackAt: null, verification: "recorded at deploy" } }),
     windows: { intakeDays: 14, followUpDays: 7, snapshotTimeUtc: "06:00" },
     collection: { startAt: T, endAt: "2026-11-24T00:00:00Z" },
     ...overrides,
@@ -27,48 +28,75 @@ function manifest(overrides = {}) {
 
 test("manifest validation rejects placeholders, unknown fields, credentials and impossible exposure clocks", () => {
   assert.throws(() => validateManifest(manifestTemplate()), (error) => error instanceof ManifestError && error.problems.some((problem) => problem.startsWith("environment")));
-  assert.equal(validateManifest(manifest()).parsed.exposures.pr32.activatedAt.toISOString(), "2026-11-03T00:00:00.000Z");
+  assert.equal(validateManifest(manifest()).parsed.exposures.reviewEpisodes.activatedAt.toISOString(), "2026-11-03T00:00:00.000Z");
   assert.deepEqual(manifestTemplate().windows, { intakeDays: 14, followUpDays: 7, snapshotTimeUtc: "06:00" }, "the template carries the confirmed windows");
+  assert.deepEqual(Object.keys(manifestTemplate().exposures), ["observations", "reviewEpisodes", "effortTimer"], "exposures are prospective; no historical PR32/PR33 activation is asked for");
+  const entry = (fields) => exposuresWith({ reviewEpisodes: { ...off(), ...fields } });
+  const valid = validateManifest(manifest({
+    flagChanges: [{ flag: "REVIEW_EPISODES_ENABLED", enabled: false, at: "2026-11-05T00:00:00Z", note: "paused" }, { flag: "REVIEW_EPISODES_ENABLED", enabled: true, at: "2026-11-06T00:00:00Z" }],
+    allowlistChanges: [{ change: "added", count: 2, at: "2026-11-04T00:00:00Z" }],
+  }));
+  assert.equal(valid.parsed.flagChanges.length, 2);
+  assert.equal(valid.parsed.allowlistChanges[0].at.toISOString(), "2026-11-04T00:00:00.000Z");
   const invalid = [
     manifest({ extra: true }),
     manifest({ targetVerification: "mongodb+srv://reader:secret@cluster.example/db" }),
     manifest({ evidence: { location: "https://user:pass@host/x", checksum: null } }),
-    manifest({ exposures: { pr32: { activatedAt: T, rollbackAt: "2026-11-02T00:00:00Z", verification: "log" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" }, observations: { activatedAt: null, rollbackAt: null, verification: "" } } }),
-    manifest({ exposures: { pr32: { activatedAt: T, rollbackAt: null, verification: "" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" }, observations: { activatedAt: null, rollbackAt: null, verification: "" } } }),
-    manifest({ exposures: { pr32: { activatedAt: "2026-11-03", rollbackAt: null, verification: "log" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" }, observations: { activatedAt: null, rollbackAt: null, verification: "" } } }),
+    manifest({ exposures: entry({ activatedAt: T, rollbackAt: "2026-11-02T00:00:00Z", verification: "log" }) }),
+    manifest({ exposures: entry({ activatedAt: T, verification: "" }) }),
+    manifest({ exposures: entry({ activatedAt: "2026-11-03", verification: "log" }) }),
+    manifest({ exposures: entry({ activatedAt: T, deployedRevision: "main", verification: "log" }) }),
+    manifest({ exposures: { ...exposuresWith(), pr33: off() } }),
+    manifest({ exposures: { observations: off(), reviewEpisodes: off() } }),
     manifest({ windows: { intakeDays: 0, followUpDays: 7, snapshotTimeUtc: "06:00" } }),
     manifest({ windows: { intakeDays: 14, followUpDays: 7, snapshotTimeUtc: "6am" } }),
     manifest({ windows: { intakeDays: 7, followUpDays: 7, snapshotTimeUtc: "06:00" } }),
     manifest({ windows: { intakeDays: 14, followUpDays: 7, snapshotTimeUtc: "00:00" } }),
     manifest({ windows: null }),
-    manifest({ exposures: { pr32: { activatedAt: null, rollbackAt: null, verification: "" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" } } }),
-    manifest({ flags: { lowercase: true } }),
+    manifest({ flags: { REVIEW_EPISODES_ENABLED: true } }),
+    manifest({ flagChanges: [{ flag: "lowercase", enabled: true, at: T }] }),
+    manifest({ flagChanges: [{ flag: "REVIEW_EPISODE_ENABLED", enabled: false, at: "2026-11-05T00:00:00Z" }] }),
+    manifest({ flagChanges: [{ flag: "REVIEW_EPISODES_ENABLED", enabled: false, at: "2026-11-02T00:00:00Z" }] }),
+    manifest({ flagChanges: [{ flag: "REVIEW_EFFORT_TIMER_ENABLED", enabled: true, at: "2026-11-05T00:00:00Z" }] }),
+    manifest({ flagChanges: [{ flag: "REVIEW_EPISODES_ENABLED", enabled: "yes", at: T }] }),
+    manifest({ flagChanges: [{ flag: "A_FLAG", enabled: true, at: "2026-11-05T00:00:00Z" }, { flag: "A_FLAG", enabled: false, at: T }] }),
+    manifest({ allowlistChanges: [{ change: "grew", count: 1, at: T }] }),
+    manifest({ allowlistChanges: [{ change: "added", count: -1, at: T }] }),
+    manifest({ allowlistChanges: {} }),
     manifest({ sourceCommit: "main" }),
-    manifest({ schemaVersion: 1 }),
+    manifest({ schemaVersion: 2 }),
     manifest({ collection: { startAt: "2026-02-31T00:00:00Z", endAt: null } }),
-    manifest({ exposures: { pr32: { activatedAt: "2026-11-31T00:00Z", rollbackAt: null, verification: "log" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" }, observations: { activatedAt: null, rollbackAt: null, verification: "" } } }),
+    manifest({ exposures: entry({ activatedAt: "2026-11-31T00:00Z", verification: "log" }) }),
   ];
   for (const value of invalid) assert.throws(() => validateManifest(value), ManifestError);
   // Printed problems never repeat credential-like keys.
-  for (const value of [manifest({ flags: { "mongodb://reader:hunter2@db.example": true } }), { ...manifest(), "mongodb://reader:hunter2@db.example": 1 }]) {
+  for (const value of [manifest({ flagChanges: [{ flag: "A_FLAG", enabled: true, at: T, "mongodb://reader:hunter2@db.example": true }] }), { ...manifest(), "mongodb://reader:hunter2@db.example": 1 }]) {
     assert.throws(() => validateManifest(value), (error) => error instanceof ManifestError && !error.message.includes("hunter2") && error.message.includes("<unrecognized key>"));
   }
 });
 
-test("cohort windows are half-open around verified activation and never assume unverified exposure", () => {
-  const exposure = { activatedAt: new Date(T), rollbackAt: null };
+test("intakes start at a recorded activation, never assume an unrecorded one, and stop at a rollback", () => {
   const windows = { intakeDays: 14, followUpDays: 7, snapshotTimeUtc: "06:00" };
   const at = Date.parse(T);
-  const result = cohortWindows(exposure, windows, new Date(at + 21 * DAY));
-  assert.deepEqual(result.baselineIntake, { from: new Date(at - 14 * DAY).toISOString(), to: new Date(at).toISOString(), followUpCrossesActivation: true });
-  assert.deepEqual(result.shiftedBaselineIntake, { from: new Date(at - 21 * DAY).toISOString(), to: new Date(at - 7 * DAY).toISOString() });
-  assert.deepEqual(result.postIntake, { from: new Date(at).toISOString(), to: new Date(at + 14 * DAY).toISOString() });
-  assert.equal(result.postFollowUpEnd, new Date(at + 21 * DAY).toISOString());
-  assert.equal(result.followUpComplete, true);
-  assert.equal(cohortWindows(exposure, windows, new Date(at + 20 * DAY)).followUpComplete, false);
-  assert.equal(cohortWindows({ ...exposure, rollbackAt: new Date(at + 3 * DAY) }, windows, null).rollbackInsidePostWindow, true);
-  assert.deepEqual(cohortWindows({ activatedAt: null }, windows, null), { status: "exposure_unverified", claim: "prospective_only" });
-  assert.deepEqual(cohortWindows(exposure, null, null), { status: "windows_unconfirmed" });
+  const exposure = { activatedAt: new Date(T), rollbackAt: null };
+  const intake = prospectiveIntake(exposure, windows, new Date(at + 21 * DAY));
+  assert.equal(intake.status, "defined");
+  assert.equal(+intake.from, at);
+  assert.equal(+intake.to, at + 14 * DAY);
+  assert.equal(+intake.followUpEnd, at + 21 * DAY);
+  assert.equal(intake.followUpComplete, true);
+  assert.equal(prospectiveIntake(exposure, windows, new Date(at + 20 * DAY)).followUpComplete, false);
+  assert.deepEqual(prospectiveIntake({ activatedAt: null }, windows, null), { status: "activation_not_recorded" });
+  assert.deepEqual(prospectiveIntake(exposure, null, null), { status: "windows_unconfirmed" });
+  assert.deepEqual(prospectiveIntake({ ...exposure, rollbackAt: new Date(at + 20 * DAY) }, windows, null), { status: "rolled_back_before_follow_up_end" });
+  assert.equal(prospectiveIntake({ ...exposure, rollbackAt: new Date(at + 22 * DAY) }, windows, null).status, "defined");
+  // Sections that only count the intake are complete once the intake ends.
+  assert.equal(prospectiveIntake({ ...exposure, rollbackAt: new Date(at + 20 * DAY) }, windows, null, { followUp: false }).status, "defined");
+  assert.deepEqual(prospectiveIntake({ ...exposure, rollbackAt: new Date(at + 10 * DAY) }, windows, null, { followUp: false }), { status: "rolled_back_during_intake" });
+
+  const change = (enabled, day, flag = "REVIEW_EPISODES_ENABLED") => ({ flag, enabled, at: new Date(at + day * DAY) });
+  const changes = [change(false, 2), change(true, 3), change(false, 5, "OTHER_FLAG"), change(false, 10)];
+  assert.deepEqual(disabledIntervals(changes, "REVIEW_EPISODES_ENABLED", new Date(at), new Date(at + 14 * DAY)).map(({ from, to }) => [(from - at) / DAY, (to - at) / DAY]), [[2, 3], [10, 14]]);
 });
 
 test("metric shapes keep denominators, null empty rates and censor immature follow-up", () => {
@@ -216,12 +244,21 @@ function world() {
     models: {
       AlbumCatalog: model(albums),
       Listening: {
-        MappingCase: model(cases), Job: model(jobs), AlbumMapping: model(mappings), DiscoveryAttempt: model([]),
+        MappingCase: model(cases), Job: model(jobs), AlbumMapping: model(mappings), DiscoveryAttempt: model([]), MappingAudit: model([]),
         Connection: model([{ _id: connectionId, state: "active" }]),
         Scrobble: { aggregate: (pipeline) => ({ option: async (options) => { assert.deepEqual(options, { maxTimeMS: 5_000, allowDiskUse: false }); assert.ok(pipeline[0].$match.expiresAt.$gt instanceof Date); assert.ok(pipeline.at(-1).$limit > 0); return names; } }) },
       },
       reviewStatusForAlbums: async (ids, options) => { assert.equal(options.maxTimeMS, 5_000); return ids.map((id) => statuses.get(id)).filter(Boolean); },
+      ...observationModels(),
     },
+  };
+}
+
+// Empty review-observation collections; tests that exercise them pass rows.
+function observationModels({ baselineAudits = [], episodes = [], runs = [], efforts = [] } = {}) {
+  return {
+    Baselines: { Audit: model(baselineAudits) },
+    ReviewObservation: { Episode: model(episodes), RecommendationRun: model(runs), Effort: model(efforts) },
   };
 }
 
@@ -262,10 +299,12 @@ test("the collector reports the eligible pair census, evidence reasons and deman
   assert.equal(readiness.albums.outsideBaselineQueue, 1);
 
   assert.equal(report.collection.complete, true);
-  assert.equal(report.cohortWindows.pr32.status, "defined");
-  assert.equal(report.cohortWindows.pr32.followUpComplete, false, "a snapshot before the planned end has not observed the follow-up");
-  assert.equal(report.cohortWindows.pr33.claim, "prospective_only");
-  assert.equal(report.baselineRecommendations.collected, false);
+  assert.equal(report.intakes.reviewEpisodes.status, "defined");
+  assert.equal(report.intakes.reviewEpisodes.followUpComplete, false, "a snapshot before the planned end has not observed the follow-up");
+  assert.deepEqual(report.intakes.observations, { status: "activation_not_recorded" });
+  assert.equal(report.before.reference, "docs/QUEUE_METRICS_2026-11-01.md");
+  assert.equal(report.reviewEpisodes.collected, true);
+  assert.equal(report.adjudication.collected, false);
   const serialized = JSON.stringify(report);
   for (const secret of [...albums.flatMap((album) => [album.albumId, String(album._id), album.title]), ...cases.map((row) => row.caseId)]) {
     assert.equal(serialized.includes(secret), false, `report leaks ${secret}`);
@@ -275,8 +314,9 @@ test("the collector reports the eligible pair census, evidence reasons and deman
 test("an empty database reports zero counts and null rates", async () => {
   const empty = {
     AlbumCatalog: model([]),
-    Listening: { MappingCase: model([]), Job: model([]), AlbumMapping: model([]), DiscoveryAttempt: model([]), Connection: model([]), Scrobble: { aggregate: () => { throw new Error("not called without connections"); } } },
+    Listening: { MappingCase: model([]), Job: model([]), AlbumMapping: model([]), DiscoveryAttempt: model([]), MappingAudit: model([]), Connection: model([]), Scrobble: { aggregate: () => { throw new Error("not called without connections"); } } },
     reviewStatusForAlbums: async () => [],
+    ...observationModels(),
   };
   const report = await collectMeasurement({ manifest: manifest(), now: NOW, clock: () => 0, ...empty });
   assert.equal(report.rediscoveryCensus.pairs, 0);
@@ -284,8 +324,10 @@ test("an empty database reports zero counts and null rates", async () => {
   assert.equal(report.mappingEvidence.problemRate.value, null);
   assert.equal(report.demandReadiness.names.mappingCoverage.value, null);
   assert.equal(report.demandReadiness.albums.status.reconciles, true);
-  assert.deepEqual(report.rediscoveryOutcomes, { collected: false, reason: "observation_records_unverified" });
-  assert.deepEqual(report.discoveryRuns, { collected: false, reason: "observation_records_unverified" });
+  assert.deepEqual(report.rediscoveryOutcomes, { collected: false, reason: "activation_not_recorded" });
+  assert.deepEqual(report.discoveryRuns, { collected: false, reason: "activation_not_recorded" });
+  assert.equal(report.reviewEpisodes.mapping.episodeCoverage.value, null);
+  assert.deepEqual(report.reviewEffort, { collected: false, reason: "activation_not_recorded" });
 });
 
 test("an exhausted budget marks the section and every later one as not collected", async () => {
@@ -317,22 +359,6 @@ test("an invalid manifest stops collection before any query", async () => {
   const { models } = world();
   await assert.rejects(collectMeasurement({ manifest: manifestTemplate(), now: NOW, ...models }), ManifestError);
   assert.equal(models.Listening.MappingCase.calls.length, 0);
-});
-
-test("observation intake is prospective unless PR33 activated after records began", () => {
-  const windows = { intakeDays: 14, followUpDays: 7, snapshotTimeUtc: "06:00" };
-  const records = new Date("2026-11-03T00:00:00Z");
-  assert.deepEqual(observationIntake({ observations: { activatedAt: null } }, windows), { status: "observation_records_unverified" });
-  const prospective = observationIntake({ pr33: { activatedAt: new Date("2026-10-31T00:00:00Z") }, observations: { activatedAt: records } }, windows);
-  assert.equal(prospective.basis, "prospective_after_observation_records");
-  assert.equal(+prospective.from, +records);
-  assert.equal(+prospective.to - +prospective.from, 14 * DAY);
-  const post = observationIntake({ pr33: { activatedAt: new Date("2026-11-05T00:00:00Z") }, observations: { activatedAt: records } }, windows);
-  assert.equal(post.basis, "post_pr33_activation");
-  assert.equal(post.from.toISOString(), "2026-11-05T00:00:00.000Z");
-  assert.equal(post.pr33RollbackInsideFollowUp, false);
-  assert.deepEqual(observationIntake({ observations: { activatedAt: records, rollbackAt: new Date("2026-11-10T00:00:00Z") } }, windows), { status: "observation_records_rolled_back" });
-  assert.equal(observationIntake({ pr33: { activatedAt: records, rollbackAt: new Date("2026-11-20T00:00:00Z") }, observations: { activatedAt: records } }, windows).pr33RollbackInsideFollowUp, true);
 });
 
 function oidAt(date) {
@@ -374,10 +400,11 @@ function windowedWorld() {
 
 test("windowed rediscovery outcomes credit gains carefully and keep every pair in the denominator", async () => {
   const { jobs, attempts } = windowedWorld();
-  const exposures = { pr32: { activatedAt: null, rollbackAt: null, verification: "" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" }, observations: { activatedAt: "2026-11-03T00:00:00Z", rollbackAt: null, verification: "worker deploy log" } };
+  const exposures = exposuresWith({ observations: { activatedAt: "2026-11-03T00:00:00Z", deployedRevision: null, rollbackAt: null, verification: "worker deploy log" } });
   const models = {
     AlbumCatalog: model([]), reviewStatusForAlbums: async () => [],
-    Listening: { MappingCase: model([]), Job: model(jobs), AlbumMapping: model([]), DiscoveryAttempt: model(attempts), Connection: model([]), Scrobble: { aggregate: () => { throw new Error("unused"); } } },
+    Listening: { MappingCase: model([]), Job: model(jobs), AlbumMapping: model([]), DiscoveryAttempt: model(attempts), MappingAudit: model([]), Connection: model([]), Scrobble: { aggregate: () => { throw new Error("unused"); } } },
+    ...observationModels(),
   };
   const now = new Date("2026-11-20T06:00:00Z");
   const report = await collectMeasurement({ manifest: manifest({ exposures }), now, clock: () => 0, limits: { pageSize: 2, maxRecords: 10_000, maxTimeMS: 5_000, wallMs: 60_000 }, ...models });
@@ -408,4 +435,90 @@ test("windowed rediscovery outcomes credit gains carefully and keep every pair i
 
   const serialized = JSON.stringify(report);
   for (const job of jobs) for (const secret of [job.payload.caseId, job.payload.observation.albumId, String(job._id)]) assert.equal(serialized.includes(secret), false);
+});
+
+test("review episode coverage is measured against the audit log, with failures by reason and unknown gaps", async () => {
+  const at = (hours) => new Date(Date.parse(T) + hours * 3_600_000);
+  const audit = (hours, action, extra = {}) => ({ _id: oidAt(at(hours)), auditId: crypto.randomUUID(), action, createdAt: at(hours), ...extra });
+  const mappingAudits = [audit(1, "approved"), audit(2, "approved"), audit(3, "rejected"), audit(4, "no_catalog_match"), audit(5, "approved"), audit(50, "approved"), audit(6, "revoked")];
+  const baselineAudits = [audit(1, "confirm"), audit(2, "replace"), audit(3, "defer"), audit(4, "invalidate")];
+  const episode = (row, fields) => ({ _id: oidAt(row.createdAt), auditId: row.auditId, decidedAt: row.createdAt, outcome: "recorded", failureReason: "", ...fields });
+  const run = crypto.randomUUID();
+  const release = (id) => ({ id });
+  const episodes = [
+    episode(mappingAudits[0], { evidence: { coverage: { queryCapReached: false }, candidatesTruncated: false, selected: release("a"), selectedRank: 0 } }),
+    episode(mappingAudits[1], { evidence: { coverage: { queryCapReached: true }, candidatesTruncated: true, selected: release("b"), selectedRank: -1 } }),
+    episode(mappingAudits[2], { outcome: "failed", failureReason: "capture_failed", evidence: null }),
+    episode(mappingAudits[3], { outcome: "failed", failureReason: "write_failed", evidence: null }),
+    // mappingAudits[4] has no episode and no marker: unknown. mappingAudits[5] fell in a flag-off interval.
+    episode(baselineAudits[0], { evidence: { coverage: { browseComplete: true }, recommendationRunId: run, recommended: release("r1"), selected: release("r1"), selectedRank: 0 } }),
+    episode(baselineAudits[1], { evidence: { coverage: null, recommendationRunId: "", recommended: null, selected: release("r2"), selectedRank: -1 } }),
+    // An episode whose audit entry is missing would be a bug, so it is counted separately.
+    { _id: oidAt(at(7)), auditId: crypto.randomUUID(), decidedAt: at(7), outcome: "recorded", evidence: {} },
+  ];
+  const runs = [
+    { _id: oidAt(at(1)), runId: run, startedAt: at(1), outcome: "recommended", coverage: { browseComplete: true, hydrationComplete: false, uninspectedCompeting: 1, ambiguous: true }, comparisons: [{ competing: true, equivalent: false }, { competing: false, equivalent: false }] },
+    { _id: oidAt(at(2)), runId: crypto.randomUUID(), startedAt: at(2), outcome: "no_candidate", coverage: { browseComplete: false }, comparisons: [] },
+    { _id: oidAt(at(3)), runId: crypto.randomUUID(), startedAt: at(3), outcome: "failed", coverage: null, comparisons: [] },
+  ];
+  const flagChanges = [{ flag: "REVIEW_EPISODES_ENABLED", enabled: false, at: at(48).toISOString() }, { flag: "REVIEW_EPISODES_ENABLED", enabled: true, at: at(52).toISOString() }];
+  const models = {
+    AlbumCatalog: model([]), reviewStatusForAlbums: async () => [],
+    Listening: { MappingCase: model([]), Job: model([]), AlbumMapping: model([]), DiscoveryAttempt: model([]), MappingAudit: model(mappingAudits), Connection: model([]), Scrobble: { aggregate: () => { throw new Error("unused"); } } },
+    ...observationModels({ baselineAudits, episodes, runs }),
+  };
+  const report = await collectMeasurement({ manifest: manifest({ flagChanges }), now: NOW, clock: () => 0, limits: { pageSize: 2, maxRecords: 10_000, maxTimeMS: 5_000, wallMs: 60_000 }, ...models });
+  const { mapping, baseline } = report.reviewEpisodes;
+  assert.equal(report.reviewEpisodes.flagOffIntervals, 1);
+  assert.equal(mapping.decisions, 5, "revokes are not decisions; the decision while the flag was off is excluded");
+  assert.equal(mapping.decisionsWhileFlagOff, 1);
+  assert.deepEqual(mapping.episodes, { recorded: 2, failed: 2, missingUnknown: 1, total: 5, reconciles: true });
+  assert.deepEqual(mapping.failedByReason, { capture_failed: 1, capture_invalid: 0, write_failed: 1, write_timeout: 0, total: 2, reconciles: true });
+  assert.deepEqual(mapping.episodeCoverage, { unit: "decision", numerator: 2, denominator: 5, value: 0.4 });
+  assert.deepEqual(mapping.provenanceAmongRecorded, { recorded: 2, coverageKnown: 2, candidateListTruncated: 1 });
+  assert.deepEqual(mapping.selection, { fromDisplayedCandidates: 1, outsideDisplayedCandidates: 1, total: 2, reconciles: true });
+  assert.equal(baseline.decisions, 3, "server-authored invalidations are not decisions");
+  assert.deepEqual(baseline.episodes, { recorded: 2, failed: 0, missingUnknown: 1, total: 3, reconciles: true });
+  assert.deepEqual(baseline.provenanceAmongRecorded, { recorded: 2, coverageKnown: 1, candidateListTruncated: 0, withRecommendationRun: 1 });
+  assert.deepEqual(baseline.selection, { matchesRecommendation: 1, differsFromRecommendation: 0, noRecommendationRecorded: 1, total: 2, reconciles: true });
+  assert.equal(report.reviewEpisodes.episodesWithoutAuditEntry, 1);
+
+  const runsReport = report.recommendationRuns;
+  assert.deepEqual(runsReport.outcome, { recommended: 1, no_candidate: 1, failed: 1, total: 3, reconciles: true });
+  assert.deepEqual(runsReport.coverageKnown, { unit: "run with a result", numerator: 2, denominator: 2, value: 1 });
+  assert.deepEqual(runsReport.reasonsAmongResults, { browseIncomplete: 1, hydrationIncomplete: 1, uninspectedCompeting: 1, ambiguous: 1, competingOrderedDifference: 1, nonCompetingOrderedDifference: 1 });
+  assert.deepEqual(runsReport.runsLinkedToDecisions, { unit: "run", numerator: 1, denominator: 3, value: 1 / 3 });
+  const serialized = JSON.stringify(report);
+  for (const row of [...mappingAudits, ...baselineAudits]) assert.equal(serialized.includes(row.auditId), false);
+  assert.equal(serialized.includes(run), false);
+});
+
+test("effort totals hide every group smaller than five, including cells recoverable by subtraction", async () => {
+  const at = (minutes) => new Date(Date.parse(T) + minutes * 60_000);
+  const effort = (minute, fields) => ({ _id: oidAt(at(minute)), recordedAt: at(minute), kind: "mapping", outcome: "decided", activeMs: 120_000, auditId: crypto.randomUUID(), ...fields });
+  const mapping = [1, 2, 3, 4, 5].map((minute) => effort(minute, {}));
+  const baseline = [6, 7, 8, 9, 10].map((minute) => effort(minute, { kind: "baseline", activeMs: 600_000 }));
+  const abandoned = [11, 12, 13, 14, 15].map((minute) => effort(minute, { outcome: "abandoned", auditId: "" }));
+  const unlinked = [16, 17, 18, 19, 20].map((minute) => effort(minute, { auditId: "" }));
+  const exposures = exposuresWith({ effortTimer: { activatedAt: T, deployedRevision: null, rollbackAt: null, verification: "flag turned on" } });
+  const base = {
+    AlbumCatalog: model([]), reviewStatusForAlbums: async () => [],
+    Listening: { MappingCase: model([]), Job: model([]), AlbumMapping: model([]), DiscoveryAttempt: model([]), MappingAudit: model([]), Connection: model([]), Scrobble: { aggregate: () => { throw new Error("unused"); } } },
+  };
+  const run = (efforts) => collectMeasurement({ manifest: manifest({ exposures }), now: NOW, clock: () => 0, ...base, ...observationModels({ efforts }) });
+  const full = (await run([...mapping, ...baseline, ...abandoned, ...unlinked])).reviewEffort;
+  assert.deepEqual(full.timings, { decidedLinked: 10, decidedUnlinked: 5, abandoned: 5, total: 20, reconciles: true });
+  assert.deepEqual(full.decided, { records: 10, activeMinutes: 60, activeSecondsPerRecord: { count: 10, p50: 120, p90: 600, max: 600 } });
+  assert.deepEqual(full.byKind.mapping, { records: 5, activeMinutes: 10, activeSecondsPerRecord: { count: 5, p50: 120, p90: 120, max: 120 } });
+  assert.equal(full.abandoned.records, 5);
+
+  // One baseline timing would be decided minus mapping, so both kinds are hidden; the timing
+  // partition has small cells, so only its total is shown.
+  const partial = (await run([...mapping, baseline[0], abandoned[0]])).reviewEffort;
+  assert.deepEqual(partial.byKind, { mapping: { suppressed: true, reason: "fewer_than_5" }, baseline: { suppressed: true, reason: "fewer_than_5" } });
+  assert.deepEqual(partial.timings, { total: 7, suppressed: true, reason: "a_cell_has_fewer_than_5" });
+  assert.equal(partial.decided.records, 6);
+  assert.deepEqual(partial.abandoned, { suppressed: true, reason: "fewer_than_5" });
+  const few = (await run(mapping.slice(0, 3))).reviewEffort;
+  assert.deepEqual(few.timings, { suppressed: true, reason: "fewer_than_5" }, "even the overall counts are hidden below five");
 });

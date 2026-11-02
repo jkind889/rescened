@@ -4,13 +4,17 @@
 // aggregates only: no names, album IDs, case IDs, release IDs, reviewer IDs or internal IDs.
 // A section that exhausts a budget is reported as not collected, never as a partial cohort.
 const fs = require("node:fs");
+const path = require("node:path");
 const mongoose = require("mongoose");
 const { catalogRevisionOf, normalize } = require("../lib/listening/common");
 const { DISCOVERY_ATTEMPT_RETENTION_MS, PAIR_OBSERVATION_VERSION, REDISCOVERY_MATCHER_VERSION, attemptJobKey, rediscoveryPairs } = require("../lib/listening/worker");
 const {
-  COLLECTION_LIMITS, COLLECTOR_VERSION, DAY_MS, MEASUREMENT_SCHEMA_VERSION, BudgetExceeded,
-  assertAggregateOnly, cohortWindows, createBudget, manifestChecksum, manifestTemplate, observationIntake, partition, percentiles, ratio, validateManifest,
+  BEFORE_SNAPSHOT, COLLECTION_LIMITS, COLLECTOR_VERSION, DAY_MS, EXPOSURE_FLAGS, FOLLOW_UP_EXPOSURES, MEASUREMENT_SCHEMA_VERSION, BudgetExceeded,
+  assertAggregateOnly, createBudget, describeIntake, disabledIntervals, manifestChecksum, manifestTemplate, partition, percentiles, prospectiveIntake, ratio, validateManifest,
 } = require("../lib/listening/measurement");
+const { EPISODE_RETENTION_MS, RECOMMENDATION_RUN_RETENTION_MS } = require("../lib/reviewObservations/episodes");
+const { EFFORT_RETENTION_MS } = require("../lib/reviewObservations/effort");
+const { summarizeLabels } = require("../lib/reviewObservations/adjudication");
 
 const ELIGIBLE_STATUSES = ["pending", "no_catalog_match"];
 // Discovery stores provider_evidence_incomplete, then the worker's failure path records the job
@@ -305,7 +309,7 @@ async function rediscoveryOutcomes(reader, { Listening }, intake, cutoff, now) {
   return {
     collected: true,
     unit: "newly observed eligible case/album pair",
-    intake: { basis: intake.basis, from: iso(intake.from), to: iso(intake.to), followUpDays: followUp / DAY_MS, cutoff: iso(cutoff), baseline: intake.baseline, pr33RollbackInsideFollowUp: intake.pr33RollbackInsideFollowUp },
+    intake: { basis: "prospective_after_observation_records", from: iso(intake.from), to: iso(intake.to), followUpDays: followUp / DAY_MS, cutoff: iso(cutoff) },
     entryClock: "scanner_observation",
     entered: jobs.length, followUpComplete: mature.length, censored: jobs.length - mature.length,
     enqueueReach: { measurable: false, reason: "pairs enter when the scanner observes and enqueues them; use the daily census notEnqueued count for scan lag" },
@@ -350,7 +354,7 @@ async function discoveryRuns(reader, { Listening }, intake) {
   return {
     collected: true,
     unit: "discovery run",
-    intake: { basis: intake.basis, from: iso(intake.from), to: iso(intake.to) },
+    intake: { basis: "prospective_after_observation_records", from: iso(intake.from), to: iso(intake.to) },
     runs: runs.length, skips: attempts.length - runs.length, distinctCases: new Set(runs.map((run) => run.caseId)).size,
     result: partition(result, runs.length),
     byTrigger: partition(byTrigger, runs.length),
@@ -361,44 +365,191 @@ async function discoveryRuns(reader, { Listening }, intake) {
   };
 }
 
+const MAPPING_DECISIONS = ["approved", "rejected", "no_catalog_match"];
+const BASELINE_DECISIONS = ["confirm", "replace", "defer", "revoke"];
+const EPISODE_FAILURES = ["capture_failed", "capture_invalid", "write_failed", "write_timeout"];
+// Effort groups smaller than this are hidden, since a group of one or two moderators' reviews is personal.
+const MIN_GROUP = 5;
+const inIntervals = (at, intervals) => intervals.some((interval) => at >= interval.from && at < interval.to);
+const windowRange = (intake, field) => ({ _id: idRange(intake.from, intake.to), [field]: { $gte: intake.from, $lt: intake.to } });
+
+// Coverage of one decision kind against its audit log, which records every committed decision.
+// Missing episodes with no failure marker are unknown (for example, a crash after commit).
+function episodeCoverage(kind, audits, byAudit, disabled) {
+  const outcome = { recorded: 0, failed: 0, missingUnknown: 0 };
+  const reasons = Object.fromEntries(EPISODE_FAILURES.map((reason) => [reason, 0]));
+  const provenance = { coverageKnown: 0, candidateListTruncated: 0, ...(kind === "baseline" ? { withRecommendationRun: 0 } : {}) };
+  const selection = kind === "mapping" ? { fromDisplayedCandidates: 0, outsideDisplayedCandidates: 0 } : { matchesRecommendation: 0, differsFromRecommendation: 0, noRecommendationRecorded: 0 };
+  let whileFlagOff = 0; let selections = 0;
+  for (const audit of audits) {
+    const episode = byAudit.get(audit.auditId);
+    if (!episode && inIntervals(new Date(audit.createdAt), disabled)) { whileFlagOff += 1; continue; }
+    if (!episode) { outcome.missingUnknown += 1; continue; }
+    if (episode.outcome !== "recorded") { outcome.failed += 1; if (Object.hasOwn(reasons, episode.failureReason)) reasons[episode.failureReason] += 1; continue; }
+    outcome.recorded += 1;
+    const evidence = episode.evidence || {};
+    if (evidence.coverage) provenance.coverageKnown += 1;
+    if (evidence.candidatesTruncated) provenance.candidateListTruncated += 1;
+    if (kind === "baseline" && evidence.recommendationRunId) provenance.withRecommendationRun += 1;
+    if (!evidence.selected) continue;
+    selections += 1;
+    if (kind === "mapping") selection[evidence.selectedRank >= 0 ? "fromDisplayedCandidates" : "outsideDisplayedCandidates"] += 1;
+    else if (!evidence.recommended) selection.noRecommendationRecorded += 1;
+    else selection[evidence.recommended.id === evidence.selected.id ? "matchesRecommendation" : "differsFromRecommendation"] += 1;
+  }
+  const decisions = audits.length - whileFlagOff;
+  return {
+    decisions,
+    decisionsWhileFlagOff: whileFlagOff,
+    episodes: partition(outcome, decisions),
+    failedByReason: partition(reasons, outcome.failed),
+    episodeCoverage: ratio(outcome.recorded, decisions, "decision"),
+    unknownMissing: ratio(outcome.missingUnknown, decisions, "decision"),
+    provenanceAmongRecorded: { recorded: outcome.recorded, ...provenance },
+    selection: partition(selection, selections),
+  };
+}
+
+// Decision-time provenance (plan: "Decision-time provenance rate") for decisions committed in the
+// review-episode intake. Episodes are written after commit, so coverage below 1 is expected.
+async function reviewEpisodes(reader, { Listening, Baselines, ReviewObservation }, { intake, flagChanges }) {
+  const disabled = disabledIntervals(flagChanges, EXPOSURE_FLAGS.reviewEpisodes, intake.from, intake.to);
+  const mappingAudits = await reader.all(Listening.MappingAudit, { ...windowRange(intake, "createdAt"), action: { $in: MAPPING_DECISIONS } }, "auditId createdAt");
+  const baselineAudits = await reader.all(Baselines.Audit, { ...windowRange(intake, "createdAt"), action: { $in: BASELINE_DECISIONS } }, "auditId createdAt");
+  const auditIds = [...mappingAudits, ...baselineAudits].map((audit) => audit.auditId);
+  const episodes = await reader.inChunks(auditIds, (chunk) => reader.find(ReviewObservation.Episode, { auditId: { $in: chunk } }, "auditId outcome failureReason evidence.coverage evidence.candidatesTruncated evidence.recommendationRunId evidence.recommended.id evidence.selected.id evidence.selectedRank"));
+  const byAudit = new Map(episodes.map((episode) => [episode.auditId, episode]));
+  const known = new Set(auditIds);
+  const inWindow = await reader.all(ReviewObservation.Episode, windowRange(intake, "decidedAt"), "auditId");
+  return {
+    collected: true,
+    unit: "committed moderator decision (audit entry)",
+    intake: { basis: "prospective_after_review_episodes", from: iso(intake.from), to: iso(intake.to) },
+    flagOffIntervals: disabled.length,
+    mapping: episodeCoverage("mapping", mappingAudits, byAudit, disabled),
+    baseline: episodeCoverage("baseline", baselineAudits, byAudit, disabled),
+    episodesWithoutAuditEntry: inWindow.filter((episode) => !known.has(episode.auditId)).length,
+    note: "Episodes are written after the decision commits. failed counts logged snapshot failures by reason; missingUnknown counts decisions with no episode and no failure marker.",
+  };
+}
+
+// PR32 baseline run-level coverage over recommender executions in the review-episode intake.
+async function recommendationRuns(reader, { ReviewObservation }, { intake }) {
+  const runs = await reader.all(ReviewObservation.RecommendationRun, windowRange(intake, "startedAt"), "runId outcome coverage comparisons.competing comparisons.equivalent");
+  const outcome = { recommended: 0, no_candidate: 0, failed: 0 };
+  const reasons = { browseIncomplete: 0, hydrationIncomplete: 0, uninspectedCompeting: 0, ambiguous: 0, competingOrderedDifference: 0, nonCompetingOrderedDifference: 0 };
+  let withResult = 0; let coverageKnown = 0;
+  for (const run of runs) {
+    if (Object.hasOwn(outcome, run.outcome)) outcome[run.outcome] += 1;
+    if (run.outcome === "failed") continue;
+    withResult += 1;
+    const coverage = run.coverage || {};
+    if (typeof coverage.browseComplete === "boolean") coverageKnown += 1;
+    if (coverage.browseComplete === false) reasons.browseIncomplete += 1;
+    if (coverage.hydrationComplete === false) reasons.hydrationIncomplete += 1;
+    if (coverage.uninspectedCompeting > 0) reasons.uninspectedCompeting += 1;
+    if (coverage.ambiguous === true) reasons.ambiguous += 1;
+    if ((run.comparisons || []).some((item) => item.competing && item.equivalent === false)) reasons.competingOrderedDifference += 1;
+    if ((run.comparisons || []).some((item) => !item.competing && item.equivalent === false)) reasons.nonCompetingOrderedDifference += 1;
+  }
+  const referenced = new Set((await reader.all(ReviewObservation.Episode, windowRange(intake, "decidedAt"), "evidence.recommendationRunId")).map((episode) => episode.evidence?.recommendationRunId).filter(Boolean));
+  return {
+    collected: true,
+    unit: "baseline recommender execution",
+    intake: { basis: "prospective_after_review_episodes", from: iso(intake.from), to: iso(intake.to) },
+    runs: runs.length,
+    outcome: partition(outcome, runs.length),
+    coverageKnown: ratio(coverageKnown, withResult, "run with a result"),
+    reasonsAmongResults: reasons,
+    reasonsOverlap: true,
+    runsLinkedToDecisions: ratio(runs.filter((run) => referenced.has(run.runId)).length, runs.length, "run"),
+    note: "A decision that differs from the recommendation is disagreement, not an error. Runs whose best-effort record failed are absent.",
+  };
+}
+
+const minutes = (ms) => Math.round((ms / 60_000) * 10) / 10;
+function effortGroup(rows) {
+  if (rows.length < MIN_GROUP) return { suppressed: true, reason: `fewer_than_${MIN_GROUP}` };
+  return { records: rows.length, activeMinutes: minutes(rows.reduce((sum, row) => sum + row.activeMs, 0)), activeSecondsPerRecord: percentiles(rows.map((row) => row.activeMs / 1000)) };
+}
+
+const SUPPRESSED = { suppressed: true, reason: `fewer_than_${MIN_GROUP}` };
+// A partition is shown only when every non-empty cell reaches the minimum, so no small cell can
+// be read directly or recovered by subtracting the others from the total.
+function effortPartition(counts, total) {
+  if (total < MIN_GROUP) return SUPPRESSED;
+  if (Object.values(counts).some((value) => value > 0 && value < MIN_GROUP)) return { total, ...SUPPRESSED, reason: `a_cell_has_fewer_than_${MIN_GROUP}` };
+  return partition(counts, total);
+}
+
+// Opt-in active effort (plan: "Moderator effort") for timings recorded in the effort-timer intake.
+// Totals only; every group below the minimum size is hidden, including the overall totals.
+async function reviewEffort(reader, { ReviewObservation }, { intake }) {
+  const rows = await reader.all(ReviewObservation.Effort, windowRange(intake, "recordedAt"), "kind outcome activeMs auditId");
+  const linked = rows.filter((row) => row.outcome === "decided" && row.auditId);
+  const status = { decidedLinked: linked.length, decidedUnlinked: rows.filter((row) => row.outcome === "decided" && !row.auditId).length, abandoned: rows.filter((row) => row.outcome === "abandoned").length };
+  const kinds = { mapping: linked.filter((row) => row.kind === "mapping"), baseline: linked.filter((row) => row.kind === "baseline") };
+  // Decided = mapping + baseline, so hiding one kind hides the other too.
+  const kindHidden = Object.values(kinds).some((group) => group.length > 0 && group.length < MIN_GROUP);
+  return {
+    collected: true,
+    unit: "timed review (opt-in)",
+    intake: { basis: "prospective_after_effort_timer", from: iso(intake.from), to: iso(intake.to) },
+    minimumGroupSize: MIN_GROUP,
+    timings: effortPartition(status, rows.length),
+    decided: effortGroup(linked),
+    abandoned: effortGroup(rows.filter((row) => row.outcome === "abandoned")),
+    byKind: kindHidden ? { mapping: SUPPRESSED, baseline: SUPPRESSED } : { mapping: effortGroup(kinds.mapping), baseline: effortGroup(kinds.baseline) },
+    note: "Groups count timings, not moderators: with one opted-in moderator, every total describes that moderator's own effort. Linked timings end with a decision this moderator committed for the target, and each decision links to at most one timing. Opt-in timing is a self-selected sample, not every review.",
+  };
+}
+
 const LIMITATIONS = [
+  "Measurement is prospective only: each windowed section starts when its exposure went live. The before picture is a descriptive snapshot (see before), not a control group.",
   "Snapshot sections describe the database at collection time; they are not windowed cohort outcomes.",
-  "Windowed sections cover only runs and pairs recorded after the observation worker started; enqueue reach is not measurable because pairs enter when enqueued.",
+  "Enqueue reach is not measurable because pairs enter when the scanner enqueues them.",
   "Pair entry is the scanner observation; eligibility is bounded below by the last completed full sweep's start, and publication commit time is not recorded.",
   "doneWithoutError catalog jobs include safe skips; attempts count lease acquisitions, not provider calls.",
-  "Baseline recommendation coverage and comparisons are returned in API responses but not persisted, so they are not measured.",
-  "Decision-time candidate order, coverage and active review time are not recorded; approvals are not correctness labels.",
-  "Names, cases, pairs and albums are distinct units and must not be added together or treated as people.",
+  "Review episodes are written after the decision commits; a decision without an episode is counted, not reconstructed.",
+  "Effort comes from a self-selected opt-in timer. Approvals and adjudication agreement are not correctness proofs.",
+  "Names, cases, pairs, decisions and albums are distinct units and must not be added together or treated as people.",
   "Multi-query collection is not an atomic snapshot; see collection.startedAt and finishedAt.",
 ];
 
-// Attempt records expire, so an intake older than their retention can no longer be read in full.
-const windowed = (collect) => (reader, models, context) => {
-  if (context.intake.status !== "defined") return { collected: false, reason: context.intake.status };
-  if (context.now.getTime() - context.intake.from.getTime() >= DISCOVERY_ATTEMPT_RETENTION_MS) return { collected: false, reason: "observation_records_expired" };
-  return collect(reader, models, context);
+// Windowed sections read records that expire, so an intake older than their retention is refused.
+const windowed = (exposure, retentionMs, collect) => (reader, models, context) => {
+  const intake = context.intakes[exposure];
+  if (intake.status !== "defined") return { collected: false, reason: intake.status };
+  if (context.now.getTime() - intake.from.getTime() >= retentionMs) return { collected: false, reason: "observation_records_expired" };
+  return collect(reader, models, { ...context, intake });
 };
 const SECTIONS = [
   ["mappingEvidence", (reader, models) => mappingEvidence(reader, models)],
   ["demandReadiness", (reader, models, { now }) => demandReadiness(reader, models, now)],
   ["rediscoveryCensus", (reader, models) => rediscoveryCensus(reader, models)],
-  ["rediscoveryOutcomes", windowed((reader, models, { intake, cutoff, now }) => rediscoveryOutcomes(reader, models, intake, cutoff, now))],
-  ["discoveryRuns", windowed((reader, models, { intake }) => discoveryRuns(reader, models, intake))],
+  ["rediscoveryOutcomes", windowed("observations", DISCOVERY_ATTEMPT_RETENTION_MS, (reader, models, { intake, cutoff, now }) => rediscoveryOutcomes(reader, models, intake, cutoff, now))],
+  ["discoveryRuns", windowed("observations", DISCOVERY_ATTEMPT_RETENTION_MS, (reader, models, { intake }) => discoveryRuns(reader, models, intake))],
+  ["reviewEpisodes", windowed("reviewEpisodes", EPISODE_RETENTION_MS, (reader, models, context) => reviewEpisodes(reader, models, context))],
+  ["recommendationRuns", windowed("reviewEpisodes", RECOMMENDATION_RUN_RETENTION_MS, (reader, models, context) => recommendationRuns(reader, models, context))],
+  ["reviewEffort", windowed("effortTimer", EFFORT_RETENTION_MS, (reader, models, context) => reviewEffort(reader, models, context))],
 ];
 
 async function collectMeasurement({
-  manifest, checksum, now = new Date(), clock = () => Date.now(), limits = COLLECTION_LIMITS,
+  manifest, checksum, adjudication = null, now = new Date(), clock = () => Date.now(), limits = COLLECTION_LIMITS,
   Listening = require("../models/Listening"), AlbumCatalog = require("../models/AlbumCatalog"),
+  Baselines = require("../models/AlbumBaseline"), ReviewObservation = require("../models/ReviewObservation"),
   reviewStatusForAlbums = (...args) => require("../lib/baselines/service").reviewStatusForAlbums(...args),
 }) {
   const validated = validateManifest(manifest);
   const budget = createBudget({ maxRecords: limits.maxRecords, wallMs: limits.wallMs, clock });
   const reader = createReader(budget, limits);
-  const models = { Listening, AlbumCatalog, reviewStatusForAlbums };
+  const models = { Listening, AlbumCatalog, Baselines, ReviewObservation, reviewStatusForAlbums };
   // Follow-up is complete only for data already observed: the snapshot time, capped at the planned end.
   const endAt = validated.parsed.collection.endAt;
   const cutoff = endAt && endAt < now ? endAt : now;
-  const context = { now, cutoff, intake: observationIntake(validated.parsed.exposures, validated.windows) };
+  const { exposures, flagChanges, allowlistChanges } = validated.parsed;
+  const intakes = Object.fromEntries(Object.entries(exposures).map(([name, exposure]) => [name, prospectiveIntake(exposure, validated.windows, cutoff, { followUp: FOLLOW_UP_EXPOSURES.has(name) })]));
+  const context = { now, cutoff, intakes, flagChanges };
   const sections = {}; let stopReason = null;
   for (const [name, collect] of SECTIONS) {
     if (stopReason) { sections[name] = { collected: false, reason: "collection_stopped" }; continue; }
@@ -415,35 +566,45 @@ async function collectMeasurement({
     schemaVersion: MEASUREMENT_SCHEMA_VERSION,
     collectorVersion: COLLECTOR_VERSION,
     environment: validated.environment,
-    manifest: {
-      checksum: checksum || null, study: validated.study, sourceCommit: validated.sourceCommit, deployments: validated.deployments,
-      allowlistScopeVersion: validated.allowlistScopeVersion, windows: validated.windows,
+    manifest: { checksum: checksum || null, study: validated.study, sourceCommit: validated.sourceCommit, windows: validated.windows },
+    before: BEFORE_SNAPSHOT,
+    intakes: Object.fromEntries(Object.entries(intakes).map(([name, intake]) => [name, describeIntake(intake)])),
+    // Changes are echoed without their notes, which are free text.
+    changes: {
+      flags: flagChanges.map(({ flag, enabled, at }) => ({ flag, enabled, at: at.toISOString() })),
+      allowlist: allowlistChanges.map(({ change, count, at }) => ({ change, count, at: at.toISOString() })),
     },
-    cohortWindows: { pr32: cohortWindows(validated.parsed.exposures.pr32, validated.windows, cutoff), pr33: cohortWindows(validated.parsed.exposures.pr33, validated.windows, cutoff) },
     observedAt: now.toISOString(),
     collection: {
       startedAt: now.toISOString(), finishedAt: new Date(now.getTime() + budget.elapsed()).toISOString(),
       complete: !stopReason, stopReason, recordsRead: budget.records, limits: { ...limits },
     },
     ...sections,
-    baselineRecommendations: { collected: false, reason: "coverage_not_persisted" },
+    adjudication: adjudication ? summarizeLabels(adjudication) : { collected: false, reason: "no_adjudication_labels_supplied" },
     limitations: LIMITATIONS,
   };
   return assertAggregateOnly(report);
 }
 
 function parseArgs(argv) {
-  const usage = "Usage: listeningMeasurement.js (--template | --manifest PATH [--validate-only])";
+  const usage = "Usage: listeningMeasurement.js (--template | --manifest PATH [--validate-only] [--adjudication DIR])";
   if (argv.length === 1 && argv[0] === "--template") return { template: true };
   const args = {}; const rest = [...argv];
   while (rest.length) {
     const flag = rest.shift();
     if (flag === "--manifest" && rest.length && !args.manifest && !rest[0].startsWith("--")) args.manifest = rest.shift();
+    else if (flag === "--adjudication" && rest.length && !args.adjudication && !rest[0].startsWith("--")) args.adjudication = rest.shift();
     else if (flag === "--validate-only" && !args.validateOnly) args.validateOnly = true;
     else throw new Error(usage);
   }
-  if (!args.manifest) throw new Error(usage);
+  if (!args.manifest || (args.validateOnly && args.adjudication)) throw new Error(usage);
   return args;
+}
+
+// Reads a completed adjudication directory written by review:adjudication.
+function readAdjudication(directory) {
+  const read = (name) => { try { return fs.readFileSync(path.join(directory, name)); } catch { throw new Error("ADJUDICATION_FILES_MISSING"); } };
+  return { packetBytes: read("packet.json"), keyBytes: read("key.json"), labelsBytes: read("labels.json") };
 }
 
 function readManifest(path) {
@@ -460,14 +621,16 @@ async function main() {
   const validated = validateManifest(manifest);
   if (args.validateOnly) {
     // Nothing is observed offline, so follow-up is never reported complete here.
-    console.log(JSON.stringify({ valid: true, environment: validated.environment, checksum, cohortWindows: { pr32: cohortWindows(validated.parsed.exposures.pr32, validated.windows, null), pr33: cohortWindows(validated.parsed.exposures.pr33, validated.windows, null) } }, null, 2));
+    const intakes = Object.fromEntries(Object.entries(validated.parsed.exposures).map(([name, exposure]) => [name, describeIntake(prospectiveIntake(exposure, validated.windows, null, { followUp: FOLLOW_UP_EXPOSURES.has(name) }))]));
+    console.log(JSON.stringify({ valid: true, environment: validated.environment, checksum, intakes }, null, 2));
     return;
   }
+  const adjudication = args.adjudication ? readAdjudication(args.adjudication) : null;
   if (!process.env.MONGO_URI) throw new Error("MONGO_URI_REQUIRED");
   await mongoose.connect(process.env.MONGO_URI, { autoIndex: false, autoCreate: false });
-  try { console.log(JSON.stringify(await collectMeasurement({ manifest, checksum }), null, 2)); }
+  try { console.log(JSON.stringify(await collectMeasurement({ manifest, checksum, adjudication }), null, 2)); }
   finally { await mongoose.disconnect(); }
 }
-const PRINTABLE = /^(?:Usage:|Invalid measurement manifest:|MONGO_URI_REQUIRED$|MANIFEST_NOT_JSON$|MEASUREMENT_OUTPUT_CONTAINS_\w+$)/u;
+const PRINTABLE = /^(?:Usage:|Invalid measurement manifest:|MONGO_URI_REQUIRED$|MANIFEST_NOT_JSON$|MEASUREMENT_OUTPUT_CONTAINS_\w+$|ADJUDICATION_\w+$)/u;
 if (require.main === module) main().catch((error) => { console.error(PRINTABLE.test(error?.message || "") ? error.message : "LISTENING_MEASUREMENT_FAILED"); process.exitCode = 1; });
-module.exports = { collectMeasurement, createReader, jobState, parseArgs, readManifest };
+module.exports = { collectMeasurement, createReader, jobState, parseArgs, readAdjudication, readManifest };
