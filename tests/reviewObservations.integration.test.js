@@ -186,7 +186,7 @@ test("the report, adjudication export and clear command work on real collections
   assert.equal(mapping.episodes.missingUnknown, 1, "without a recorded flag change, the decision made while the flag was off is unknown");
   assert.deepEqual([baseline.episodes.recorded, baseline.selection.differsFromRecommendation], [2, 1]);
   assert.equal(report.recommendationRuns.runs, 1);
-  assert.deepEqual(report.reviewEffort.timings, { suppressed: true, reason: "fewer_than_5" });
+  assert.deepEqual(report.reviewEffort.timings, { decidedLinked: 1, decidedUnlinked: 2, abandoned: 1, total: 4, reconciles: true });
   assert.deepEqual(await Promise.all([Listening.MappingAudit.countDocuments(), Baselines.Audit.countDocuments(), ReviewObservation.Episode.countDocuments()]), before, "collection is read-only");
 
   // Every decision is too recent for adjudication until seven days have passed.

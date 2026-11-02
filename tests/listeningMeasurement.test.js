@@ -493,32 +493,23 @@ test("review episode coverage is measured against the audit log, with failures b
   assert.equal(serialized.includes(run), false);
 });
 
-test("effort totals hide every group smaller than five, including cells recoverable by subtraction", async () => {
+test("effort reports totals by outcome and kind without per-moderator detail", async () => {
   const at = (minutes) => new Date(Date.parse(T) + minutes * 60_000);
-  const effort = (minute, fields) => ({ _id: oidAt(at(minute)), recordedAt: at(minute), kind: "mapping", outcome: "decided", activeMs: 120_000, auditId: crypto.randomUUID(), ...fields });
-  const mapping = [1, 2, 3, 4, 5].map((minute) => effort(minute, {}));
-  const baseline = [6, 7, 8, 9, 10].map((minute) => effort(minute, { kind: "baseline", activeMs: 600_000 }));
-  const abandoned = [11, 12, 13, 14, 15].map((minute) => effort(minute, { outcome: "abandoned", auditId: "" }));
-  const unlinked = [16, 17, 18, 19, 20].map((minute) => effort(minute, { auditId: "" }));
+  const effort = (minute, fields) => ({ _id: oidAt(at(minute)), recordedAt: at(minute), kind: "mapping", outcome: "decided", activeMs: 120_000, auditId: crypto.randomUUID(), moderatorHash: "a".repeat(64), ...fields });
+  const efforts = [effort(1, {}), effort(2, {}), effort(3, { kind: "baseline", activeMs: 600_000 }), effort(4, { outcome: "abandoned", auditId: "", activeMs: 60_000 }), effort(5, { auditId: "" })];
   const exposures = exposuresWith({ effortTimer: { activatedAt: T, deployedRevision: null, rollbackAt: null, verification: "flag turned on" } });
-  const base = {
+  const models = {
     AlbumCatalog: model([]), reviewStatusForAlbums: async () => [],
     Listening: { MappingCase: model([]), Job: model([]), AlbumMapping: model([]), DiscoveryAttempt: model([]), MappingAudit: model([]), Connection: model([]), Scrobble: { aggregate: () => { throw new Error("unused"); } } },
+    ...observationModels({ efforts }),
   };
-  const run = (efforts) => collectMeasurement({ manifest: manifest({ exposures }), now: NOW, clock: () => 0, ...base, ...observationModels({ efforts }) });
-  const full = (await run([...mapping, ...baseline, ...abandoned, ...unlinked])).reviewEffort;
-  assert.deepEqual(full.timings, { decidedLinked: 10, decidedUnlinked: 5, abandoned: 5, total: 20, reconciles: true });
-  assert.deepEqual(full.decided, { records: 10, activeMinutes: 60, activeSecondsPerRecord: { count: 10, p50: 120, p90: 600, max: 600 } });
-  assert.deepEqual(full.byKind.mapping, { records: 5, activeMinutes: 10, activeSecondsPerRecord: { count: 5, p50: 120, p90: 120, max: 120 } });
-  assert.equal(full.abandoned.records, 5);
-
-  // One baseline timing would be decided minus mapping, so both kinds are hidden; the timing
-  // partition has small cells, so only its total is shown.
-  const partial = (await run([...mapping, baseline[0], abandoned[0]])).reviewEffort;
-  assert.deepEqual(partial.byKind, { mapping: { suppressed: true, reason: "fewer_than_5" }, baseline: { suppressed: true, reason: "fewer_than_5" } });
-  assert.deepEqual(partial.timings, { total: 7, suppressed: true, reason: "a_cell_has_fewer_than_5" });
-  assert.equal(partial.decided.records, 6);
-  assert.deepEqual(partial.abandoned, { suppressed: true, reason: "fewer_than_5" });
-  const few = (await run(mapping.slice(0, 3))).reviewEffort;
-  assert.deepEqual(few.timings, { suppressed: true, reason: "fewer_than_5" }, "even the overall counts are hidden below five");
+  const report = await collectMeasurement({ manifest: manifest({ exposures }), now: NOW, clock: () => 0, ...models });
+  const result = report.reviewEffort;
+  assert.deepEqual(result.timings, { decidedLinked: 3, decidedUnlinked: 1, abandoned: 1, total: 5, reconciles: true });
+  assert.deepEqual(result.decided, { records: 3, activeMinutes: 14, activeSecondsPerRecord: { count: 3, p50: 120, p90: 600, max: 600 } });
+  assert.deepEqual(result.byKind.baseline, { records: 1, activeMinutes: 10, activeSecondsPerRecord: { count: 1, p50: 600, p90: 600, max: 600 } }, "small groups are reported, not hidden");
+  assert.deepEqual(result.abandoned, { records: 1, activeMinutes: 1, activeSecondsPerRecord: { count: 1, p50: 60, p90: 60, max: 60 } });
+  const serialized = JSON.stringify(result);
+  assert.equal(serialized.includes("a".repeat(64)), false, "no moderator hash");
+  for (const row of efforts) if (row.auditId) assert.equal(serialized.includes(row.auditId), false);
 });

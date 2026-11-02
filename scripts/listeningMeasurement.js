@@ -368,8 +368,6 @@ async function discoveryRuns(reader, { Listening }, intake) {
 const MAPPING_DECISIONS = ["approved", "rejected", "no_catalog_match"];
 const BASELINE_DECISIONS = ["confirm", "replace", "defer", "revoke"];
 const EPISODE_FAILURES = ["capture_failed", "capture_invalid", "write_failed", "write_timeout"];
-// Effort groups smaller than this are hidden, since a group of one or two moderators' reviews is personal.
-const MIN_GROUP = 5;
 const inIntervals = (at, intervals) => intervals.some((interval) => at >= interval.from && at < interval.to);
 const windowRange = (intake, field) => ({ _id: idRange(intake.from, intake.to), [field]: { $gte: intake.from, $lt: intake.to } });
 
@@ -469,38 +467,24 @@ async function recommendationRuns(reader, { ReviewObservation }, { intake }) {
 
 const minutes = (ms) => Math.round((ms / 60_000) * 10) / 10;
 function effortGroup(rows) {
-  if (rows.length < MIN_GROUP) return { suppressed: true, reason: `fewer_than_${MIN_GROUP}` };
   return { records: rows.length, activeMinutes: minutes(rows.reduce((sum, row) => sum + row.activeMs, 0)), activeSecondsPerRecord: percentiles(rows.map((row) => row.activeMs / 1000)) };
 }
 
-const SUPPRESSED = { suppressed: true, reason: `fewer_than_${MIN_GROUP}` };
-// A partition is shown only when every non-empty cell reaches the minimum, so no small cell can
-// be read directly or recovered by subtracting the others from the total.
-function effortPartition(counts, total) {
-  if (total < MIN_GROUP) return SUPPRESSED;
-  if (Object.values(counts).some((value) => value > 0 && value < MIN_GROUP)) return { total, ...SUPPRESSED, reason: `a_cell_has_fewer_than_${MIN_GROUP}` };
-  return partition(counts, total);
-}
-
 // Opt-in active effort (plan: "Moderator effort") for timings recorded in the effort-timer intake.
-// Totals only; every group below the minimum size is hidden, including the overall totals.
+// Totals only: no per-moderator breakdown and no record identifiers.
 async function reviewEffort(reader, { ReviewObservation }, { intake }) {
   const rows = await reader.all(ReviewObservation.Effort, windowRange(intake, "recordedAt"), "kind outcome activeMs auditId");
   const linked = rows.filter((row) => row.outcome === "decided" && row.auditId);
   const status = { decidedLinked: linked.length, decidedUnlinked: rows.filter((row) => row.outcome === "decided" && !row.auditId).length, abandoned: rows.filter((row) => row.outcome === "abandoned").length };
-  const kinds = { mapping: linked.filter((row) => row.kind === "mapping"), baseline: linked.filter((row) => row.kind === "baseline") };
-  // Decided = mapping + baseline, so hiding one kind hides the other too.
-  const kindHidden = Object.values(kinds).some((group) => group.length > 0 && group.length < MIN_GROUP);
   return {
     collected: true,
     unit: "timed review (opt-in)",
     intake: { basis: "prospective_after_effort_timer", from: iso(intake.from), to: iso(intake.to) },
-    minimumGroupSize: MIN_GROUP,
-    timings: effortPartition(status, rows.length),
+    timings: partition(status, rows.length),
     decided: effortGroup(linked),
     abandoned: effortGroup(rows.filter((row) => row.outcome === "abandoned")),
-    byKind: kindHidden ? { mapping: SUPPRESSED, baseline: SUPPRESSED } : { mapping: effortGroup(kinds.mapping), baseline: effortGroup(kinds.baseline) },
-    note: "Groups count timings, not moderators: with one opted-in moderator, every total describes that moderator's own effort. Linked timings end with a decision this moderator committed for the target, and each decision links to at most one timing. Opt-in timing is a self-selected sample, not every review.",
+    byKind: { mapping: effortGroup(linked.filter((row) => row.kind === "mapping")), baseline: effortGroup(linked.filter((row) => row.kind === "baseline")) },
+    note: "Totals pool every opted-in moderator: with one moderator, they describe that moderator's own effort. Linked timings end with a decision this moderator committed for the target, and each decision links to at most one timing. Opt-in timing is a self-selected sample, not every review.",
   };
 }
 
