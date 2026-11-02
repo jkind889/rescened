@@ -3,9 +3,9 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const mongoose = require("mongoose");
 const {
-  assertAggregateOnly, cohortWindows, createBudget, followUpStatus, manifestTemplate, partition, ratio, validateManifest, BudgetExceeded, ManifestError,
+  assertAggregateOnly, cohortWindows, createBudget, followUpStatus, manifestTemplate, observationIntake, partition, ratio, validateManifest, BudgetExceeded, ManifestError,
 } = require("../lib/listening/measurement");
-const { rediscoveryMatches, rediscoveryPairs } = require("../lib/listening/worker");
+const { attemptJobKey, rediscoveryMatches, rediscoveryPairs } = require("../lib/listening/worker");
 const { collectMeasurement, jobState, parseArgs } = require("../scripts/listeningMeasurement");
 
 const DAY = 86_400_000;
@@ -16,7 +16,7 @@ function manifest(overrides = {}) {
     ...manifestTemplate(),
     environment: "fixture",
     sourceCommit: "d61e508",
-    exposures: { pr32: { activatedAt: T, rollbackAt: null, verification: "deploy log reviewed" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" } },
+    exposures: { pr32: { activatedAt: T, rollbackAt: null, verification: "deploy log reviewed" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" }, observations: { activatedAt: null, rollbackAt: null, verification: "" } },
     flags: { LASTFM_DISCOVERY_ENABLED: true },
     allowlistScopeVersion: "v1",
     windows: { intakeDays: 14, followUpDays: 7, snapshotTimeUtc: "06:00" },
@@ -28,21 +28,25 @@ function manifest(overrides = {}) {
 test("manifest validation rejects placeholders, unknown fields, credentials and impossible exposure clocks", () => {
   assert.throws(() => validateManifest(manifestTemplate()), (error) => error instanceof ManifestError && error.problems.some((problem) => problem.startsWith("environment")));
   assert.equal(validateManifest(manifest()).parsed.exposures.pr32.activatedAt.toISOString(), "2026-11-03T00:00:00.000Z");
-  assert.equal(validateManifest(manifest({ windows: null })).windows, null, "windows may stay unconfirmed");
+  assert.deepEqual(manifestTemplate().windows, { intakeDays: 14, followUpDays: 7, snapshotTimeUtc: "06:00" }, "the template carries the confirmed windows");
   const invalid = [
     manifest({ extra: true }),
     manifest({ targetVerification: "mongodb+srv://reader:secret@cluster.example/db" }),
     manifest({ evidence: { location: "https://user:pass@host/x", checksum: null } }),
-    manifest({ exposures: { pr32: { activatedAt: T, rollbackAt: "2026-11-02T00:00:00Z", verification: "log" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" } } }),
-    manifest({ exposures: { pr32: { activatedAt: T, rollbackAt: null, verification: "" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" } } }),
-    manifest({ exposures: { pr32: { activatedAt: "2026-11-03", rollbackAt: null, verification: "log" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" } } }),
+    manifest({ exposures: { pr32: { activatedAt: T, rollbackAt: "2026-11-02T00:00:00Z", verification: "log" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" }, observations: { activatedAt: null, rollbackAt: null, verification: "" } } }),
+    manifest({ exposures: { pr32: { activatedAt: T, rollbackAt: null, verification: "" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" }, observations: { activatedAt: null, rollbackAt: null, verification: "" } } }),
+    manifest({ exposures: { pr32: { activatedAt: "2026-11-03", rollbackAt: null, verification: "log" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" }, observations: { activatedAt: null, rollbackAt: null, verification: "" } } }),
     manifest({ windows: { intakeDays: 0, followUpDays: 7, snapshotTimeUtc: "06:00" } }),
     manifest({ windows: { intakeDays: 14, followUpDays: 7, snapshotTimeUtc: "6am" } }),
+    manifest({ windows: { intakeDays: 7, followUpDays: 7, snapshotTimeUtc: "06:00" } }),
+    manifest({ windows: { intakeDays: 14, followUpDays: 7, snapshotTimeUtc: "00:00" } }),
+    manifest({ windows: null }),
+    manifest({ exposures: { pr32: { activatedAt: null, rollbackAt: null, verification: "" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" } } }),
     manifest({ flags: { lowercase: true } }),
     manifest({ sourceCommit: "main" }),
-    manifest({ schemaVersion: 2 }),
+    manifest({ schemaVersion: 1 }),
     manifest({ collection: { startAt: "2026-02-31T00:00:00Z", endAt: null } }),
-    manifest({ exposures: { pr32: { activatedAt: "2026-11-31T00:00Z", rollbackAt: null, verification: "log" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" } } }),
+    manifest({ exposures: { pr32: { activatedAt: "2026-11-31T00:00Z", rollbackAt: null, verification: "log" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" }, observations: { activatedAt: null, rollbackAt: null, verification: "" } } }),
   ];
   for (const value of invalid) assert.throws(() => validateManifest(value), ManifestError);
   // Printed problems never repeat credential-like keys.
@@ -130,6 +134,9 @@ function model(rows) {
       return Object.entries(expected).every(([operator, target]) => {
         if (operator === "$in") return target.some((item) => value(item) === actual);
         if (operator === "$gt") return actual > value(target);
+        if (operator === "$gte") return actual >= value(target);
+        if (operator === "$lt") return actual < value(target);
+        if (operator === "$lte") return actual <= value(target);
         if (operator === "$ne") return actual !== target;
         if (operator === "$exists") return (actual !== undefined) === target;
         throw new Error(`Unsupported test operator ${operator}`);
@@ -209,7 +216,7 @@ function world() {
     models: {
       AlbumCatalog: model(albums),
       Listening: {
-        MappingCase: model(cases), Job: model(jobs), AlbumMapping: model(mappings),
+        MappingCase: model(cases), Job: model(jobs), AlbumMapping: model(mappings), DiscoveryAttempt: model([]),
         Connection: model([{ _id: connectionId, state: "active" }]),
         Scrobble: { aggregate: (pipeline) => ({ option: async (options) => { assert.deepEqual(options, { maxTimeMS: 5_000, allowDiskUse: false }); assert.ok(pipeline[0].$match.expiresAt.$gt instanceof Date); assert.ok(pipeline.at(-1).$limit > 0); return names; } }) },
       },
@@ -268,16 +275,17 @@ test("the collector reports the eligible pair census, evidence reasons and deman
 test("an empty database reports zero counts and null rates", async () => {
   const empty = {
     AlbumCatalog: model([]),
-    Listening: { MappingCase: model([]), Job: model([]), AlbumMapping: model([]), Connection: model([]), Scrobble: { aggregate: () => { throw new Error("not called without connections"); } } },
+    Listening: { MappingCase: model([]), Job: model([]), AlbumMapping: model([]), DiscoveryAttempt: model([]), Connection: model([]), Scrobble: { aggregate: () => { throw new Error("not called without connections"); } } },
     reviewStatusForAlbums: async () => [],
   };
-  const report = await collectMeasurement({ manifest: manifest({ windows: null }), now: NOW, clock: () => 0, ...empty });
+  const report = await collectMeasurement({ manifest: manifest(), now: NOW, clock: () => 0, ...empty });
   assert.equal(report.rediscoveryCensus.pairs, 0);
   assert.equal(report.rediscoveryCensus.casesWithUsableMatchingCandidate.value, null);
   assert.equal(report.mappingEvidence.problemRate.value, null);
   assert.equal(report.demandReadiness.names.mappingCoverage.value, null);
   assert.equal(report.demandReadiness.albums.status.reconciles, true);
-  assert.deepEqual(report.cohortWindows.pr32, { status: "windows_unconfirmed" });
+  assert.deepEqual(report.rediscoveryOutcomes, { collected: false, reason: "observation_records_unverified" });
+  assert.deepEqual(report.discoveryRuns, { collected: false, reason: "observation_records_unverified" });
 });
 
 test("an exhausted budget marks the section and every later one as not collected", async () => {
@@ -286,7 +294,7 @@ test("an exhausted budget marks the section and every later one as not collected
   const report = await collectMeasurement({ manifest: manifest(), now: NOW, clock: () => 0, limits, ...models });
   assert.equal(report.collection.complete, false);
   assert.equal(report.collection.stopReason, "record_budget_exhausted");
-  const sections = ["mappingEvidence", "demandReadiness", "rediscoveryCensus"].map((name) => report[name]);
+  const sections = ["mappingEvidence", "demandReadiness", "rediscoveryCensus", "rediscoveryOutcomes", "discoveryRuns"].map((name) => report[name]);
   const stopped = sections.findIndex((section) => !section.collected);
   assert.ok(stopped >= 0);
   assert.deepEqual(sections[stopped], { collected: false, reason: "record_budget_exhausted" });
@@ -309,4 +317,95 @@ test("an invalid manifest stops collection before any query", async () => {
   const { models } = world();
   await assert.rejects(collectMeasurement({ manifest: manifestTemplate(), now: NOW, ...models }), ManifestError);
   assert.equal(models.Listening.MappingCase.calls.length, 0);
+});
+
+test("observation intake is prospective unless PR33 activated after records began", () => {
+  const windows = { intakeDays: 14, followUpDays: 7, snapshotTimeUtc: "06:00" };
+  const records = new Date("2026-11-03T00:00:00Z");
+  assert.deepEqual(observationIntake({ observations: { activatedAt: null } }, windows), { status: "observation_records_unverified" });
+  const prospective = observationIntake({ pr33: { activatedAt: new Date("2026-10-31T00:00:00Z") }, observations: { activatedAt: records } }, windows);
+  assert.equal(prospective.basis, "prospective_after_observation_records");
+  assert.equal(+prospective.from, +records);
+  assert.equal(+prospective.to - +prospective.from, 14 * DAY);
+  const post = observationIntake({ pr33: { activatedAt: new Date("2026-11-05T00:00:00Z") }, observations: { activatedAt: records } }, windows);
+  assert.equal(post.basis, "post_pr33_activation");
+  assert.equal(post.from.toISOString(), "2026-11-05T00:00:00.000Z");
+  assert.equal(post.pr33RollbackInsideFollowUp, false);
+  assert.deepEqual(observationIntake({ observations: { activatedAt: records, rollbackAt: new Date("2026-11-10T00:00:00Z") } }, windows), { status: "observation_records_rolled_back" });
+  assert.equal(observationIntake({ pr33: { activatedAt: records, rollbackAt: new Date("2026-11-20T00:00:00Z") }, observations: { activatedAt: records } }, windows).pr33RollbackInsideFollowUp, true);
+});
+
+function oidAt(date) {
+  const id = new mongoose.Types.ObjectId();
+  id.id.writeUInt32BE(Math.floor(new Date(date).getTime() / 1000), 0);
+  return id;
+}
+
+function windowedWorld() {
+  const at = (day, hours = 0) => new Date(Date.parse(`2026-11-${String(day).padStart(2, "0")}T00:00:00Z`) + hours * 3_600_000);
+  const sweep = at(3);
+  const jobs = []; const attempts = [];
+  const pair = (day, fields = {}, observation = {}) => {
+    fields = { attempts: 1, ...fields };
+    const caseId = crypto.randomUUID(); const albumId = crypto.randomUUID(); const observedAt = at(day);
+    const job = { _id: oidAt(observedAt), key: `discovery:catalog:${caseId}:${oidAt(observedAt)}`, type: "discovery", status: "done", error: "", payload: { caseId, catalogAlbumId: String(oidAt(observedAt)), observation: { version: 1, albumId, observedAt, scanMode: "recent", eligibleAfter: sweep, usableCandidateAtEntry: false, ...observation } }, ...fields };
+    jobs.push(job); return job;
+  };
+  const attempt = (job, hours, fields = {}) => {
+    const startedAt = new Date(+job.payload.observation.observedAt + hours * 3_600_000);
+    const { completedAfterHours = 0, jobKey = job.key, ...rest } = fields;
+    attempts.push({ _id: oidAt(startedAt), caseId: job.payload.caseId, jobKeyHash: attemptJobKey(jobKey), trigger: "catalog", outcome: "committed", providerComplete: true, queryCapReached: false, candidateCapReached: false, candidatesAfter: [], pairCandidateBefore: false, startedAt, completedAt: new Date(+startedAt + completedAfterHours * 3_600_000), ...rest });
+  };
+  const found = (job) => [{ albumId: job.payload.observation.albumId }];
+  const p1 = pair(4); attempt(p1, 1, { candidatesAfter: found(p1), queryCapReached: true });
+  const p2 = pair(5); attempt(p2, 2, { jobKey: `discovery:${p2.payload.caseId}`, trigger: "moderator_refresh", candidatesAfter: found(p2) }); attempt(p2, 24, { candidatesAfter: found(p2), pairCandidateBefore: true });
+  const p3 = pair(5, { error: "lastfm_timeout" }, { usableCandidateAtEntry: true }); attempt(p3, 1, { outcome: "failed", providerComplete: null, queryCapReached: null }); attempt(p3, 2, { outcome: "failed", providerComplete: null, queryCapReached: null });
+  const p4 = pair(6, { status: "pending", error: "discovery_incomplete" }); attempt(p4, 0.5, { outcome: "conflict", queryCapReached: null }); attempt(p4, 1, { providerComplete: false, candidatesAfter: found(p4) });
+  pair(7, { status: "pending", attempts: 0 }, { eligibleAfter: null });
+  const p6 = pair(8); attempt(p6, 1, { outcome: "skipped", providerComplete: null, queryCapReached: null });
+  // Started before the follow-up ended but committed after it: not a gain by H.
+  const p9 = pair(9); attempt(p9, 167.9, { completedAfterHours: 0.5 });
+  // Leased twice with no record: an execution the observation records missed.
+  pair(10, { status: "pending", attempts: 2 });
+  pair(15, { status: "pending" });
+  pair(18, { status: "pending" });
+  return { jobs, attempts };
+}
+
+test("windowed rediscovery outcomes credit gains carefully and keep every pair in the denominator", async () => {
+  const { jobs, attempts } = windowedWorld();
+  const exposures = { pr32: { activatedAt: null, rollbackAt: null, verification: "" }, pr33: { activatedAt: null, rollbackAt: null, verification: "" }, observations: { activatedAt: "2026-11-03T00:00:00Z", rollbackAt: null, verification: "worker deploy log" } };
+  const models = {
+    AlbumCatalog: model([]), reviewStatusForAlbums: async () => [],
+    Listening: { MappingCase: model([]), Job: model(jobs), AlbumMapping: model([]), DiscoveryAttempt: model(attempts), Connection: model([]), Scrobble: { aggregate: () => { throw new Error("unused"); } } },
+  };
+  const now = new Date("2026-11-20T06:00:00Z");
+  const report = await collectMeasurement({ manifest: manifest({ exposures }), now, clock: () => 0, limits: { pageSize: 2, maxRecords: 10_000, maxTimeMS: 5_000, wallMs: 60_000 }, ...models });
+  const outcomes = report.rediscoveryOutcomes;
+  assert.equal(outcomes.intake.basis, "prospective_after_observation_records");
+  assert.deepEqual([outcomes.entered, outcomes.followUpComplete, outcomes.censored], [9, 8, 1], "the pair after the intake is excluded; the late one is censored");
+  assert.equal(outcomes.usableCandidateAtEntry, 1);
+  assert.deepEqual(outcomes.candidateGain, { unit: "pair", numerator: 2, denominator: 7, value: 2 / 7 });
+  assert.deepEqual(outcomes.pr33ObservedGain, { unit: "pair", numerator: 1, denominator: 7, value: 1 / 7 }, "a gain from a moderator refresh is not PR33's");
+  assert.deepEqual(outcomes.gainAttribution, { pr33Observed: 1, ownJobAlreadyPresent: 0, otherTrigger: 1, total: 2, reconciles: true });
+  assert.deepEqual(outcomes.outcomeAtFollowUp, { notExecuted: 2, unrecordedExecution: 1, skippedIneligible: 1, executedWithMatching: 2, executedWithoutMatching: 0, failedAwaitingRetry: 1, terminalError: 1, total: 8, reconciles: true });
+  assert.deepEqual(outcomes.terminalErrorIncidence, { unit: "pair", numerator: 1, denominator: 8, value: 1 / 8 });
+  assert.equal(outcomes.retryLoad.runs, 6);
+  assert.equal(outcomes.enqueueReach.measurable, false);
+  assert.deepEqual(outcomes.delaySeconds.eligibilityToObservationUpperBound.unknownEntry, 1);
+  assert.deepEqual(outcomes.delaySeconds.observationToFirstRun, { count: 4, p50: 3600, p90: 86_400, max: 86_400, notRunByFollowUp: 4 });
+  assert.deepEqual(outcomes.delaySeconds.observationToFirstUsableCandidate, { count: 2, p50: 3600, p90: 7200, max: 7200, notGainedByFollowUp: 5 });
+
+  const runs = report.discoveryRuns;
+  assert.deepEqual([runs.runs, runs.skips, runs.distinctCases], [8, 1, 5]);
+  assert.deepEqual(runs.result, { completeResult: 4, incompleteResult: 1, failedWithoutResult: 2, revisionConflict: 1, total: 8, reconciles: true });
+  assert.deepEqual(runs.byTrigger, { catalog: 7, moderator_refresh: 1, case_revision: 0, total: 8, reconciles: true });
+  assert.deepEqual(runs.coverageKnown, { unit: "run with a result", numerator: 5, denominator: 6, value: 5 / 6 });
+  assert.deepEqual(runs.reasonsAmongResults, { providerIncomplete: 1, queryCapReached: 1, candidateCapReached: 0 });
+
+  const expired = await collectMeasurement({ manifest: manifest({ exposures }), now: new Date("2027-02-01T00:00:00Z"), clock: () => 0, ...models });
+  assert.deepEqual(expired.rediscoveryOutcomes, { collected: false, reason: "observation_records_expired" });
+
+  const serialized = JSON.stringify(report);
+  for (const job of jobs) for (const secret of [job.payload.caseId, job.payload.observation.albumId, String(job._id)]) assert.equal(serialized.includes(secret), false);
 });

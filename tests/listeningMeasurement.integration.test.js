@@ -61,3 +61,50 @@ test("measurement collector reads real collections without writing", { skip: !en
   assert.deepEqual(await counts(), before, "collection is read-only");
   assert.equal(JSON.stringify(report).includes(duet.caseId), false);
 });
+
+test("discovery attempts commit with the discovery transaction and feed windowed outcomes", { skip: !enabled }, async (t) => {
+  const { runWorkerOnce, scheduleCatalogRediscoveryJobs } = require("../lib/listening/worker");
+  const set = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
+  await mongoose.connect(set.getUri(), { dbName: "rescened_listening_attempts" });
+  t.after(async () => { await mongoose.connection.dropDatabase(); await mongoose.disconnect(); await set.stop(); });
+  await Promise.all([AlbumCatalog.syncIndexes(), ...Object.values(Listening).map((model) => model.syncIndexes()), ...Object.values(Baselines).map((model) => model.syncIndexes())]);
+  const indexes = await Listening.DiscoveryAttempt.collection.indexes();
+  assert.ok(indexes.some((index) => index.key.expiresAt === 1 && index.expireAfterSeconds === 0), "attempts expire");
+
+  const start = new Date(Math.floor(Date.now() / 60_000) * 60_000 - 60_000);
+  const env = { LASTFM_DISCOVERY_ENABLED: "true" };
+  const album = await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Found", artistDisplayName: "Artist", releaseType: "album", catalogRevision: 1 });
+  const contested = await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Contested", artistDisplayName: "Artist", releaseType: "album", catalogRevision: 1 });
+  const mappingCase = (title) => Listening.MappingCase.create({ key: mappingKey("Artist", title), artist: "Artist", album: title, artistKey: "artist", albumKey: title.toLowerCase(), status: "no_catalog_match", evidenceHash: "empty" });
+  const found = await mappingCase("Found"); const raced = await mappingCase("Contested");
+  assert.equal(await scheduleCatalogRediscoveryJobs({ env }), 2);
+  const jobs = await Listening.Job.find({ "payload.observation.version": 1 }).lean();
+  assert.equal(jobs.length, 2);
+  for (const job of jobs) assert.equal(job.payload.observation.eligibleAfter, null, "no full sweep has completed yet");
+
+  const result = (row) => ({ candidates: [{ albumId: row.albumId, title: row.title, artistDisplayName: "Artist", catalogRevision: 1, evidence: [] }], evidence: [{ source: "candidate_discovery", candidateQueryLimitReached: false, candidatesFound: 1, candidatesShown: 1 }], evidenceHash: row.albumId });
+  const discovery = { async discover({ album: title }) {
+    // A moderator command wins the race for the contested case while discovery runs.
+    if (title === "Contested") await Listening.MappingCase.updateOne({ caseId: raced.caseId }, { $inc: { revision: 1 } });
+    return result(title === "Found" ? album : contested);
+  } };
+  // The scanner staggers catalog jobs, so run them as of a minute later.
+  for (let run = 0; run < 2; run += 1) await runWorkerOnce({ env, provider: {}, types: ["discovery"], discovery, clock: () => new Date(Date.now() + 60_000) });
+
+  const committed = await Listening.DiscoveryAttempt.findOne({ caseId: found.caseId }).lean();
+  assert.equal(committed.outcome, "committed"); assert.equal(committed.pairAlbumId, album.albumId);
+  assert.equal(committed.pairCandidateBefore, false); assert.equal(committed.pairCandidateAfter, true);
+  assert.equal((await Listening.MappingCase.findOne({ caseId: found.caseId }).lean()).status, "pending");
+  const conflicts = await Listening.DiscoveryAttempt.find({ caseId: raced.caseId }).lean();
+  assert.deepEqual(conflicts.map((row) => row.outcome), ["conflict"], "the rolled-back run left no committed attempt");
+  assert.deepEqual((await Listening.MappingCase.findOne({ caseId: raced.caseId }).lean()).candidates, []);
+
+  const manifest = { ...manifestTemplate(), environment: "integration", exposures: { ...manifestTemplate().exposures, observations: { activatedAt: start.toISOString(), rollbackAt: null, verification: "integration fixture" } } };
+  const report = await collectMeasurement({ manifest, now: new Date(start.getTime() + 8 * 86_400_000) });
+  assert.equal(report.collection.complete, true);
+  assert.equal(report.rediscoveryOutcomes.followUpComplete, 2);
+  assert.deepEqual(report.rediscoveryOutcomes.candidateGain, { unit: "pair", numerator: 1, denominator: 2, value: 0.5 });
+  assert.equal(report.rediscoveryOutcomes.pr33ObservedGain.numerator, 1);
+  assert.equal(report.discoveryRuns.result.completeResult, 1);
+  assert.equal(report.discoveryRuns.result.revisionConflict, 1);
+});

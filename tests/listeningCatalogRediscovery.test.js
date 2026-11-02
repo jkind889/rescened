@@ -3,8 +3,8 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const mongoose = require("mongoose");
 const AlbumCatalog = require("../models/AlbumCatalog");
-const { MappingCase, Job, CatalogScan } = require("../models/Listening");
-const { scheduleCatalogRediscoveryJobs, runWorkerOnce } = require("../lib/listening/worker");
+const { MappingCase, Job, CatalogScan, DiscoveryAttempt } = require("../models/Listening");
+const { attemptJobKey, scheduleCatalogRediscoveryJobs, runWorkerOnce } = require("../lib/listening/worker");
 const { normalize, mappingKey } = require("../lib/listening/common");
 
 // Execute the real Mongoose queries/middleware against an in-memory collection boundary.
@@ -12,7 +12,7 @@ const { normalize, mappingKey } = require("../lib/listening/common");
 // behavior is separately covered in the Mongo integration suite; this harness does not emulate it.
 function harness(t) {
   let now = new Date("2026-11-01T12:00:00.500Z");
-  const albums = []; const cases = []; const jobs = []; const checkpoints = []; const reads = [];
+  const albums = []; const cases = []; const jobs = []; const checkpoints = []; const attempts = []; const reads = [];
   const value = (x) => x instanceof Date ? +x : x?._bsontype === "ObjectId" ? String(x) : x;
   const get = (row, key) => key.split(".").reduce((entry, part) => entry?.[part], row);
   const matches = (row, filter) => Object.entries(filter).every(([key, expected]) => {
@@ -78,7 +78,7 @@ function harness(t) {
       update(row, change, false); return clone(row);
     });
   };
-  bind(AlbumCatalog, albums); bind(MappingCase, cases); bind(Job, jobs); bind(CatalogScan, checkpoints);
+  bind(AlbumCatalog, albums); bind(MappingCase, cases); bind(Job, jobs); bind(CatalogScan, checkpoints); bind(DiscoveryAttempt, attempts);
   t.mock.method(mongoose, "now", () => now);
   const env = { LASTFM_DISCOVERY_ENABLED: "true" };
   const state = {};
@@ -96,7 +96,7 @@ function harness(t) {
     cases.push(row); return row;
   };
   const run = (discover, extra = {}) => runWorkerOnce({ env, provider: {}, clock: () => now, types: ["discovery"], discovery: { discover }, sessionFactory: async () => ({ withTransaction: async (fn) => fn(), endSession: async () => {} }), ...extra });
-  return { albums, cases, jobs, checkpoints, reads, state, scan, run, addAlbum, addCase, now: () => now, advance: (ms) => { now = new Date(+now + ms); } };
+  return { albums, cases, jobs, checkpoints, attempts, reads, state, scan, run, addAlbum, addCase, now: () => now, advance: (ms) => { now = new Date(+now + ms); } };
 }
 const complete = (albumId) => ({ candidates: [{ albumId }], evidence: [], evidenceHash: albumId });
 
@@ -261,4 +261,93 @@ test("a scanner that loses its lease stops enqueueing and cannot overwrite its s
   assert.equal(h.jobs.length, 1);
   assert.deepEqual(h.checkpoints[0].state, { marker: "successor-state" });
   assert.equal(h.checkpoints[0].leaseToken, "successor");
+});
+
+test("catalog jobs record their pair observation and each execution as a private attempt", async (t) => {
+  const h = harness(t); const album = h.addAlbum(); h.addCase();
+  assert.equal(await h.scan(), 1);
+  assert.deepEqual(h.jobs[0].payload.observation, { version: 1, albumId: album.albumId, observedAt: h.now(), scanMode: "recent", eligibleAfter: null, usableCandidateAtEntry: false });
+  h.advance(1_000);
+  await h.run(async () => complete(album.albumId));
+  assert.equal(h.attempts.length, 1);
+  const [attempt] = h.attempts;
+  assert.equal(attempt.outcome, "committed"); assert.equal(attempt.trigger, "catalog");
+  assert.equal(attempt.jobKeyHash, attemptJobKey(h.jobs[0].key)); assert.equal(attempt.pairAlbumId, album.albumId);
+  assert.equal(attempt.pairCandidateBefore, false); assert.equal(attempt.pairCandidateAfter, true);
+  assert.equal(attempt.providerComplete, true); assert.equal(attempt.storedCandidatesReplaced, true);
+  assert.equal(attempt.statusBefore, "no_catalog_match"); assert.equal(attempt.statusAfter, "pending");
+  assert.deepEqual(JSON.parse(JSON.stringify(attempt.candidatesAfter)), [{ albumId: album.albumId, catalogRevision: null }]);
+  assert.equal(attempt.leaseAttempt, 1);
+  assert.equal(+attempt.expiresAt - +attempt.completedAt, 90 * 86_400_000);
+});
+
+test("incomplete runs record their own result while the case keeps its earlier candidates", async (t) => {
+  const h = harness(t); const album = h.addAlbum(); const row = h.addCase({ candidates: [{ albumId: "kept" }] });
+  await h.scan();
+  await h.run(async () => ({ ...complete(album.albumId), incomplete: true }));
+  assert.deepEqual(row.candidates, [{ albumId: "kept" }]);
+  const [attempt] = h.attempts;
+  assert.equal(attempt.outcome, "committed"); assert.equal(attempt.providerComplete, false);
+  assert.equal(attempt.storedCandidatesReplaced, false); assert.equal(attempt.pairCandidateAfter, true);
+  assert.equal(h.jobs[0].error, "discovery_incomplete");
+});
+
+test("skips and failed discoveries are recorded without provider results", async (t) => {
+  const h = harness(t); const album = h.addAlbum(); const row = h.addCase();
+  await h.scan();
+  row.status = "rejected";
+  let called = false;
+  await h.run(async () => { called = true; return complete(album.albumId); });
+  assert.equal(called, false);
+  assert.deepEqual([h.attempts[0].outcome, h.attempts[0].skipReason, h.attempts[0].providerComplete, h.attempts[0].pairCandidateAfter], ["skipped", "case_not_eligible", null, null]);
+
+  const other = harness(t); const second = other.addAlbum(); other.addCase();
+  await other.scan();
+  await other.run(async () => { const error = new Error("boom"); error.code = "lastfm_timeout"; throw error; });
+  assert.deepEqual([other.attempts[0].outcome, other.attempts[0].errorCode], ["failed", "lastfm_timeout"]);
+  assert.equal(other.jobs[0].status, "pending", "recording a failure does not change the retry");
+  assert.ok(second);
+});
+
+test("pairs observed after a completed full sweep carry that sweep's start as their entry bound", async (t) => {
+  const h = harness(t); h.addAlbum({ title: "Other" });
+  const before = h.now();
+  for (let pass = 0; pass < 4 && !h.state.lastFullSweepStartedAt; pass += 1) { await h.scan(); h.advance(1_000); }
+  const sweepStart = h.state.lastFullSweepStartedAt;
+  assert.ok(sweepStart >= before && sweepStart < h.now());
+  h.advance(60_000);
+  const album = h.addAlbum(); h.addCase();
+  for (let pass = 0; pass < 2 && !h.jobs.length; pass += 1) await h.scan();
+  assert.equal(h.jobs.length, 1);
+  assert.equal(+h.jobs[0].payload.observation.eligibleAfter, +sweepStart);
+  assert.equal(h.jobs[0].payload.observation.albumId, album.albumId);
+});
+
+test("long case-revision keys still record, and failures after provider work are recorded", async (t) => {
+  const h = harness(t);
+  const artist = "A".repeat(500); const album = "B".repeat(500);
+  const row = h.addCase({ artist, album, status: "pending" });
+  h.jobs.push({ _id: new mongoose.Types.ObjectId(), key: `discovery:${row.key}:1`, type: "discovery", payload: { caseId: row.caseId, key: row.key }, status: "pending", runAt: h.now(), attempts: 0, progress: {}, error: "" });
+  await h.run(async () => ({ candidates: [], evidence: [], evidenceHash: "none" }));
+  assert.equal(h.jobs[0].status, "done", "recording never blocks discovery");
+  assert.equal(row.status, "no_catalog_match");
+  assert.deepEqual([h.attempts[0].trigger, h.attempts[0].outcome, h.attempts[0].jobKeyHash], ["case_revision", "committed", attemptJobKey(h.jobs[0].key)]);
+
+  const lost = harness(t); const found = lost.addAlbum(); lost.addCase();
+  await lost.scan();
+  const failing = { withTransaction: async () => { const error = new Error("lease"); error.code = "job_lease_lost"; throw error; }, endSession: async () => {} };
+  await lost.run(async () => complete(found.albumId), { sessionFactory: async () => failing });
+  assert.deepEqual([lost.attempts[0].outcome, lost.attempts[0].errorCode, lost.attempts[0].pairCandidateAfter], ["failed", "job_lease_lost", null]);
+});
+
+test("entry usability ignores a later failed refresh, and albums without public IDs get no observation", async (t) => {
+  const h = harness(t); const album = h.addAlbum({ catalogRevision: 1 });
+  h.addCase({ candidates: [{ albumId: album.albumId, catalogRevision: 1 }], discoveryError: "mapping_case_revision_changed" });
+  await h.scan();
+  assert.equal(h.jobs[0].payload.observation.usableCandidateAtEntry, true);
+
+  const legacy = harness(t); legacy.addAlbum({ albumId: undefined }); legacy.addCase();
+  await legacy.scan();
+  assert.equal(legacy.jobs.length, 1);
+  assert.equal(Object.hasOwn(legacy.jobs[0].payload, "observation"), false);
 });

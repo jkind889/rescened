@@ -6,10 +6,10 @@
 const fs = require("node:fs");
 const mongoose = require("mongoose");
 const { catalogRevisionOf, normalize } = require("../lib/listening/common");
-const { REDISCOVERY_MATCHER_VERSION, rediscoveryPairs } = require("../lib/listening/worker");
+const { DISCOVERY_ATTEMPT_RETENTION_MS, PAIR_OBSERVATION_VERSION, REDISCOVERY_MATCHER_VERSION, attemptJobKey, rediscoveryPairs } = require("../lib/listening/worker");
 const {
-  COLLECTION_LIMITS, COLLECTOR_VERSION, MEASUREMENT_SCHEMA_VERSION, BudgetExceeded,
-  assertAggregateOnly, cohortWindows, createBudget, manifestChecksum, manifestTemplate, partition, ratio, validateManifest,
+  COLLECTION_LIMITS, COLLECTOR_VERSION, DAY_MS, MEASUREMENT_SCHEMA_VERSION, BudgetExceeded,
+  assertAggregateOnly, cohortWindows, createBudget, manifestChecksum, manifestTemplate, observationIntake, partition, percentiles, ratio, validateManifest,
 } = require("../lib/listening/measurement");
 
 const ELIGIBLE_STATUSES = ["pending", "no_catalog_match"];
@@ -39,7 +39,7 @@ function createReader(budget, limits = COLLECTION_LIMITS) {
     async *pages(Model, filter, fields) {
       let after = null;
       for (;;) {
-        const rows = await this.find(Model, after ? { ...filter, _id: { $gt: after } } : filter, `${fields} _id`, { sort: { _id: 1 } });
+        const rows = await this.find(Model, after ? { ...filter, _id: { ...filter._id, $gt: after } } : filter, `${fields} _id`, { sort: { _id: 1 } });
         if (rows.length) yield rows;
         if (rows.length < limits.pageSize) return;
         after = rows[rows.length - 1]._id;
@@ -179,7 +179,7 @@ async function rediscoveryCensus(reader, { Listening, AlbumCatalog }) {
     albumsScanned += page.length;
     const albums = page.map((row) => ({ ...row, artists: [row.artistDisplayName, ...(row.artistCredits || []).map((credit) => credit.name)] }));
     const artistKeys = [...new Set(albums.flatMap((album) => album.artists.map(normalize)).filter(Boolean))];
-    const cases = await reader.inChunks(artistKeys, (chunk) => reader.all(Listening.MappingCase, { status: { $in: ELIGIBLE_STATUSES }, artistKey: { $in: chunk } }, "caseId artistKey album albumKey listenerCount discoveryError candidates.albumId candidates.catalogRevision"));
+    const cases = await reader.inChunks(artistKeys, (chunk) => reader.all(Listening.MappingCase, { status: { $in: ELIGIBLE_STATUSES }, artistKey: { $in: chunk } }, "caseId artistKey album albumKey listenerCount candidates.albumId candidates.catalogRevision"));
     pairs.push(...rediscoveryPairs(cases, albums));
   }
   const jobKey = ({ row, album }) => `discovery:catalog:${row.caseId}:${String(album._id)}`;
@@ -195,8 +195,8 @@ async function rediscoveryCensus(reader, { Listening, AlbumCatalog }) {
     states[state] += 1;
     cases.add(pair.row.caseId);
     const candidate = (pair.row.candidates || []).find((item) => item?.albumId === pair.album.albumId);
-    // Usable: the album is in the stored result of a provider-complete discovery bound to its current revision.
-    const usable = Boolean(candidate) && !pair.row.discoveryError && candidate.catalogRevision === catalogRevisionOf(pair.album);
+    // Usable: the album is in the stored result, which only provider-complete runs replace, bound to its current revision.
+    const usable = Boolean(candidate) && candidate.catalogRevision === catalogRevisionOf(pair.album);
     candidates[usable ? "usable" : candidate ? "presentNotUsable" : "absent"] += 1;
     if (usable) casesWithUsable.add(pair.row.caseId);
     else if (state === "notEnqueued") notEnqueuedWithoutUsable += 1;
@@ -237,9 +237,134 @@ async function jobsOutsideCohort(reader, { Listening, AlbumCatalog }, cohortKeys
   return { unit: "catalog rediscovery job outside the current pair cohort", exits: partition(exits, jobs.length) };
 }
 
+const seconds = (from, to) => (new Date(to) - new Date(from)) / 1000;
+const iso = (value) => value ? new Date(value).toISOString() : null;
+// Job and attempt IDs are generated at insert, so a day of margin bounds an indexed _id range
+// around the intake; exact membership is then decided by the recorded clocks.
+const idRange = (from, to) => ({ $gte: mongoose.Types.ObjectId.createFromTime(Math.floor((from.getTime() - DAY_MS) / 1000)), $lt: mongoose.Types.ObjectId.createFromTime(Math.ceil((to.getTime() + DAY_MS) / 1000)) });
+const usableResult = (attempt, albumId) => attempt.outcome === "committed" && attempt.providerComplete === true && (attempt.candidatesAfter || []).some((item) => item?.albumId === albumId);
+
+// Attempts count toward follow-up by when they were written (the commit time for committed runs).
+const doneBy = (attempt, horizon) => new Date(attempt.completedAt) <= horizon;
+
+function pairOutcome(job, own, ownAll, horizon) {
+  const last = own[own.length - 1];
+  // Lease acquisitions without any record are executions the observation records missed.
+  if (!last) return !ownAll.length && job.attempts > 0 ? "unrecordedExecution" : "notExecuted";
+  if (last.outcome === "skipped") return "skippedIneligible";
+  if (last.outcome === "committed" && last.providerComplete === true) return usableResult(last, job.payload.observation.albumId) ? "executedWithMatching" : "executedWithoutMatching";
+  // Terminal at H only when the job ended with an error and made no later attempt.
+  const later = ownAll.some((attempt) => !doneBy(attempt, horizon));
+  return job.status === "done" && job.error && !later ? "terminalError" : "failedAwaitingRetry";
+}
+
+// PR33 windowed outcomes (plan: "PR33: availability and reliability") for pairs the scanner newly
+// observed during the intake. Observation is the entry clock; eligibility is bounded below by the
+// last completed full sweep's start when known. Pairs without a full follow-up by the cutoff are
+// censored. Attempts are read through the snapshot time so terminal outcomes reflect the job now.
+async function rediscoveryOutcomes(reader, { Listening }, intake, cutoff, now) {
+  const followUp = intake.followUpMs;
+  const jobs = (await reader.all(Listening.Job, { _id: idRange(intake.from, intake.to), type: "discovery", "payload.observation.version": PAIR_OBSERVATION_VERSION }, "key status error attempts payload.caseId payload.observation"))
+    .filter((job) => { const at = new Date(job.payload.observation.observedAt); return at >= intake.from && at < intake.to; });
+  const mature = jobs.filter((job) => new Date(job.payload.observation.observedAt).getTime() + followUp <= cutoff.getTime());
+  const caseIds = [...new Set(mature.map((job) => job.payload.caseId))];
+  const attempts = await reader.inChunks(caseIds, (chunk) => reader.all(Listening.DiscoveryAttempt, { caseId: { $in: chunk }, startedAt: { $gte: intake.from, $lte: now } }, "caseId jobKeyHash outcome providerComplete candidatesAfter.albumId pairCandidateBefore startedAt completedAt"));
+  const byCase = new Map();
+  for (const attempt of attempts.sort((a, b) => new Date(a.completedAt) - new Date(b.completedAt))) {
+    if (!byCase.has(attempt.caseId)) byCase.set(attempt.caseId, []);
+    byCase.get(attempt.caseId).push(attempt);
+  }
+  const outcomes = { notExecuted: 0, unrecordedExecution: 0, skippedIneligible: 0, executedWithMatching: 0, executedWithoutMatching: 0, failedAwaitingRetry: 0, terminalError: 0 };
+  const attribution = { pr33Observed: 0, ownJobAlreadyPresent: 0, otherTrigger: 0 };
+  const delays = { entry: [], execution: [], candidate: [] };
+  let unknownEntry = 0; let notExecuted = 0; let notGained = 0; let gained = 0; let gainEligible = 0; let ownRuns = 0;
+  const gainCases = new Set(); const gainedCases = new Set();
+  for (const job of mature) {
+    const { observation } = job.payload;
+    const ownKey = attemptJobKey(job.key);
+    const start = new Date(observation.observedAt); const horizon = new Date(start.getTime() + followUp);
+    const caseAttempts = (byCase.get(job.payload.caseId) || []).filter((attempt) => new Date(attempt.startedAt) >= start);
+    const inWindow = caseAttempts.filter((attempt) => doneBy(attempt, horizon));
+    const ownAll = caseAttempts.filter((attempt) => attempt.jobKeyHash === ownKey);
+    const own = inWindow.filter((attempt) => attempt.jobKeyHash === ownKey);
+    outcomes[pairOutcome(job, own, ownAll, horizon)] += 1;
+    ownRuns += own.filter((attempt) => attempt.outcome !== "skipped").length;
+    if (observation.eligibleAfter) delays.entry.push(seconds(observation.eligibleAfter, start)); else unknownEntry += 1;
+    const firstRun = own.find((attempt) => attempt.outcome !== "skipped");
+    if (firstRun) delays.execution.push(seconds(start, firstRun.startedAt)); else notExecuted += 1;
+    if (observation.usableCandidateAtEntry) continue;
+    // Candidate gain is tracked across every trigger; only the pair's own job can earn PR33 credit.
+    gainEligible += 1; gainCases.add(job.payload.caseId);
+    const gain = inWindow.find((attempt) => usableResult(attempt, observation.albumId));
+    if (!gain) { notGained += 1; continue; }
+    gained += 1; gainedCases.add(job.payload.caseId);
+    delays.candidate.push(seconds(start, gain.completedAt));
+    if (gain.jobKeyHash !== ownKey) attribution.otherTrigger += 1;
+    else attribution[gain.pairCandidateBefore === false ? "pr33Observed" : "ownJobAlreadyPresent"] += 1;
+  }
+  return {
+    collected: true,
+    unit: "newly observed eligible case/album pair",
+    intake: { basis: intake.basis, from: iso(intake.from), to: iso(intake.to), followUpDays: followUp / DAY_MS, cutoff: iso(cutoff), baseline: intake.baseline, pr33RollbackInsideFollowUp: intake.pr33RollbackInsideFollowUp },
+    entryClock: "scanner_observation",
+    entered: jobs.length, followUpComplete: mature.length, censored: jobs.length - mature.length,
+    enqueueReach: { measurable: false, reason: "pairs enter when the scanner observes and enqueues them; use the daily census notEnqueued count for scan lag" },
+    usableCandidateAtEntry: mature.length - gainEligible,
+    candidateGain: ratio(gained, gainEligible, "pair"),
+    candidateGainCases: ratio(gainedCases.size, gainCases.size, "case"),
+    pr33ObservedGain: ratio(attribution.pr33Observed, gainEligible, "pair"),
+    gainAttribution: partition(attribution, gained),
+    outcomeAtFollowUp: partition(outcomes, mature.length),
+    terminalErrorIncidence: ratio(outcomes.terminalError, mature.length, "pair"),
+    retryLoad: { unit: "own non-skipped runs per pair; not an error probability", runs: ownRuns, pairs: mature.length, value: mature.length ? ownRuns / mature.length : null },
+    delaySeconds: {
+      eligibilityToObservationUpperBound: { ...percentiles(delays.entry), unknownEntry },
+      observationToFirstRun: { ...percentiles(delays.execution), notRunByFollowUp: notExecuted },
+      observationToFirstUsableCandidate: { ...percentiles(delays.candidate), notGainedByFollowUp: notGained },
+    },
+  };
+}
+
+// PR32 run-level coverage (plan: "PR32: evidence and presentation") over every discovery run that
+// started in the intake, whatever its trigger. Skips are not runs. Reasons overlap.
+async function discoveryRuns(reader, { Listening }, intake) {
+  const attempts = (await reader.all(Listening.DiscoveryAttempt, { _id: idRange(intake.from, intake.to), startedAt: { $gte: intake.from, $lt: intake.to } }, "caseId trigger outcome providerComplete queryCapReached candidateCapReached"));
+  const runs = attempts.filter((attempt) => attempt.outcome !== "skipped");
+  const results = runs.filter((attempt) => attempt.outcome === "committed" || attempt.outcome === "conflict");
+  const result = { completeResult: 0, incompleteResult: 0, failedWithoutResult: 0, revisionConflict: 0 };
+  const byTrigger = { catalog: 0, moderator_refresh: 0, case_revision: 0 };
+  const reasons = { providerIncomplete: 0, queryCapReached: 0, candidateCapReached: 0 };
+  let coverageKnown = 0;
+  for (const run of runs) {
+    if (Object.hasOwn(byTrigger, run.trigger)) byTrigger[run.trigger] += 1;
+    if (run.outcome === "failed") result.failedWithoutResult += 1;
+    else if (run.outcome === "conflict") result.revisionConflict += 1;
+    else result[run.providerComplete ? "completeResult" : "incompleteResult"] += 1;
+  }
+  for (const run of results) {
+    if (run.providerComplete === false) reasons.providerIncomplete += 1;
+    if (typeof run.queryCapReached === "boolean") coverageKnown += 1;
+    if (run.queryCapReached === true) reasons.queryCapReached += 1;
+    if (run.candidateCapReached === true) reasons.candidateCapReached += 1;
+  }
+  return {
+    collected: true,
+    unit: "discovery run",
+    intake: { basis: intake.basis, from: iso(intake.from), to: iso(intake.to) },
+    runs: runs.length, skips: attempts.length - runs.length, distinctCases: new Set(runs.map((run) => run.caseId)).size,
+    result: partition(result, runs.length),
+    byTrigger: partition(byTrigger, runs.length),
+    coverageKnown: ratio(coverageKnown, results.length, "run with a result"),
+    reasonsAmongResults: reasons,
+    reasonsOverlap: true,
+    unrecordedRuns: "unknown: a run whose best-effort record failed to write is absent from every count",
+  };
+}
+
 const LIMITATIONS = [
   "Snapshot sections describe the database at collection time; they are not windowed cohort outcomes.",
-  "Windowed PR33 reach, candidate gain and delay need eligibility and discovery-attempt records that are not yet stored.",
+  "Windowed sections cover only runs and pairs recorded after the observation worker started; enqueue reach is not measurable because pairs enter when enqueued.",
+  "Pair entry is the scanner observation; eligibility is bounded below by the last completed full sweep's start, and publication commit time is not recorded.",
   "doneWithoutError catalog jobs include safe skips; attempts count lease acquisitions, not provider calls.",
   "Baseline recommendation coverage and comparisons are returned in API responses but not persisted, so they are not measured.",
   "Decision-time candidate order, coverage and active review time are not recorded; approvals are not correctness labels.",
@@ -247,10 +372,18 @@ const LIMITATIONS = [
   "Multi-query collection is not an atomic snapshot; see collection.startedAt and finishedAt.",
 ];
 
+// Attempt records expire, so an intake older than their retention can no longer be read in full.
+const windowed = (collect) => (reader, models, context) => {
+  if (context.intake.status !== "defined") return { collected: false, reason: context.intake.status };
+  if (context.now.getTime() - context.intake.from.getTime() >= DISCOVERY_ATTEMPT_RETENTION_MS) return { collected: false, reason: "observation_records_expired" };
+  return collect(reader, models, context);
+};
 const SECTIONS = [
   ["mappingEvidence", (reader, models) => mappingEvidence(reader, models)],
-  ["demandReadiness", (reader, models, now) => demandReadiness(reader, models, now)],
+  ["demandReadiness", (reader, models, { now }) => demandReadiness(reader, models, now)],
   ["rediscoveryCensus", (reader, models) => rediscoveryCensus(reader, models)],
+  ["rediscoveryOutcomes", windowed((reader, models, { intake, cutoff, now }) => rediscoveryOutcomes(reader, models, intake, cutoff, now))],
+  ["discoveryRuns", windowed((reader, models, { intake }) => discoveryRuns(reader, models, intake))],
 ];
 
 async function collectMeasurement({
@@ -262,10 +395,14 @@ async function collectMeasurement({
   const budget = createBudget({ maxRecords: limits.maxRecords, wallMs: limits.wallMs, clock });
   const reader = createReader(budget, limits);
   const models = { Listening, AlbumCatalog, reviewStatusForAlbums };
+  // Follow-up is complete only for data already observed: the snapshot time, capped at the planned end.
+  const endAt = validated.parsed.collection.endAt;
+  const cutoff = endAt && endAt < now ? endAt : now;
+  const context = { now, cutoff, intake: observationIntake(validated.parsed.exposures, validated.windows) };
   const sections = {}; let stopReason = null;
   for (const [name, collect] of SECTIONS) {
     if (stopReason) { sections[name] = { collected: false, reason: "collection_stopped" }; continue; }
-    try { sections[name] = await collect(reader, models, now); }
+    try { sections[name] = await collect(reader, models, context); }
     catch (error) {
       const timeout = error?.code === 50 || error?.codeName === "MaxTimeMSExpired";
       const memory = error?.code === 292 || error?.codeName === "QueryExceededMemoryLimitNoDiskUseAllowed";
@@ -274,9 +411,6 @@ async function collectMeasurement({
       sections[name] = { collected: false, reason: stopReason };
     }
   }
-  // Follow-up is complete only for data already observed: the snapshot time, capped at the planned end.
-  const endAt = validated.parsed.collection.endAt;
-  const cutoff = endAt && endAt < now ? endAt : now;
   const report = {
     schemaVersion: MEASUREMENT_SCHEMA_VERSION,
     collectorVersion: COLLECTOR_VERSION,
