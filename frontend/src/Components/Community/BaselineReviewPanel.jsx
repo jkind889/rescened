@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/react";
 import { API_BASE_URL } from "../../config/api.js";
 import { communityErrorFrom, requestCommunityJson } from "../../features/community/community.js";
+import { mergeBrowsePage } from "../../features/baselines/recommendationObservation.js";
 import { useReviewTimer } from "./ReviewTimer.jsx";
 import "./BaselineReviewPanel.css";
 
@@ -88,13 +89,6 @@ function coverageWarnings(coverage, incomplete) {
   if (hydration.failed?.length) warnings.push(`${plural(hydration.failed.length, "release", "releases")} could not be loaded.`);
   if (!warnings.length && incomplete) warnings.push("Some releases were not inspected.");
   return warnings;
-}
-
-// Later browse pages only list releases; they never hydrate or compare them.
-function withListedPage(coverage, page) {
-  if (!coverage?.browse) return coverage;
-  const listed = coverage.browse.listed + (page?.items?.length || 0);
-  return { ...coverage, browse: { ...coverage.browse, listed, complete: page?.incomplete === false && (!Number.isSafeInteger(coverage.browse.total) || listed >= coverage.browse.total) } };
 }
 
 function comparisonFacts(comparison) {
@@ -284,11 +278,11 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
       const data = await runRequest(`${API_BASE_URL}${BASE_PATH}/${kind}/${encodeURIComponent(id)}/candidates`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ releaseGroupMbid: group, ...(offset ? { offset } : {}) }),
+        body: JSON.stringify({ releaseGroupMbid: group, ...(offset ? { offset, recommendationRunId: recommendation?.recommendationRunId || "" } : {}) }),
         signal: controller.signal,
       }, "MusicBrainz release recommendations are unavailable.");
       if (controller.signal.aborted) return;
-      setRecommendation((current) => offset ? { ...current, items: [...(current?.items || []), ...(data?.items || [])], incomplete: Boolean(current?.incomplete || data?.incomplete), coverage: withListedPage(current?.coverage, data) } : data);
+      setRecommendation((current) => offset ? mergeBrowsePage(current, data) : { ...data, recommendationPageIds: [] });
       if (data?.candidate) setSelectedCandidate(data.candidate);
       setCandidateOffset(data?.nextOffset ?? "");
     } catch (error) {
@@ -344,6 +338,10 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
         body.candidateHash = selectedCandidate.tracklistHash;
         body.releaseMbid = selectedCandidate.releaseMbid;
         body.releaseGroupMbid = selectedCandidate.releaseGroupMbid;
+      }
+      if (recommendation?.recommendationRunId) {
+        body.recommendationRunId = recommendation.recommendationRunId;
+        body.recommendationPageIds = recommendation.recommendationPageIds || [];
       }
       const data = await runRequest(`${API_BASE_URL}${BASE_PATH}/${kind}/${encodeURIComponent(id)}/${action}`, {
         method: "POST",

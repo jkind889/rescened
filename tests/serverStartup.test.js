@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const serverPath = require.resolve("../server");
-const REQUIRED_ENV = ["MONGO_URI", "CLERK_SECRET_KEY", "CLERK_PUBLISHABLE_KEY", "NODE_ENV", "LASTFM_CONNECTION_ENABLED", "LASTFM_SYNC_ENABLED", "LASTFM_DISCOVERY_ENABLED", "ALBUM_MAPPING_MODERATION_ENABLED", "TRACKLIST_ENRICHMENT_ENABLED", "TRACKLIST_BASELINE_MODERATION_ENABLED", "GENRES_ENABLED"];
+const REQUIRED_ENV = ["MONGO_URI", "CLERK_SECRET_KEY", "CLERK_PUBLISHABLE_KEY", "NODE_ENV", "LASTFM_CONNECTION_ENABLED", "LASTFM_SYNC_ENABLED", "LASTFM_DISCOVERY_ENABLED", "ALBUM_MAPPING_MODERATION_ENABLED", "TRACKLIST_ENRICHMENT_ENABLED", "TRACKLIST_BASELINE_MODERATION_ENABLED", "REVIEW_EPISODES_ENABLED", "REVIEW_EFFORT_TIMER_ENABLED", "GENRES_ENABLED"];
 
 function loadServer(t) {
   const previous = Object.fromEntries(REQUIRED_ENV.map((key) => [key, process.env[key]]));
@@ -17,6 +17,8 @@ function loadServer(t) {
     ALBUM_MAPPING_MODERATION_ENABLED: "false",
     TRACKLIST_ENRICHMENT_ENABLED: "false",
     TRACKLIST_BASELINE_MODERATION_ENABLED: "false",
+    REVIEW_EPISODES_ENABLED: "false",
+    REVIEW_EFFORT_TIMER_ENABLED: "false",
     GENRES_ENABLED: "false",
   });
   delete require.cache[serverPath];
@@ -46,6 +48,7 @@ test("startServer waits for MongoDB before binding the HTTP port", async (t) => 
     },
     initializeDiary: async () => { calls.push(["diaryIndexes"]); },
     initializeListening: async () => { calls.push(["listeningIndexes"]); },
+    initializeReviewObservations: async () => { calls.push(["reviewObservationIndexes"]); },
     listen: (port, callback) => {
       calls.push(["listen", port]);
       callback();
@@ -62,8 +65,23 @@ test("startServer waits for MongoDB before binding the HTTP port", async (t) => 
     ["connect", "mongodb://example.test/rescened"],
     ["diaryIndexes"],
     ["listeningIndexes"],
+    ["reviewObservationIndexes"],
     ["listen", 4100],
   ]);
+});
+
+test("startServer does not bind a port when review observation indexes fail", async (t) => {
+  const { startServer } = loadServer(t);
+  let listenCalls = 0;
+  await assert.rejects(startServer({
+    connect: async () => {},
+    initializeDiary: async () => {},
+    initializeListening: async () => {},
+    initializeBaselines: async () => {},
+    initializeReviewObservations: async () => { throw new Error("Review observation index failed"); },
+    listen: () => { listenCalls += 1; },
+  }), /Review observation index failed/);
+  assert.equal(listenCalls, 0);
 });
 
 test("startServer does not accept traffic when diary index initialization fails", async (t) => {

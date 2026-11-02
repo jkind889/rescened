@@ -6,6 +6,9 @@ const path = require("node:path");
 const test = require("node:test");
 
 const ReviewObservation = require("../models/ReviewObservation");
+const AlbumCatalog = require("../models/AlbumCatalog");
+const Baselines = require("../models/AlbumBaseline");
+const Listening = require("../models/Listening");
 const episodes = require("../lib/reviewObservations/episodes");
 const { normalizeEffort } = require("../lib/reviewObservations/effort");
 const { buildPacket, summarizeLabels } = require("../lib/reviewObservations/adjudication");
@@ -73,6 +76,76 @@ test("capture failures are recorded with their own reason", async (t) => {
   assert.equal(written[0].outcome, "failed");
   assert.equal(written[0].failureReason, "capture_failed");
   assert.equal("failure" in written[0], false);
+});
+
+test("a timed-out episode write cannot be displaced by a failure marker", async (t) => {
+  let finishWrite;
+  const pending = new Promise((resolve) => { finishWrite = resolve; });
+  const writes = []; let executions = 0;
+  t.mock.method(ReviewObservation.Episode, "updateOne", (filter, update) => {
+    writes.push(update.$setOnInsert);
+    // Mongoose Queries are single-use thenables. A second assimilation would fail while
+    // the first write might still succeed, incorrectly creating a failure marker.
+    return { then(resolve, reject) { executions += 1; if (executions > 1) throw new Error("Query was already executed"); return pending.then(resolve, reject); } };
+  });
+  t.mock.method(console, "warn", () => {});
+  const capture = { evidenceVersion: 1, kind: "mapping", targetKind: "cases", targetId: uuid(), action: "approved", evidence: { capturedAt: NOW, targetRevision: 2, expectedRevision: 2, candidates: [], coverage: null, recommendationRunId: "", recommended: null, selected: null, selectedRank: null, evidenceHash: "a".repeat(64) } };
+  assert.equal(await episodes.recordEpisode(capture, { auditId: uuid(), decidedRevision: 3, reviewer: "user_1", clock: () => NOW }), "timeout");
+  assert.equal(writes.length, 1, "an unresolved write must not race a failure marker");
+  finishWrite({ upsertedCount: 1 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(writes.length, 1, "a late successful write never creates a failure marker");
+  assert.equal(executions, 1);
+});
+
+const query = (value) => ({ select() { return this; }, maxTimeMS() { return this; }, lean() { return Promise.resolve(value); } });
+
+test("mapping capture ranks all displayed candidates, including position 51", async (t) => {
+  const albums = Array.from({ length: 51 }, () => ({ albumId: uuid(), catalogRevision: 1 }));
+  t.mock.method(Listening.MappingCase, "findOne", () => query({ revision: 1, candidates: albums, evidence: [], discoveryError: "" }));
+  t.mock.method(AlbumCatalog, "find", () => query(albums));
+  const capture = await episodes.captureMapping({ caseId: uuid(), action: "approve", command: { albumId: albums[50].albumId, expectedRevision: 1 }, env: { REVIEW_EPISODES_ENABLED: "true" } });
+  assert.equal(capture.evidence.candidates.length, 51);
+  assert.equal(capture.evidence.selectedRank, 50);
+  assert.equal(capture.evidence.candidatesTruncated, false);
+});
+
+test("baseline capture follows the exact run and displayed pages, never the latest target run", async (t) => {
+  const targetId = uuid(); const runId = uuid(); const pageId = uuid();
+  const releases = [uuid(), uuid(), uuid()];
+  const run = { runId, targetKind: "albums", targetId, targetRevision: 1, ranked: releases.slice(0, 2).map((releaseMbid) => ({ releaseMbid })), pages: [{ pageId, offset: 20, ranked: [{ releaseMbid: releases[2] }], incomplete: false }], recommended: { releaseMbid: releases[0] }, coverage: { browseComplete: false, browseListed: 2, browseTotal: 3 } };
+  t.mock.method(AlbumCatalog, "findOne", () => query({ catalogRevision: 1 }));
+  t.mock.method(Baselines.Head, "findOne", () => query(null));
+  t.mock.method(ReviewObservation.RecommendationRun, "findOne", (filter) => query(filter.runId === runId ? run : null));
+  const body = { expectedRevision: 0, recommendationRunId: runId, recommendationPageIds: [pageId], releaseMbid: releases[2] };
+  const capture = await episodes.captureBaseline({ kind: "albums", id: targetId, action: "confirm", body, env: { REVIEW_EPISODES_ENABLED: "true" }, clock: () => NOW });
+  assert.equal(capture.evidence.recommendationRunId, runId);
+  assert.deepEqual(capture.evidence.candidates.map((item) => item.id), releases);
+  assert.equal(capture.evidence.selectedRank, 2);
+  assert.equal(capture.evidence.coverage.browseComplete, true);
+  const missingPage = await episodes.captureBaseline({ kind: "albums", id: targetId, action: "confirm", body: { ...body, recommendationPageIds: [uuid()] }, env: { REVIEW_EPISODES_ENABLED: "true" }, clock: () => NOW });
+  assert.equal(missingPage.evidence.recommendationRunId, "");
+  assert.equal(missingPage.evidence.candidates.length, 0);
+  const noRun = await episodes.captureBaseline({ kind: "albums", id: targetId, action: "confirm", body: { ...body, recommendationRunId: "", recommendationPageIds: [] }, env: { REVIEW_EPISODES_ENABLED: "true" }, clock: () => NOW });
+  assert.equal(noRun.evidence.recommendationRunId, "", "a latest run is not substituted when no ID was supplied");
+});
+
+test("browse pages are attached to the requested run with a distinct page ID", async (t) => {
+  const runId = uuid(); const targetId = uuid(); const releaseMbid = uuid();
+  let filter; let update;
+  t.mock.method(ReviewObservation.RecommendationRun, "updateOne", (where, change) => {
+    filter = where; update = change;
+    return Promise.resolve({ matchedCount: 1 });
+  });
+  const pageId = await episodes.recordRecommendationPage({ runId, kind: "albums", targetId, targetRevision: 1, offset: 20, result: { items: [{ releaseMbid }], incomplete: false }, env: { REVIEW_EPISODES_ENABLED: "true" } });
+  assert.match(pageId, /^[0-9a-f-]{36}$/u);
+  assert.deepEqual([filter.runId, filter.targetKind, filter.targetId, filter.targetRevision], [runId, "albums", targetId, 1]);
+  assert.deepEqual(update.$push.pages, { pageId, offset: 20, ranked: [{ releaseMbid }], incomplete: false });
+});
+
+test("linked effort has a unique partial audit index", () => {
+  const auditIndex = ReviewObservation.Effort.schema.indexes().find(([fields]) => fields.auditId === 1);
+  assert.equal(auditIndex?.[1].unique, true);
 });
 
 test("effort timings are validated before anything is stored", () => {
@@ -166,6 +239,32 @@ test("labels join with the key as supported, unsupported, insufficient or unrevi
   assert.throws(() => summarizeLabels({ packetBytes: `${built.packetBytes} `, keyBytes: built.keyBytes, labelsBytes: labels("independent") }), /ADJUDICATION_CHECKSUM_MISMATCH/u);
   assert.throws(() => summarizeLabels({ packetBytes: built.packetBytes, keyBytes: built.keyBytes, labelsBytes: labels("independent", { [first.itemId]: "Z" }) }), /ADJUDICATION_LABEL_INVALID/u);
   assert.throws(() => summarizeLabels({ packetBytes: built.packetBytes, keyBytes: built.keyBytes, labelsBytes: labels("independent", { [uuid()]: "A" }) }), /ADJUDICATION_LABEL_INVALID/u);
+});
+
+test("a no-match spot check needs independent catalog evidence before it can support a decision", () => {
+  const caseId = uuid();
+  const evidence = { candidates: [], selected: null, coverage: {} };
+  const rows = [
+    { kind: "mapping", targetKind: "cases", targetId: caseId, action: "no_catalog_match", outcome: "recorded", decidedAt: new Date("2026-11-05T00:00:00Z"), evidence },
+    { kind: "mapping", targetKind: "cases", targetId: caseId, action: "rejected", outcome: "recorded", decidedAt: new Date("2026-11-05T00:00:00Z"), evidence },
+  ];
+  const built = buildPacket({ episodes: rows, details: { cases: new Map([[caseId, { artist: "Artist", album: "Album" }]]), albums: new Map(), targets: new Map() }, environment: "fixture", now: NOW, seed: "empty-options", sampleSize: 2 });
+  const packet = JSON.parse(built.packetBytes);
+  const key = JSON.parse(built.keyBytes);
+  const labels = JSON.parse(built.labelsBytes);
+  labels.adjudicator = "independent";
+  for (const item of packet.items) {
+    assert.equal(item.options.length, 0);
+    labels.labels[item.itemId] = "no_match";
+  }
+  const summarize = () => summarizeLabels({ packetBytes: built.packetBytes, keyBytes: built.keyBytes, labelsBytes: JSON.stringify(labels) });
+  assert.equal(summarize().outcome.insufficient, 2, "zero options alone cannot support either decision");
+  const noMatch = key.items.find((item) => item.action === "no_catalog_match");
+  labels.catalogEvidence[noMatch.itemId] = { queries: ["Artist Album", "Album artist alias"], matchedAlbumId: null };
+  assert.deepEqual([summarize().outcome.supported, summarize().outcome.insufficient], [1, 1]);
+  labels.labels[noMatch.itemId] = "other_match";
+  labels.catalogEvidence[noMatch.itemId].matchedAlbumId = uuid();
+  assert.equal(summarize().outcome.unsupported, 1, "an independently found unlisted album flags a false no-match");
 });
 
 test("operator commands validate arguments and keep packets out of the repository", () => {

@@ -111,26 +111,31 @@ test("mapping decisions write an episode after commit, keyed by the audit entry"
   assert.equal(await ReviewObservation.Episode.countDocuments({ targetId: conflict.caseId }), 0);
 });
 
-test("baseline decisions link the recommendation run the moderator saw; replays add nothing", { skip: !enabled }, async () => {
+test("baseline decisions link the exact recommendation and browsed page; replays add nothing", { skip: !enabled }, async () => {
   const target = await album();
   const releaseGroupMbid = target.externalReferences[0].externalId;
-  const recommended = makeCandidate(releaseGroupMbid); const alternative = makeCandidate(releaseGroupMbid);
+  const recommended = makeCandidate(releaseGroupMbid); const alternative = makeCandidate(releaseGroupMbid); const laterPage = makeCandidate(releaseGroupMbid);
   const result = { candidate: recommended, items: [{ releaseMbid: recommended.releaseMbid }, { releaseMbid: alternative.releaseMbid }], incomplete: true, ambiguous: false, comparisons: [{ releaseMbid: alternative.releaseMbid, competing: true, equivalent: false }], coverage: { browse: { complete: false, listed: 2, total: 3 }, hydration: { complete: true, competing: 2, failed: [], uninspected: [] } } };
   const runId = await episodes.recordRecommendationRun({ kind: "albums", targetId: target.albumId, targetRevision: 1, startedAt: new Date(), result });
+  const pageId = await episodes.recordRecommendationPage({ runId, kind: "albums", targetId: target.albumId, targetRevision: 1, offset: 20, result: { items: [{ releaseMbid: laterPage.releaseMbid }], incomplete: false } });
+  assert.ok(pageId);
+  const otherRunId = await episodes.recordRecommendationRun({ kind: "albums", targetId: target.albumId, targetRevision: 1, startedAt: new Date(), result: { ...result, candidate: alternative } });
+  assert.notEqual(otherRunId, runId, "another moderator's later run must not be selected");
   const run = await ReviewObservation.RecommendationRun.findOne({ runId }).lean();
   assert.deepEqual([run.outcome, run.coverage.browseComplete, run.coverage.browseTotal, run.ranked.length], ["recommended", false, 3, 2]);
-  await storeCandidate("albums", target, recommended); await storeCandidate("albums", target, alternative);
+  await storeCandidate("albums", target, recommended); await storeCandidate("albums", target, alternative); await storeCandidate("albums", target, laterPage);
   const requestId = crypto.randomUUID();
-  const body = { expectedRevision: 0, expectedTargetRevision: 1, requestId, releaseMbid: alternative.releaseMbid, releaseGroupMbid, candidateHash: alternative.tracklistHash };
+  const body = { expectedRevision: 0, expectedTargetRevision: 1, requestId, releaseMbid: laterPage.releaseMbid, releaseGroupMbid, candidateHash: laterPage.tracklistHash, recommendationRunId: runId, recommendationPageIds: [pageId] };
   const first = await performCommand({ kind: "albums", id: target.albumId, action: "confirm", body, actorUserId: "moderator" });
   const audit = await Baselines.Audit.findOne({ targetId: target.albumId, requestId }).lean();
   const episode = await ReviewObservation.Episode.findOne({ auditId: audit.auditId }).lean();
   assert.deepEqual([episode.kind, episode.targetKind, episode.action, episode.outcome], ["baseline", "albums", "confirm", "recorded"]);
   assert.equal(episode.evidence.recommendationRunId, runId);
   assert.equal(episode.evidence.recommended.id, recommended.releaseMbid);
-  assert.equal(episode.evidence.selected.id, alternative.releaseMbid);
-  assert.equal(episode.evidence.selectedRank, 1);
-  assert.equal(episode.evidence.coverage.browseComplete, false);
+  assert.equal(episode.evidence.selected.id, laterPage.releaseMbid);
+  assert.equal(episode.evidence.selectedRank, 2);
+  assert.deepEqual(episode.evidence.candidates.map((item) => item.id), [recommended.releaseMbid, alternative.releaseMbid, laterPage.releaseMbid]);
+  assert.equal(episode.evidence.coverage.browseComplete, true);
   const replay = await performCommand({ kind: "albums", id: target.albumId, action: "confirm", body, actorUserId: "moderator" });
   assert.deepEqual(replay.revision, first.revision);
   assert.equal(await ReviewObservation.Episode.countDocuments({ targetId: target.albumId }), 1, "an idempotent replay commits no new decision");
@@ -185,7 +190,7 @@ test("the report, adjudication export and clear command work on real collections
   assert.equal(mapping.failedByReason.write_failed, 1);
   assert.equal(mapping.episodes.missingUnknown, 1, "without a recorded flag change, the decision made while the flag was off is unknown");
   assert.deepEqual([baseline.episodes.recorded, baseline.selection.differsFromRecommendation], [2, 1]);
-  assert.equal(report.recommendationRuns.runs, 1);
+  assert.equal(report.recommendationRuns.runs, 2);
   assert.deepEqual(report.reviewEffort.timings, { decidedLinked: 1, decidedUnlinked: 2, abandoned: 1, total: 4, reconciles: true });
   assert.deepEqual(await Promise.all([Listening.MappingAudit.countDocuments(), Baselines.Audit.countDocuments(), ReviewObservation.Episode.countDocuments()]), before, "collection is read-only");
 
@@ -204,7 +209,9 @@ test("the report, adjudication export and clear command work on real collections
   for (const item of key.items) labels.labels[item.itemId] = item.moderatorChoice;
   fs.writeFileSync(path.join(directory, "labels.json"), JSON.stringify(labels));
   const summary = summarizeLabels({ packetBytes: fs.readFileSync(path.join(directory, "packet.json")), keyBytes: fs.readFileSync(path.join(directory, "key.json")), labelsBytes: fs.readFileSync(path.join(directory, "labels.json")) });
-  assert.deepEqual([summary.adjudication, summary.outcome.supported, summary.outcome.unsupported], ["delayed_self_review", exported.sampled, 0]);
+  assert.equal(summary.adjudication, "delayed_self_review");
+  assert.equal(summary.outcome.unsupported, 0);
+  assert.equal(summary.outcome.supported + summary.outcome.insufficient, exported.sampled, "no-match answers without an independent catalog check remain insufficient");
   await assert.rejects(exportPacket({ manifest, out: directory, seed: "again", now: new Date() }), /ADJUDICATION_OUTPUT_NOT_EMPTY/u);
   fs.rmSync(path.dirname(directory), { recursive: true });
 
@@ -217,4 +224,41 @@ test("the report, adjudication export and clear command work on real collections
   assert.deepEqual([applied.deleted, applied.auditEntriesNotReduced], [before[2], true]);
   assert.equal(await ReviewObservation.Episode.countDocuments(), 0);
   assert.deepEqual(await Promise.all([Listening.MappingAudit.countDocuments(), Baselines.Audit.countDocuments()]), before.slice(0, 2), "audit history is untouched");
+});
+
+test("concurrent effort submissions cannot claim the same audit twice", { skip: !enabled }, async () => {
+  const target = await mappingCase("Concurrent Timed");
+  await moderate(target.caseId, "reject", { expectedRevision: 1 }, "moderator");
+  const now = Date.now();
+  const claim = {
+    effortId: crypto.randomUUID(), kind: "mapping", targetKind: "cases", targetId: target.caseId, targetRevision: 1, outcome: "decided",
+    intervals: [{ startedAt: new Date(now - 120_000).toISOString(), endedAt: new Date(now - 60_000).toISOString() }],
+  };
+  const claims = await Promise.allSettled([effort.recordEffort("moderator", claim), effort.recordEffort("moderator", { ...claim, effortId: crypto.randomUUID() })]);
+  const audit = await Listening.MappingAudit.findOne({ caseId: target.caseId }).lean();
+  assert.ok(claims.some((result) => result.status === "fulfilled"));
+  assert.equal(await ReviewObservation.Effort.countDocuments({ auditId: audit.auditId }), 1, "the unique index prevents concurrent duplicate claims");
+});
+
+test("racing baseline replays cannot replace the committer's evidence", { skip: !enabled }, async () => {
+  const target = await album();
+  const releaseGroupMbid = target.externalReferences[0].externalId;
+  const selected = makeCandidate(releaseGroupMbid);
+  await storeCandidate("albums", target, selected);
+  const runs = await Promise.all(["moderator", "second-moderator"].map(() => episodes.recordRecommendationRun({
+    kind: "albums", targetId: target.albumId, targetRevision: 1, startedAt: new Date(),
+    result: { candidate: selected, items: [{ releaseMbid: selected.releaseMbid }], coverage: { browse: { complete: true, listed: 1, total: 1 } } },
+  })));
+  const requestId = crypto.randomUUID();
+  const common = { expectedRevision: 0, expectedTargetRevision: 1, requestId, releaseMbid: selected.releaseMbid, releaseGroupMbid, candidateHash: selected.tracklistHash };
+  const results = await Promise.allSettled(["moderator", "second-moderator"].map((actorUserId, index) => performCommand({
+    kind: "albums", id: target.albumId, action: "confirm", body: { ...common, recommendationRunId: runs[index] }, actorUserId,
+  })));
+  assert.ok(results.some((result) => result.status === "fulfilled"));
+  const audit = await Baselines.Audit.findOne({ targetId: target.albumId, requestId }).lean();
+  const episode = await ReviewObservation.Episode.findOne({ auditId: audit.auditId }).lean();
+  const committer = audit.actorUserId === "moderator" ? 0 : 1;
+  assert.equal(episode.evidence.recommendationRunId, runs[committer]);
+  assert.equal(episode.moderatorHash, episodes.moderatorHash(audit.actorUserId));
+  assert.equal(await ReviewObservation.Episode.countDocuments({ auditId: audit.auditId }), 1);
 });

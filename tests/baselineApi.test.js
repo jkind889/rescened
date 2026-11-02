@@ -98,3 +98,12 @@ test('provider rate limits preserve the stable code and expose Retry-After', asy
   assert.equal(timeout.statusCode, 503);
   assert.equal('Retry-After' in timeout.headers, false);
 });
+test('later browse pages pass their recommendation run ID to the service', async () => {
+  const runId = '11111111-1111-4111-8111-111111111111';
+  let received;
+  service.candidates = async (kind, id, body) => { received = body; return { items: [], recommendationRunId: runId, recommendationPageId: '22222222-2222-4222-8222-222222222222' }; };
+  const response = await invoke('post', '/:kind/:id/candidates', { testUserId: 'baseline-moderator', body: { releaseGroupMbid: runId, offset: 20, recommendationRunId: runId } });
+  assert.equal(response.statusCode, 200);
+  assert.equal(received.recommendationRunId, runId);
+  assert.equal(response.body.recommendationPageId, '22222222-2222-4222-8222-222222222222');
+});

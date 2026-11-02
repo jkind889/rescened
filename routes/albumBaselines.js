@@ -56,7 +56,7 @@ router.get("/groups", authenticate, moderatorOnly, externalSearchRateLimit, asyn
 });
 router.get("/:kind/:id", authenticate, moderatorOnly, async (req, res) => { try { return res.json(await service.detail(req.params.kind, req.params.id)); } catch (error) { return sendError(res, error); } });
 router.post("/:kind/:id/candidates", authenticate, moderatorOnly, externalSearchRateLimit, async (req, res) => {
-  try { allowedKeys(req.body || {}, new Set(["releaseGroupMbid", "offset"]), "request body"); return res.json(await service.candidates(req.params.kind, req.params.id, req.body)); } catch (error) { return sendError(res, error); }
+  try { allowedKeys(req.body || {}, new Set(["releaseGroupMbid", "offset", "recommendationRunId"]), "request body"); return res.json(await service.candidates(req.params.kind, req.params.id, req.body)); } catch (error) { return sendError(res, error); }
 });
 router.post("/:kind/:id/preview", authenticate, moderatorOnly, externalSearchRateLimit, async (req, res) => {
   try { allowedKeys(req.body || {}, new Set(["releaseMbid", "releaseGroupMbid"]), "request body"); return res.json(await service.preview(req.params.kind, req.params.id, req.body)); } catch (error) { return sendError(res, error); }

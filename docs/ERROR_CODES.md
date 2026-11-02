@@ -700,7 +700,7 @@ The moderator-only `/moderation/review-effort` API follows the existing `UNAUTHO
 | `REVIEW_EFFORT_OPT_IN_REQUIRED` | 403 | The moderator has not opted in to timing. |
 | `INVALID_REVIEW_EFFORT_REQUEST` | 400 | Unknown field, malformed identifier, kind, outcome, or opt-in value. |
 | `INVALID_REVIEW_EFFORT_INTERVALS` | 400 | Intervals are reversed, overlapping, longer than 4 hours, span over 12 hours, started more than 12 hours ago, or end more than a minute in the future. |
-| `REVIEW_EFFORT_CONFLICT` | 409 | Another moderator already used this `effortId`. |
+| `REVIEW_EFFORT_CONFLICT` | 409 | Another moderator already used this `effortId`, or a concurrent timing already claimed the decision. |
 | `REVIEW_EFFORT_REQUEST_FAILED` | 500 | Unexpected server failure; no details are returned. |
 
 Review-episode recording never adds an error code: a failed capture or write is logged and leaves the decision's response unchanged.

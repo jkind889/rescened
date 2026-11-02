@@ -84,6 +84,12 @@ const comparisonSchema = new mongoose.Schema({
   competing: { type: Boolean, required: true },
   equivalent: { type: Boolean, default: null },
 }, { _id: false, strict: "throw" });
+const browsePageSchema = new mongoose.Schema({
+  pageId: { type: String, required: true, match: UUID },
+  offset: { type: Number, required: true, min: 1, max: 1000 },
+  ranked: { type: [runRefSchema], default: [] },
+  incomplete: { type: Boolean, default: null },
+}, { _id: false, strict: "throw" });
 
 // One baseline recommender execution (offset 0), best effort, independent of any decision.
 const recommendationRunSchema = new mongoose.Schema({
@@ -97,6 +103,7 @@ const recommendationRunSchema = new mongoose.Schema({
   errorCode: { type: String, default: "", maxlength: 100 },
   coverage: { type: coverageSchema, default: null },
   ranked: { type: [runRefSchema], default: [] },
+  pages: { type: [browsePageSchema], default: [] },
   rankedTruncated: { type: Boolean, default: false },
   recommended: { type: runRefSchema, default: null },
   comparisons: { type: [comparisonSchema], default: [] },
@@ -135,7 +142,7 @@ const effortSchema = new mongoose.Schema({
 }, { timestamps: false, strict: "throw" });
 effortSchema.index({ recordedAt: 1 });
 // Each decision is linked to at most one timing.
-effortSchema.index({ auditId: 1 }, { partialFilterExpression: { auditId: { $gt: "" } } });
+effortSchema.index({ auditId: 1 }, { unique: true, partialFilterExpression: { auditId: { $gt: "" } } });
 
 module.exports = {
   Episode: mongoose.model("ReviewEpisode", episodeSchema),
