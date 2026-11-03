@@ -3,16 +3,12 @@
 // makeup and moderator effort before any automated assistance is built. It emits counts and
 // durations only: no names, album IDs, release IDs or reviewer IDs.
 const mongoose = require("mongoose");
+const { percentiles } = require("../lib/listening/measurement");
 
 const MAPPING_DECISIONS = ["approved", "rejected", "no_catalog_match"];
 const BASELINE_DECISIONS = ["confirm", "replace", "defer", "revoke"];
 const DAY_MS = 86_400_000;
 
-function percentiles(values) {
-  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
-  const at = (share) => sorted.length ? Math.round(sorted[Math.min(sorted.length - 1, Math.ceil(share * sorted.length) - 1)]) : null;
-  return { count: sorted.length, p50: at(0.5), p90: at(0.9), max: sorted.length ? Math.round(sorted[sorted.length - 1]) : null };
-}
 const seconds = (from, to) => (new Date(to) - new Date(from)) / 1000;
 
 // Describes a case by its stored candidates and discovery evidence. Approved cases keep the

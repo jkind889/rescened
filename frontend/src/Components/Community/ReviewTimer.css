@@ -1,0 +1,22 @@
+.review-timer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0.75rem 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px dashed currentColor;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.review-timer-elapsed {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-width: 3.5rem;
+}
+
+.review-timer small {
+  flex-basis: 100%;
+  opacity: 0.8;
+}

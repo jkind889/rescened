@@ -6,6 +6,8 @@ const files = [
   "tests/albumBaselines.integration.test.js",
   "tests/listeningBaselines.integration.test.js",
   "tests/listeningWorker.integration.test.js",
+  "tests/listeningMeasurement.integration.test.js",
+  "tests/reviewObservations.integration.test.js",
   "tests/listeningDetection.integration.test.js",
   "tests/listeningPublication.integration.test.js",
   "tests/listeningApi.integration.test.js",

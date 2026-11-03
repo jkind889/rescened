@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/react";
 import { API_BASE_URL } from "../../config/api.js";
 import { communityErrorFrom, requestCommunityJson } from "../../features/community/community.js";
+import { mergeBrowsePage } from "../../features/baselines/recommendationObservation.js";
+import { useReviewTimer } from "./ReviewTimer.jsx";
 import "./BaselineReviewPanel.css";
 
 const BASE_PATH = "/moderation/album-baselines";
@@ -89,13 +91,6 @@ function coverageWarnings(coverage, incomplete) {
   return warnings;
 }
 
-// Later browse pages only list releases; they never hydrate or compare them.
-function withListedPage(coverage, page) {
-  if (!coverage?.browse) return coverage;
-  const listed = coverage.browse.listed + (page?.items?.length || 0);
-  return { ...coverage, browse: { ...coverage.browse, listed, complete: page?.incomplete === false && (!Number.isSafeInteger(coverage.browse.total) || listed >= coverage.browse.total) } };
-}
-
 function comparisonFacts(comparison) {
   if (comparison.equivalent) return ["Same tracklist"];
   const facts = [];
@@ -172,6 +167,8 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
   const [candidateOffset, setCandidateOffset] = useState("");
   const requestSequence = useRef(0);
   const providerController = useRef(null);
+  // Embedded in mapping review, the mapping page times the whole review instead.
+  const effort = useReviewTimer({ kind: "baseline", targetKind: kind, targetId: compact ? "" : id });
 
   const targetKey = `${kind}:${id || ""}`;
   useEffect(() => {
@@ -281,11 +278,11 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
       const data = await runRequest(`${API_BASE_URL}${BASE_PATH}/${kind}/${encodeURIComponent(id)}/candidates`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ releaseGroupMbid: group, ...(offset ? { offset } : {}) }),
+        body: JSON.stringify({ releaseGroupMbid: group, ...(offset ? { offset, recommendationRunId: recommendation?.recommendationRunId || "" } : {}) }),
         signal: controller.signal,
       }, "MusicBrainz release recommendations are unavailable.");
       if (controller.signal.aborted) return;
-      setRecommendation((current) => offset ? { ...current, items: [...(current?.items || []), ...(data?.items || [])], incomplete: Boolean(current?.incomplete || data?.incomplete), coverage: withListedPage(current?.coverage, data) } : data);
+      setRecommendation((current) => offset ? mergeBrowsePage(current, data) : { ...data, recommendationPageIds: [] });
       if (data?.candidate) setSelectedCandidate(data.candidate);
       setCandidateOffset(data?.nextOffset ?? "");
     } catch (error) {
@@ -342,6 +339,10 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
         body.releaseMbid = selectedCandidate.releaseMbid;
         body.releaseGroupMbid = selectedCandidate.releaseGroupMbid;
       }
+      if (recommendation?.recommendationRunId) {
+        body.recommendationRunId = recommendation.recommendationRunId;
+        body.recommendationPageIds = recommendation.recommendationPageIds || [];
+      }
       const data = await runRequest(`${API_BASE_URL}${BASE_PATH}/${kind}/${encodeURIComponent(id)}/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -349,6 +350,7 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
       }, "The baseline decision could not be recorded.");
       setDetail(data);
       setSelectedCandidate(data?.status === "stale" ? null : reusableCandidate(data) || selectedCandidate);
+      effort.finish(id, body.expectedTargetRevision);
       setCommand({ pending: false, error: null, success: `Baseline ${action} recorded.` });
       setReason("");
       onStateChange?.(data);
@@ -377,6 +379,7 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
         </div>
         <span className={`community-status community-status-${detail?.status || "pending"}`}>{detail?.status || "pending"}</span>
       </div>
+      {effort.panel}
       <div className="baseline-flag-row"><span>Discovery: {flagLabel(canDiscover)}</span><span>Moderation: {flagLabel(canModerate)}</span>{detail?.revision ? <span>Review revision {detail.revision}</span> : null}</div>
       {detail?.status === "stale" ? <p className="baseline-warning">The catalog record changed after this review. Suggest or preview a release again before confirming.</p> : null}
       {detail?.activeBaseline ? <p className={detail.status === "stale" ? "baseline-muted" : "baseline-success"}>{detail.status === "stale" ? "Previous" : "Active"} baseline v{detail.activeBaseline.version || "?"} · reviewed {detail.activeBaseline.reviewedAt ? new Date(detail.activeBaseline.reviewedAt).toLocaleDateString() : "date unavailable"}.</p> : null}

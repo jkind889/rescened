@@ -71,6 +71,7 @@ app.use("/moderation/album-suggestions", moderationRoutes)
 app.use("/connections/lastfm", require("./routes/lastfmConnections"));
 app.use("/moderation/album-mappings", require("./routes/albumMappings"));
 app.use("/moderation/album-baselines", require("./routes/albumBaselines"));
+app.use("/moderation/review-effort", require("./routes/reviewEffort"));
 app.use("/moderation/genres", require("./routes/genreModeration"));
 app.use("/moderation/comment-reports", require("./routes/commentModeration"));
 
@@ -92,6 +93,13 @@ async function startServer({
       await Promise.all(Object.values(require("./models/AlbumBaseline")).map((Model) => Model.init()));
     }
   },
+  initializeReviewObservations = async () => {
+    if ([process.env.REVIEW_EPISODES_ENABLED, process.env.REVIEW_EFFORT_TIMER_ENABLED].some((value) => String(value || "").trim().toLowerCase() === "true")) {
+      // The auditId claim must be unique before accepting timed reviews. Building these
+      // indexes on first use would leave a window where concurrent claims both succeed.
+      await Promise.all(Object.values(require("./models/ReviewObservation")).map((Model) => Model.createIndexes()));
+    }
+  },
   initializeGenres = async () => {
     if (require("./routes/utils/serverConfig").isGenresEnabled()) {
       await Promise.all(Object.values(require("./models/Genre")).map((Model) => Model.init()));
@@ -105,6 +113,7 @@ async function startServer({
   await initializeDiary();
   await initializeListening();
   await initializeBaselines();
+  await initializeReviewObservations();
   await initializeGenres();
   console.log("MongoDB Connected");
   return listen(port, () => {

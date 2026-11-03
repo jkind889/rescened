@@ -162,6 +162,47 @@ jobSchema.index({ type: 1, status: 1 }, { partialFilterExpression: { "payload.ca
 // Connection cleanup retires that connection's other jobs.
 jobSchema.index({ "payload.connectionId": 1 }, { sparse: true });
 
+// Private measurement record of one discovery job execution or skip, for
+// docs/DETERMINISTIC_MAPPING_METRICS_PLAN.md. Internal joins only: never serialized by an API and
+// never printed by a report. Stores no user IDs. The worker sets a 90-day expiry.
+const attemptCandidateSchema = new mongoose.Schema({
+  albumId: { type: String, required: true, lowercase: true },
+  catalogRevision: { type: Number, default: null },
+}, { _id: false, strict: "throw" });
+const discoveryAttemptSchema = new mongoose.Schema({
+  attemptId: uuid,
+  evidenceVersion: { type: Number, required: true, enum: [1], default: 1 },
+  caseId: { type: String, required: true },
+  // SHA-256 of the job key: case-revision keys embed long names, and a record must always validate.
+  jobKeyHash: { type: String, required: true, match: /^[0-9a-f]{64}$/u },
+  trigger: { type: String, required: true, enum: ["catalog", "moderator_refresh", "case_revision"] },
+  // Catalog jobs only: the public ID of the observed pair's album, when the scanner recorded it.
+  pairAlbumId: { type: String, default: "", lowercase: true },
+  // Lease acquisitions so far, including this one; not a provider-call count.
+  leaseAttempt: { type: Number, required: true, min: 0 },
+  outcome: { type: String, required: true, enum: ["committed", "skipped", "conflict", "failed"] },
+  skipReason: { type: String, default: "", enum: ["", "case_missing", "case_approved", "case_not_eligible"] },
+  errorCode: { type: String, default: "", maxlength: 200 },
+  caseRevision: { type: Number, default: null },
+  statusBefore: { type: String, default: "" },
+  statusAfter: { type: String, default: "" },
+  // Facts about this run's own result, captured before retained candidates can hide a failed refresh.
+  providerComplete: { type: Boolean, default: null },
+  queryCapReached: { type: Boolean, default: null },
+  candidateCapReached: { type: Boolean, default: null },
+  candidatesBefore: { type: [attemptCandidateSchema], default: [] },
+  candidatesAfter: { type: [attemptCandidateSchema], default: [] },
+  storedCandidatesReplaced: { type: Boolean, default: false },
+  pairCandidateBefore: { type: Boolean, default: null },
+  pairCandidateAfter: { type: Boolean, default: null },
+  startedAt: { type: Date, required: true },
+  // When the record was written: the commit time for committed runs.
+  completedAt: { type: Date, required: true },
+  expiresAt: { type: Date, required: true, index: { expires: 0 } },
+}, { timestamps: false, strict: "throw" });
+discoveryAttemptSchema.index({ caseId: 1, startedAt: 1 });
+discoveryAttemptSchema.index({ startedAt: 1 });
+
 // A single leased scanner owns the bounded recent/full cursors. Jobs are independently leased.
 const catalogScanSchema = new mongoose.Schema({
   key: { type: String, required: true, unique: true, immutable: true },
@@ -270,6 +311,7 @@ module.exports = {
   MappingAudit: model("ListeningMappingAudit", mappingAuditSchema),
   Job: model("ListeningJob", jobSchema),
   CatalogScan: model("ListeningCatalogScan", catalogScanSchema),
+  DiscoveryAttempt: model("ListeningDiscoveryAttempt", discoveryAttemptSchema),
   Detection: model("ListeningDetection", detectionSchema),
   DetectionEvidence: model("ListeningDetectionEvidence", detectionEvidenceSchema),
   ProviderBudget: model("ListeningProviderBudget", providerBudgetSchema),
