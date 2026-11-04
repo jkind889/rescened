@@ -9,7 +9,7 @@ const AlbumSubmission = require("../models/AlbumSubmission");
 const Models = require("../models/AlbumBaseline");
 const Listening = require("../models/Listening");
 const { hashCandidateTracklist } = require("../lib/baselines/musicBrainz");
-const { baselineForAlbum, detail, invalidateAlbumBaseline, list, performCommand, queueEnrichmentCandidate, reviewStatusCounts, storeCandidate } = require("../lib/baselines/service");
+const { baselineForAlbum, detail, invalidateAlbumBaseline, list, performCommand, queueEnrichmentCandidate, reviewStatusCounts, reviewStatusForAlbums, storeCandidate } = require("../lib/baselines/service");
 const { approveAlbumSubmission } = require("../routes/utils/approval");
 const { findDuplicateSignals, normalizeSubmissionPayload, snapshotForSubmission } = require("../routes/utils/submissions");
 
@@ -31,8 +31,8 @@ function makeCandidate({ releaseGroupMbid = mbid(), title = "Pilot", tracks } = 
 function albumInput({ albumId = crypto.randomUUID(), releaseGroupMbid = mbid(), tracks = [] } = {}) {
   return { albumId, title: "Pilot", artistDisplayName: "Artist", releaseType: "album", tracks, catalogRevision: 1, externalReferences: [{ provider: "musicbrainz", entityType: "release-group", externalId: releaseGroupMbid, url: `https://musicbrainz.org/release-group/${releaseGroupMbid}` }] };
 }
-async function createSubmission(releaseGroupMbid) {
-  const payload = normalizeSubmissionPayload({ proposedMetadata: { title: "Submitted Pilot", artistCredits: [{ name: "Artist" }], releaseType: "album", releaseDate: "2026" }, supportingSources: [{ type: "musicbrainz", url: `https://musicbrainz.org/release-group/${releaseGroupMbid}` }], externalReferences: [{ provider: "musicbrainz", entityType: "release-group", externalId: releaseGroupMbid, url: `https://musicbrainz.org/release-group/${releaseGroupMbid}` }] });
+async function createSubmission(releaseGroupMbid, releaseType = "album") {
+  const payload = normalizeSubmissionPayload({ proposedMetadata: { title: "Submitted Pilot", artistCredits: [{ name: "Artist" }], releaseType, releaseDate: "2026" }, supportingSources: [{ type: "musicbrainz", url: `https://musicbrainz.org/release-group/${releaseGroupMbid}` }], externalReferences: [{ provider: "musicbrainz", entityType: "release-group", externalId: releaseGroupMbid, url: `https://musicbrainz.org/release-group/${releaseGroupMbid}` }] });
   const duplicate = await findDuplicateSignals(payload); const submittedAt = new Date();
   return AlbumSubmission.create({ submissionId: crypto.randomUUID(), submittedByUserId: "integration-user", proposedMetadata: payload.proposedMetadata, supportingSources: payload.supportingSources, externalReferences: payload.externalReferences, normalizedFingerprint: duplicate.fingerprint, status: "pending", currentRevision: 1, revisions: [snapshotForSubmission(payload, duplicate, submittedAt, 1)], moderationHistory: [{ actorUserId: "integration-user", action: "submitted", reason: "", createdAt: submittedAt }] });
 }
@@ -115,6 +115,97 @@ test("reviewed backfill apply is exact, idempotent, and only queues", { skip: !e
   const session = await mongoose.startSession(); let first; await session.withTransaction(async () => { first = await queueEnrichmentCandidate({ albumId: album.albumId, expectedCatalogRevision: 1, candidate, reviewer: "integration-moderator", planHash, session }); }); await session.endSession();
   const secondSession = await mongoose.startSession(); let retry; await secondSession.withTransaction(async () => { retry = await queueEnrichmentCandidate({ albumId: album.albumId, expectedCatalogRevision: 1, candidate, reviewer: "integration-moderator", planHash, session: secondSession }); }); await secondSession.endSession();
   assert.equal(first.status, "pending"); assert.equal(retry.idempotent, true); assert.equal(await Models.Candidate.countDocuments({ targetId: album.albumId }), 1); assert.equal(await Models.Baseline.countDocuments({}), 0); assert.equal((await AlbumCatalog.findOne({ albumId: album.albumId })).tracks.length, 0);
+});
+
+test("mixtapes can be queued, confirmed, replaced, and revoked without overwriting catalog tracks", { skip: !enabled }, async () => {
+  const group = mbid();
+  const album = await AlbumCatalog.create({ ...albumInput({ releaseGroupMbid: group }), releaseType: "mixtape" });
+  const candidate = makeCandidate({ releaseGroupMbid: group });
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(() => queueEnrichmentCandidate({ albumId: album.albumId, expectedCatalogRevision: 1, candidate, reviewer: "integration-moderator", planHash: "a".repeat(64), session }));
+  } finally { await session.endSession(); }
+  assert.equal((await list({ readiness: "ready" })).items[0].id, album.albumId);
+  assert.equal((await reviewStatusCounts()).albums.pendingWithCandidate, 1);
+  assert.equal(await Models.Baseline.countDocuments({}), 0, "enrichment only queues a candidate");
+  assert.equal((await AlbumCatalog.findOne({ albumId: album.albumId })).tracks.length, 0);
+
+  const requestId = crypto.randomUUID();
+  const confirmed = await command("albums", album.albumId, "confirm", 1, 1, candidate, requestId);
+  assert.equal(confirmed.status, "reviewed");
+  const updated = await AlbumCatalog.findOne({ albumId: album.albumId });
+  assert.equal(updated.catalogRevision, 2);
+  assert.equal(updated.tracks.length, 1);
+  assert.equal(updated.fieldProvenance.tracks.source, "musicbrainz");
+  assert.equal((await baselineForAlbum(updated)).tracklistHash, candidate.tracklistHash);
+  assert.equal((await command("albums", album.albumId, "confirm", 1, 1, candidate, requestId)).revision, 2);
+  assert.equal(await Models.Baseline.countDocuments({ albumId: album.albumId }), 1);
+
+  const replacement = makeCandidate({ releaseGroupMbid: group, tracks: candidate.tracks.map((track) => ({ ...track, durationMs: 2000 })) });
+  await storeCandidate("albums", updated, replacement);
+  const replaced = await command("albums", album.albumId, "replace", 2, 2, replacement);
+  assert.equal(replaced.activeBaseline.version, 2);
+  assert.deepEqual((await AlbumCatalog.findOne({ albumId: album.albumId })).tracks.toObject(), updated.tracks.toObject());
+  await command("albums", album.albumId, "revoke", 3, 2, null);
+  assert.equal(await baselineForAlbum(updated), null);
+  assert.equal(await Models.Baseline.countDocuments({ albumId: album.albumId }), 2);
+});
+
+test("mixtape submission baselines publish with approval and enter the reviewed catalog queue", { skip: !enabled }, async () => {
+  const group = mbid();
+  const submission = await createSubmission(group, "mixtape");
+  assert.deepEqual((await list({ status: "pending" })).items.map((row) => [row.kind, row.id]), [["submissions", submission.submissionId]]);
+  assert.equal((await reviewStatusCounts()).submissions.pending, 1);
+  const candidate = makeCandidate({ releaseGroupMbid: group, title: "Submitted Pilot" });
+  await storeCandidate("submissions", submission, candidate);
+  await command("submissions", submission.submissionId, "confirm", 0, 1, candidate);
+  assert.equal((await reviewStatusCounts()).submissions.reviewed, 1);
+  assert.equal(await AlbumCatalog.countDocuments({}), 0, "a reviewed submission is still private");
+  const approved = await approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "integration-moderator", confirmPossibleDuplicate: true, coverResolver: null });
+  const album = await AlbumCatalog.findOne({ albumId: approved.album.albumId });
+  assert.equal(album.releaseType, "mixtape");
+  assert.equal((await baselineForAlbum(album)).tracklistHash, candidate.tracklistHash);
+  assert.deepEqual((await list({ status: "reviewed" })).items.map((row) => [row.kind, row.id]), [["albums", album.albumId]]);
+  assert.equal((await reviewStatusCounts()).albums.reviewed, 1);
+});
+
+test("queues and measurement agree on album, EP, and mixtape eligibility", { skip: !enabled }, async () => {
+  const eligible = new Set(["album", "ep", "mixtape"]);
+  const albums = [];
+  const submissions = [];
+  for (const releaseType of AlbumCatalog.schema.path("releaseType").enumValues) {
+    albums.push(await AlbumCatalog.create({ ...albumInput(), releaseType }));
+    submissions.push(await createSubmission(mbid(), releaseType));
+  }
+  const pending = await list({ status: "pending", limit: 50 });
+  assert.deepEqual(new Set(pending.items.map((row) => row.id)), new Set([
+    ...albums.filter((row) => eligible.has(row.releaseType)).map((row) => row.albumId),
+    ...submissions.filter((row) => eligible.has(row.proposedMetadata.releaseType)).map((row) => row.submissionId),
+  ]));
+  const counts = await reviewStatusCounts();
+  assert.equal(counts.albums.pending, 3);
+  assert.equal(counts.submissions.pending, 3);
+  const measured = await reviewStatusForAlbums(albums.map((row) => row.albumId));
+  for (const album of albums) assert.equal(measured.find((row) => row.id === album.albumId).inBaselineQueue, eligible.has(album.releaseType), album.releaseType);
+});
+
+test("other release types still reject baseline confirmation and enrichment apply", { skip: !enabled }, async () => {
+  for (const releaseType of ["single", "soundtrack", "compilation", "live", "remix", "other"]) {
+    const group = mbid();
+    const album = await AlbumCatalog.create({ ...albumInput({ releaseGroupMbid: group }), releaseType });
+    const candidate = makeCandidate({ releaseGroupMbid: group });
+    await storeCandidate("albums", album, candidate);
+    const unsupported = (error) => error.code === "UNSUPPORTED_RELEASE_TYPE" && error.status === 409;
+    await assert.rejects(command("albums", album.albumId, "confirm", 0, 1, candidate), unsupported, releaseType);
+    const session = await mongoose.startSession();
+    try {
+      await assert.rejects(session.withTransaction(() => queueEnrichmentCandidate({ albumId: album.albumId, expectedCatalogRevision: 1, candidate, reviewer: "integration-moderator", planHash: "b".repeat(64), session })), unsupported, releaseType);
+    } finally { await session.endSession(); }
+    assert.equal((await AlbumCatalog.findOne({ albumId: album.albumId })).tracks.length, 0);
+  }
+  assert.equal(await Models.Baseline.countDocuments({}), 0);
+  assert.equal(await Models.Head.countDocuments({}), 0);
+  assert.equal(await Models.Audit.countDocuments({}), 0);
 });
 
 test("pending queue readiness partitions candidate-backed work before pagination", { skip: !enabled }, async () => {

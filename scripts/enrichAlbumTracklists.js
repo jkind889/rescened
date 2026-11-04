@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const fs = require('node:fs');
 const mongoose = require('mongoose');
+const { BASELINE_RELEASE_TYPES } = require('../lib/baselines/eligibility');
 const { preparePlan, summarizePlan, verifyPlan, applyPlan, digest, targetFingerprint } = require('../lib/baselines/backfill');
 function parseArgs(args) {
   const options = { mode: 'dry-run', limit: 20 };
@@ -43,7 +44,7 @@ async function main(args = process.argv.slice(2)) {
     const service = require('../lib/baselines/service');
     const fingerprint = targetFingerprint(mongoose.connection);
     if (options.mode === 'dry-run') {
-      const albums = await require('../models/AlbumCatalog').find({ releaseType: { $in: ['album', 'ep'] }, ...(options['--after'] ? { albumId: { $gt: options['--after'] } } : {}) }).sort({ albumId: 1 }).limit(options.limit).lean();
+      const albums = await require('../models/AlbumCatalog').find({ releaseType: { $in: BASELINE_RELEASE_TYPES }, ...(options['--after'] ? { albumId: { $gt: options['--after'] } } : {}) }).sort({ albumId: 1 }).limit(options.limit).lean();
       const provider = require('../lib/baselines/musicBrainz').createBaselineMusicBrainz(privateProviderOptions());
       const plan = await preparePlan({ albums, environment: options['--environment'], fingerprint, provider, baselineForAlbum: service.baselineForAlbum });
       const bytes = JSON.stringify(plan, null, 2) + '\n';
