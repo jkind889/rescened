@@ -243,7 +243,8 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Data export | `GET /profile/me/export/:dataset.:format`, after request validation | authenticated user | 10 exports per hour |
 | Board mutation | `PATCH /boards/:boardId`, `PUT /boards/:boardId/order` | authenticated user | 60 attempts per 10 minutes |
 | Queue mutation | `POST`/`PUT /profile/me/queue`, `DELETE /profile/me/queue/:albumId` | authenticated user | 60 attempts per 10 minutes |
-| Suggestion create | `POST /suggestions`, `POST /suggestions/corrections` | authenticated user | 6 attempts per 10 minutes |
+| Album suggestion create | `POST /suggestions` | authenticated user | 10 attempts per 10 minutes |
+| Correction create | `POST /suggestions/corrections` | authenticated user | 6 attempts per 5 minutes |
 | Suggestion mutation | `POST /suggestions/:submissionId/revise`, `POST /suggestions/:submissionId/withdraw` | authenticated user | 20 attempts per 10 minutes |
 | Genre suggestion | `POST /suggestions/genres` | authenticated user | 20 attempts per hour |
 | Moderation mutation | Request-changes, reject, duplicate, and approve commands, bulk approval (one point per item), genre vocabulary commands, and comment remove and dismiss | authenticated moderator | 120 points per 10 minutes |

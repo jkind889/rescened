@@ -24,6 +24,7 @@ const {
   snapshotForSubmission,
 } = require("./utils/submissions");
 const {
+  correctionCreateRateLimit,
   genreSuggestionRateLimit,
   submissionCreateRateLimit,
   submissionMutationRateLimit,
@@ -162,7 +163,7 @@ router.post("/", auth, submissionsEnabled, submissionCreateRateLimit, async (req
   }
 });
 
-router.post("/corrections", auth, submissionsEnabled, submissionCreateRateLimit, async (req, res) => {
+router.post("/corrections", auth, submissionsEnabled, correctionCreateRateLimit, async (req, res) => {
   try {
     const requestedAlbumId = typeof req.body?.albumId === "string" ? req.body.albumId.trim().toLowerCase() : "";
     const album = requestedAlbumId ? await queryResult(AlbumCatalog.findOne({ albumId: requestedAlbumId })) : null;
