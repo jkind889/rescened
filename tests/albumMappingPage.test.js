@@ -46,6 +46,7 @@ function harness() {
     failGet(value = true) { failGet = value; },
     holdGet() { let resolve; const promise = new Promise((done) => { resolve = done; }); getHold = { promise }; return resolve; },
     holdPost() { let resolve; const promise = new Promise((done) => { resolve = done; }); postHold = { promise }; return resolve; },
+    unmount() { for (const slot of slots) slot?.cleanup?.(); },
     requests,
   };
 }
@@ -163,4 +164,41 @@ test("a mismatched detail response is rejected", async () => {
   await h.render().retry();
   assert.equal(h.render().detail, null);
   assert.ok(h.render().detailError);
+});
+
+test("a baseline completion from case A cannot clear the loaded case B", async () => {
+  const h = await loaded();
+  const completeA = h.render().handleBaselineStateChange;
+  h.setResponse({ ...view("pending"), case: { ...view("pending").case, caseId: "case-b" } });
+  h.route("case-b"); h.render(); await h.flush();
+  assert.equal(h.render().detail.case.caseId, "case-b");
+  const before = h.requests.length;
+  completeA(); await h.flush();
+  assert.equal(h.render().detail.case.caseId, "case-b");
+  assert.equal(h.render().detailLoading, false);
+  assert.equal(h.render().detailError, null);
+  assert.equal(h.requests.length, before, "obsolete callbacks must not request or abort anything");
+});
+
+test("a baseline completion from a superseded review cannot interrupt its reload", async () => {
+  const h = await loaded();
+  const completeOldReview = h.render().handleBaselineStateChange;
+  const release = h.holdGet();
+  const reload = h.render().retry(); await h.flush();
+  const before = h.requests.length;
+  completeOldReview(); await h.flush();
+  assert.equal(h.requests.length, before);
+  release(); await reload;
+  assert.equal(h.render().detail.case.caseId, "case-a");
+  assert.equal(h.render().detailError, null);
+});
+
+
+test("a baseline completion after unmount cannot start another fetch", async () => {
+  const h = await loaded();
+  const complete = h.render().handleBaselineStateChange;
+  h.unmount();
+  const before = h.requests.length;
+  complete(); await h.flush();
+  assert.equal(h.requests.length, before);
 });

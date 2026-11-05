@@ -111,6 +111,7 @@ export default function AlbumMappings() {
   const [accessDenied, setAccessDenied] = useState(false);
   const detailSequence = useRef(0);
   const detailController = useRef(null);
+  const reviewedDetail = useRef(null);
   const effort = useReviewTimer({ kind: "mapping", targetKind: "cases", targetId: caseId });
 
   const loadQueue = useCallback(async ({ cursor = "", append = false } = {}) => {
@@ -151,6 +152,7 @@ export default function AlbumMappings() {
     detailController.current = controller;
     const sequence = ++detailSequence.current;
     const current = () => !controller.signal.aborted && sequence === detailSequence.current;
+    reviewedDetail.current = null;
     setDetail(null);
     setDetailLoading(true);
     setDetailError(null);
@@ -171,6 +173,7 @@ export default function AlbumMappings() {
       );
       if (!current()) return;
       if (data?.case?.caseId !== caseId) throw new Error("The server returned a different mapping case.");
+      reviewedDetail.current = data;
       setDetail(data);
       setSelectedAlbumId(data?.mapping?.albumId || "");
     } catch (error) {
@@ -188,15 +191,19 @@ export default function AlbumMappings() {
     return () => {
       detailController.current?.abort();
       detailSequence.current += 1;
+      reviewedDetail.current = null;
     };
   }, [loadDetail]);
 
   // Baseline writes may advance the catalog revision and mapping together.
   // Read the authoritative mapping state before offering another decision.
   const handleBaselineStateChange = useCallback(() => {
+    // A baseline mutation can finish after its panel has switched cases or reviews.
+    // Only the callback belonging to the currently loaded review may reload it.
+    if (!detail || detail !== reviewedDetail.current) return;
     loadDetail();
     loadQueue();
-  }, [loadDetail, loadQueue]);
+  }, [detail, loadDetail, loadQueue]);
 
   const selectedCase = !detailLoading && !detailError && detail?.case?.caseId === caseId ? detail.case : null;
   const actionOptions = mappingActions(selectedCase ? detail : null);
@@ -272,6 +279,7 @@ export default function AlbumMappings() {
       );
       if (sequence !== detailSequence.current) return;
       setAction("");
+      reviewedDetail.current = updatedDetail;
       setDetail(updatedDetail);
       setSelectedAlbumId(updatedDetail?.mapping?.albumId || selectedAlbumId);
       // Only final decisions end a timed review; refresh and reconfirm keep it running.
