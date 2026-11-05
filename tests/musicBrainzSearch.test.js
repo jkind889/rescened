@@ -296,3 +296,46 @@ test("ranked search cache expires and evicts entries at its configured bound", a
   await client.searchReleaseGroups("first");
   assert.equal(calls, 4);
 });
+
+
+test("failure diagnostics separate gate and fetch timing across provider failure categories", async () => {
+  for (const [category, fetchResult, status] of [
+    ["network", () => { throw new Error("secret URL"); }, undefined],
+    ["upstream_http", () => response(null, 503), 503],
+    ["invalid_response", () => response({ unexpected: "secret" }), 200],
+    ["invalid_response", () => ({ ...response(null), json: async () => { throw new SyntaxError("secret"); } }), 200],
+  ]) {
+    let now = 0;
+    const client = createMusicBrainzSearch({
+      nowMs: () => now,
+      rateGate: async () => { now += 850; },
+      fetchFn: async () => { now += 120; return fetchResult(); },
+    });
+    await assert.rejects(() => client.searchReleaseGroups("secret"), (error) => {
+      assert.deepEqual(error.diagnostics, {
+        category, ...(status ? { upstreamStatus: status } : {}), gateWaitMs: 850, fetchDurationMs: 120,
+      });
+      assert.equal(JSON.stringify(error.diagnostics).includes("secret"), false);
+      return true;
+    });
+    assert.equal(client.stats.networkRequests, 1);
+  }
+});
+
+test("abort during response-body reading is diagnosed as timeout", async () => {
+  const client = createMusicBrainzSearch({
+    timeoutMs: 5, intervalMs: 0,
+    fetchFn: async (url, { signal }) => ({
+      ...response(null),
+      json: () => new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("body aborted")), { once: true });
+      }),
+    }),
+  });
+  await assert.rejects(() => client.searchReleaseGroups("secret"), (error) => {
+    assert.equal(error.diagnostics.category, "timeout");
+    assert.equal(error.diagnostics.upstreamStatus, 200);
+    assert.ok(error.diagnostics.fetchDurationMs >= 0);
+    return true;
+  });
+});

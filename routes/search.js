@@ -1,3 +1,4 @@
+const { randomUUID } = require("node:crypto");
 const express = require("express");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const { normalizeCatalogAlbum, toSearchResult } = require("./utils/albumCatalog");
@@ -85,10 +86,15 @@ function invalidExternalSearch(res, error) {
   });
 }
 
-function externalSearchUnavailable(res) {
+function externalSearchUnavailable(res, diagnostic) {
   return res.status(502).json({
     error: "External album search is temporarily unavailable",
     code: "EXTERNAL_SEARCH_UNAVAILABLE",
+    ...(diagnostic ? {
+      category: diagnostic.category,
+      upstreamStatus: diagnostic.upstreamStatus,
+      requestId: diagnostic.requestId,
+    } : {}),
   });
 }
 
@@ -136,6 +142,33 @@ router.get("/search", searchRateLimit, async (req, res) => {
   }
 });
 
+function externalSearchDiagnostic(error, requestId) {
+  const diagnostic = error?.diagnostics;
+  const categories = ["timeout", "network", "upstream_http", "invalid_response"];
+  return {
+    category: categories.includes(diagnostic?.category) ? diagnostic.category : "unknown",
+    upstreamStatus: Number.isInteger(diagnostic?.upstreamStatus)
+      && diagnostic.upstreamStatus >= 100 && diagnostic.upstreamStatus <= 599
+      ? diagnostic.upstreamStatus : null,
+    requestId,
+  };
+}
+
+function logExternalSearchFailure(error, diagnostic, operation) {
+  const duration = (value) => Number.isFinite(value) && value >= 0 ? value : null;
+  console.warn(JSON.stringify({
+    event: "external_search_failure",
+    timestamp: new Date().toISOString(),
+    requestId: diagnostic.requestId,
+    provider: "musicbrainz",
+    operation,
+    category: diagnostic.category,
+    upstreamStatus: diagnostic.upstreamStatus,
+    gateWaitMs: duration(error?.diagnostics?.gateWaitMs),
+    fetchDurationMs: duration(error?.diagnostics?.fetchDurationMs),
+  }));
+}
+
 router.get("/external", externalSearchEnabled, externalSearchRateLimit, async (req, res) => {
   let query;
   let limit;
@@ -146,13 +179,16 @@ router.get("/external", externalSearchEnabled, externalSearchRateLimit, async (r
     return invalidExternalSearch(res, error);
   }
 
+  const requestId = randomUUID();
+  res.set("X-Request-ID", requestId);
   let candidates;
   try {
     candidates = await searchReleaseGroups(query, limit);
   } catch (error) {
     if (error?.code === "INVALID_EXTERNAL_SEARCH") return invalidExternalSearch(res, error);
-    if (!(error instanceof MusicBrainzSearchError)) console.error(error);
-    return externalSearchUnavailable(res);
+    const diagnostic = externalSearchDiagnostic(error, requestId);
+    logExternalSearchFailure(error, diagnostic, "search");
+    return externalSearchUnavailable(res, diagnostic);
   }
 
   try {

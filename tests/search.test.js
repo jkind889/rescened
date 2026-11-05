@@ -51,7 +51,7 @@ function callRoute(router, method, path, req = {}) {
       await handler(req, res, () => { nextCalled = true; });
       if (!nextCalled) break;
     }
-    return { status: res.statusCode, body: res.body };
+    return { status: res.statusCode, body: res.body, headers: res.headers };
   })();
 }
 
@@ -225,4 +225,69 @@ test("invalid external queries and limits retain the 400 contract without provid
     assert.equal(result.body.code, "INVALID_EXTERNAL_SEARCH");
   }
   assert.equal(installed.searchCalls, 0);
+});
+
+
+test("external failure logs only safe diagnostic fields and a server-generated correlation ID", async (t) => {
+  process.env.EXTERNAL_ALBUM_SEARCH_ENABLED = "true";
+  const logs = [];
+  t.mock.method(console, "warn", (line) => logs.push(JSON.parse(line)));
+  const error = new realAdapter.MusicBrainzSearchError("secret query https://provider/?token=secret");
+  error.diagnostics = { category: "timeout", gateWaitMs: 850, fetchDurationMs: 3003, query: "secret" };
+  const installed = install({ searchError: error });
+  const result = await callRoute(installed.router, "get", "/external", {
+    query: { q: "imaginal disk" }, headers: { "x-request-id": "secret" },
+  });
+  assert.equal(result.status, 502);
+  assert.deepEqual(result.body, {
+    error: "External album search is temporarily unavailable", code: "EXTERNAL_SEARCH_UNAVAILABLE",
+    category: "timeout", upstreamStatus: null, requestId: result.headers["X-Request-ID"],
+  });
+  assert.equal(logs.length, 1);
+  assert.deepEqual(Object.keys(logs[0]).sort(), ["event", "timestamp", "requestId", "provider", "operation",
+    "category", "upstreamStatus", "gateWaitMs", "fetchDurationMs"].sort());
+  assert.equal(logs[0].requestId, result.headers["X-Request-ID"]);
+  assert.match(logs[0].requestId, /^[0-9a-f-]{36}$/u);
+  assert.ok(Number.isFinite(Date.parse(logs[0].timestamp)));
+  assert.equal(logs[0].gateWaitMs, 850);
+  assert.equal(logs[0].fetchDurationMs, 3003);
+  assert.equal(JSON.stringify(logs).includes("secret"), false);
+});
+
+
+test("external 502 exposes only allowlisted diagnostics and never invents an upstream status", async (t) => {
+  process.env.EXTERNAL_ALBUM_SEARCH_ENABLED = "true";
+  const logs = [];
+  t.mock.method(console, "warn", (line) => logs.push(JSON.parse(line)));
+  for (const [diagnostics, category, upstreamStatus] of [
+    [{ category: "upstream_http", upstreamStatus: 503 }, "upstream_http", 503],
+    [{ category: "network" }, "network", null],
+    [{ category: "timeout" }, "timeout", null],
+    [{ category: "timeout", upstreamStatus: 200 }, "timeout", 200],
+    [{ category: "invalid_response", upstreamStatus: 200 }, "invalid_response", 200],
+    [{ category: "secret", upstreamStatus: "503" }, "unknown", null],
+    [{ category: "network", upstreamStatus: 600 }, "network", null],
+    [{ category: "network", upstreamStatus: 99 }, "network", null],
+    [undefined, "unknown", null],
+  ]) {
+    const error = new Error("secret exception https://provider/?token=secret");
+    error.status = 502;
+    error.body = "secret provider body";
+    error.diagnostics = diagnostics && {
+      ...diagnostics, gateWaitMs: 850, fetchDurationMs: 3003,
+      query: "secret", url: "https://secret", credentials: "secret",
+    };
+    const installed = install({ searchError: error });
+    const result = await callRoute(installed.router, "get", "/external", { query: { q: "imaginal disk" } });
+    assert.equal(result.status, 502);
+    assert.deepEqual(result.body, {
+      error: "External album search is temporarily unavailable", code: "EXTERNAL_SEARCH_UNAVAILABLE",
+      category, upstreamStatus, requestId: result.headers["X-Request-ID"],
+    });
+    assert.equal(JSON.stringify(result.body).includes("secret"), false);
+    assert.equal(result.body.requestId, logs.at(-1).requestId);
+    assert.equal(result.body.category, logs.at(-1).category);
+    assert.equal(result.body.upstreamStatus, logs.at(-1).upstreamStatus);
+    if (diagnostics) assert.equal(logs.at(-1).fetchDurationMs, 3003);
+  }
 });

@@ -498,3 +498,37 @@ The follow-up requires server-side caching, a disabled-by-default feature flag, 
 **Not implemented in this release.** Build a reviewed query set with expected release-group MBIDs covering titles, artists, mixed input, ambiguous names, punctuation, non-Latin text, obscure releases, and specifically requested singles/live releases. Compare the previous plain-title search and 12-row retrieval, the current 50-row structured search and reranking, and later popularity enrichment.
 
 Measure top-result accuracy, top-12 coverage, reciprocal rank, latency, and provider request count. Retain sufficiently broad captured responses for each retrieval strategy so offline comparisons do not mistake absent baseline candidates for ranking failures; record source, capture date, and fixture licensing. Live captures require explicit authorization. Use the results to set improvement thresholds and tune ranking. Search-query history collection and personalized ranking remain outside scope. This evaluation does not replace the deterministic adapter and route regression tests required for this release.
+
+
+### External search failure diagnostics
+
+`GET /search/external` emits a JSON `external_search_failure` warning on provider
+failure while preserving HTTP `502`, the error message, and code
+`EXTERNAL_SEARCH_UNAVAILABLE`. The JSON body additionally exposes only
+`category`, `upstreamStatus`, and `requestId`, using the same sanitized values as
+the log. `upstreamStatus` is null when no provider response was received (including
+timeouts and network failures); it can be 200 when body reading or validation
+fails after successful headers. Gate/fetch durations remain server-log-only. A
+server-generated UUID in `X-Request-ID` matches the warning's `requestId`; it
+identifies each browser request, including callers sharing an in-flight fetch.
+The record contains an ISO timestamp, provider, operation, category (`timeout`,
+`network`, `upstream_http`, `invalid_response`, or `unknown`), upstream HTTP status
+when received, `gateWaitMs`, and `fetchDurationMs`. Unknown measurements are null.
+Fetch duration includes reading and validating the response; the three-second
+request timer still starts after the existing rate gate. Successful cached calls
+emit no failure event. No retries, timeout changes, or rate-gate changes are added.
+
+The adapter attaches allowlisted diagnostic metadata to failed requests, including
+release-group lookup errors; this route wiring currently logs external search
+failures only. Logs exclude queries, URLs, error messages/stacks, credentials, and
+incoming correlation headers. The warning goes to the existing console sink.
+Central log collection, retention, alert thresholds, dashboards, and browser-side
+correlation UI remain future integration work. Existing clients that read the
+error/code continue to work; strict response-schema consumers must accept the
+three additive fields. The exact release-group lookup endpoint retains its
+existing error body. Browser JavaScript can read the new fields from the JSON
+body without any CORS header-exposure change. Cross-origin browser JavaScript
+would also need the response header exposed by the CORS policy before reading it;
+DevTools can inspect it directly. Reproduce and inspect a failed request before
+making any timeout decision; these diagnostics do not establish the cause of an
+older failure.

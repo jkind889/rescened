@@ -221,6 +221,14 @@ Bulk approval returns `200` with a result for each item. Its per-item `error.cod
 | `EXTERNAL_SEARCH_UNAVAILABLE` | `502` | MusicBrainz failed, timed out, or returned data that could not be normalized. Local catalog search remains available. |
 | `EXTERNAL_SEARCH_DISABLED` | `503` | `EXTERNAL_ALBUM_SEARCH_ENABLED` is off. |
 
+For `GET /search/external`, `EXTERNAL_SEARCH_UNAVAILABLE` preserves its message and
+adds `category` (`timeout`, `network`, `upstream_http`, `invalid_response`, or
+`unknown`), `upstreamStatus` (received provider HTTP status or `null`), and a
+server-generated `requestId` matching `X-Request-ID` and the failure log. No
+provider response means no upstream status; the API's own 502 is not substituted.
+Timings and raw provider/exception details are not returned. The release-group
+lookup endpoint's error body is unchanged.
+
 The route deliberately maps internal provider codes to the smaller public vocabulary above so raw upstream details do not leak to clients.
 
 ## Rate-limit reference
