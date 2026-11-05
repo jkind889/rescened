@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -109,6 +109,8 @@ export default function AlbumMappings() {
   const [command, setCommand] = useState({ pending: false, error: null, success: "" });
   const [baselineBusy, setBaselineBusy] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
+  const detailSequence = useRef(0);
+  const detailController = useRef(null);
   const effort = useReviewTimer({ kind: "mapping", targetKind: "cases", targetId: caseId });
 
   const loadQueue = useCallback(async ({ cursor = "", append = false } = {}) => {
@@ -142,54 +144,62 @@ export default function AlbumMappings() {
     loadQueue();
   }, [loadQueue]);
 
-  useEffect(() => {
-    if (!caseId || !isLoaded || !isSignedIn) return undefined;
+  const loadDetail = useCallback(async () => {
+    if (!caseId || !isLoaded || !isSignedIn) return;
+    detailController.current?.abort();
     const controller = new AbortController();
+    detailController.current = controller;
+    const sequence = ++detailSequence.current;
+    const current = () => !controller.signal.aborted && sequence === detailSequence.current;
+    setDetail(null);
     setDetailLoading(true);
     setDetailError(null);
-    async function loadDetail() {
-      try {
-        const token = await getToken();
-        const data = await requestLastfmJson(
-          lastfmUrl(`${ALBUM_MAPPING_PATH}/${encodeURIComponent(caseId)}`),
-          { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal },
-          "This album mapping case could not be loaded.",
-        );
-        if (!controller.signal.aborted) {
-          setDetail(data);
-          setSelectedAlbumId(data?.mapping?.albumId || "");
-          setCommand({ pending: false, error: null, success: "" });
-        }
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          const parsed = errorState(error, "This album mapping case could not be loaded.");
-          setDetailError(parsed);
-          if (parsed.status === 403 || parsed.code === "MODERATOR_REQUIRED") setAccessDenied(true);
-        }
-      } finally {
-        if (!controller.signal.aborted) setDetailLoading(false);
-      }
+    setAction("");
+    setReason("");
+    setSelectedAlbumId("");
+    setCatalogQuery("");
+    setCatalogResults([]);
+    setCatalogLoading(false);
+    setCommand({ pending: false, error: null, success: "" });
+    try {
+      const token = await getToken();
+      if (!current()) return;
+      const data = await requestLastfmJson(
+        lastfmUrl(`${ALBUM_MAPPING_PATH}/${encodeURIComponent(caseId)}`),
+        { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal },
+        "This album mapping case could not be loaded.",
+      );
+      if (!current()) return;
+      if (data?.case?.caseId !== caseId) throw new Error("The server returned a different mapping case.");
+      setDetail(data);
+      setSelectedAlbumId(data?.mapping?.albumId || "");
+    } catch (error) {
+      if (!current()) return;
+      const parsed = errorState(error, "This album mapping case could not be loaded.");
+      setDetailError(parsed);
+      if (parsed.status === 403 || parsed.code === "MODERATOR_REQUIRED") setAccessDenied(true);
+    } finally {
+      if (current()) setDetailLoading(false);
     }
-    loadDetail();
-    return () => controller.abort();
   }, [caseId, getToken, isLoaded, isSignedIn]);
 
-  // A baseline confirmation can fill empty tracks and advance the album's catalog
-  // revision. Carry that revision into the candidates so approval is checked
-  // against the revision the moderator is now looking at.
-  const handleBaselineStateChange = useCallback((baseline) => {
-    const albumId = baseline?.target?.kind === "albums" ? baseline.target.id : "";
-    const revision = Number(baseline?.target?.catalogRevision);
-    if (albumId && Number.isSafeInteger(revision) && revision > 0) {
-      const update = (candidate) => (candidate.albumId === albumId ? { ...candidate, catalogRevision: revision } : candidate);
-      setDetail((current) => (current?.case ? { ...current, case: { ...current.case, candidates: (current.case.candidates || []).map(update) } } : current));
-      setCatalogResults((current) => current.map(update));
-    }
-    loadQueue();
-  }, [loadQueue]);
+  useEffect(() => {
+    loadDetail();
+    return () => {
+      detailController.current?.abort();
+      detailSequence.current += 1;
+    };
+  }, [loadDetail]);
 
-  const selectedCase = detail?.case || null;
-  const actionOptions = mappingActions(detail);
+  // Baseline writes may advance the catalog revision and mapping together.
+  // Read the authoritative mapping state before offering another decision.
+  const handleBaselineStateChange = useCallback(() => {
+    loadDetail();
+    loadQueue();
+  }, [loadDetail, loadQueue]);
+
+  const selectedCase = !detailLoading && !detailError && detail?.case?.caseId === caseId ? detail.case : null;
+  const actionOptions = mappingActions(selectedCase ? detail : null);
   const action = actionOptions.some((option) => option.value === requestedAction) ? requestedAction : actionOptions[0]?.value || "";
   const isApproved = selectedCase?.status === "approved";
   const reviewAlbumId = isApproved ? detail?.mapping?.albumId || "" : selectedAlbumId;
@@ -203,6 +213,7 @@ export default function AlbumMappings() {
       setCatalogResults([]);
       return;
     }
+    const sequence = detailSequence.current;
     setCatalogLoading(true);
     try {
       const token = await getToken();
@@ -211,11 +222,13 @@ export default function AlbumMappings() {
         { headers: { Authorization: `Bearer ${token}` } },
         "Catalog search failed.",
       );
+      if (sequence !== detailSequence.current) return;
       setCatalogResults(Array.isArray(data?.items) ? data.items : []);
     } catch (error) {
+      if (sequence !== detailSequence.current) return;
       setCommand((current) => ({ ...current, error: errorState(error, "Catalog search failed.") }));
     } finally {
-      setCatalogLoading(false);
+      if (sequence === detailSequence.current) setCatalogLoading(false);
     }
   }
 
@@ -234,9 +247,11 @@ export default function AlbumMappings() {
       setCommand((current) => ({ ...current, error: { message: "Select an existing catalog album before approving.", code: "ALBUM_REQUIRED" } }));
       return;
     }
+    const sequence = detailSequence.current;
     setCommand({ pending: true, error: null, success: "" });
     try {
       const token = await getToken();
+      if (sequence !== detailSequence.current) return;
       const selectedCandidate = [...candidates, ...catalogResults].find((candidate) => candidate.albumId === selectedAlbumId);
       const expectedCatalogRevision = action === "approve" && Number.isSafeInteger(Number(selectedCandidate?.catalogRevision))
         ? Number(selectedCandidate.catalogRevision)
@@ -255,6 +270,8 @@ export default function AlbumMappings() {
         },
         "The mapping decision could not be applied.",
       );
+      if (sequence !== detailSequence.current) return;
+      setAction("");
       setDetail(updatedDetail);
       setSelectedAlbumId(updatedDetail?.mapping?.albumId || selectedAlbumId);
       // Only final decisions end a timed review; refresh and reconfirm keep it running.
@@ -263,6 +280,7 @@ export default function AlbumMappings() {
       setReason("");
       await loadQueue();
     } catch (error) {
+      if (sequence !== detailSequence.current) return;
       const parsed = errorState(error, "The mapping decision could not be applied.");
       setCommand({ pending: false, error: parsed, success: "" });
       if (parsed.status === 409) {
@@ -308,7 +326,7 @@ export default function AlbumMappings() {
         <section className="mapping-detail-panel community-panel" aria-label="Selected album mapping">
           {!caseId ? <div className="community-empty-state"><p className="community-eyebrow">No selection</p><h2>Choose a mapping case to inspect.</h2><p>Provider evidence and catalog candidates will appear here without exposing listener identities or exact listening times.</p></div> : null}
           {caseId && detailLoading ? <div className="community-loading" role="status">Loading mapping evidence…</div> : null}
-          {caseId && detailError ? <div className="community-message community-message-error" role="alert"><strong>{detailError.message}</strong>{detailError.code ? <code>{detailError.code}</code> : null}<button className="community-text-button" onClick={() => navigate(`${ALBUM_MAPPING_PATH}/${encodeURIComponent(caseId)}`)} type="button">Try again</button></div> : null}
+          {caseId && detailError ? <div className="community-message community-message-error" role="alert"><strong>{detailError.message}</strong>{detailError.code ? <code>{detailError.code}</code> : null}<button className="community-text-button" onClick={() => loadDetail()} type="button">Try again</button></div> : null}
           {selectedCase && !detailLoading ? (
             <div className="mapping-detail-content">
               <div className="mapping-detail-toolbar"><div><p className="community-eyebrow">Mapping case</p><code>{selectedCase.caseId}</code></div><button className="community-text-button" onClick={() => navigate(ALBUM_MAPPING_PATH)} type="button">Close</button></div>
