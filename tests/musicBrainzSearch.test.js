@@ -339,3 +339,38 @@ test("abort during response-body reading is diagnosed as timeout", async () => {
     return true;
   });
 });
+
+
+test("real response bodies distinguish interrupted transport from malformed JSON", async () => {
+  for (const [category, makeResponse] of [
+    ["network", () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"release-groups":['));
+      },
+      pull(controller) {
+        controller.error(Object.assign(new TypeError("secret connection reset"), {
+          cause: Object.assign(new Error("secret socket"), { code: "ECONNRESET" }),
+        }));
+      },
+    }), { status: 200 })],
+    ["invalid_response", () => new Response('{"release-groups":[', { status: 200 })],
+  ]) {
+    let calls = 0;
+    const client = createMusicBrainzSearch({
+      intervalMs: 0,
+      fetchFn: async () => {
+        calls += 1;
+        return calls === 1 ? makeResponse() : Response.json({ "release-groups": [] });
+      },
+    });
+    await assert.rejects(() => client.searchReleaseGroups("secret"), (error) => {
+      assert.equal(error.diagnostics.category, category);
+      assert.equal(error.diagnostics.upstreamStatus, 200);
+      assert.equal(JSON.stringify(error.diagnostics).includes("secret"), false);
+      return true;
+    });
+    assert.equal(calls, 1, "failed transport must not introduce automatic retries");
+    assert.deepEqual(await client.searchReleaseGroups("secret"), []);
+    assert.equal(calls, 2, "failed responses must not be cached or retain an in-flight entry");
+  }
+});

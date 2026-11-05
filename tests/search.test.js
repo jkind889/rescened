@@ -262,6 +262,7 @@ test("external 502 exposes only allowlisted diagnostics and never invents an ups
   for (const [diagnostics, category, upstreamStatus] of [
     [{ category: "upstream_http", upstreamStatus: 503 }, "upstream_http", 503],
     [{ category: "network" }, "network", null],
+    [{ category: "network", upstreamStatus: 200 }, "network", 200],
     [{ category: "timeout" }, "timeout", null],
     [{ category: "timeout", upstreamStatus: 200 }, "timeout", 200],
     [{ category: "invalid_response", upstreamStatus: 200 }, "invalid_response", 200],

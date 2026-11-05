@@ -508,7 +508,9 @@ failure while preserving HTTP `502`, the error message, and code
 `category`, `upstreamStatus`, and `requestId`, using the same sanitized values as
 the log. `upstreamStatus` is null when no provider response was received (including
 timeouts and network failures); it can be 200 when body reading or validation
-fails after successful headers. Gate/fetch durations remain server-log-only. A
+fails after successful headers. Interrupted response-body transport is categorized
+as `network`; syntactically malformed JSON is `invalid_response`, and an aborted
+body read remains `timeout`. Gate/fetch durations remain server-log-only. A
 server-generated UUID in `X-Request-ID` matches the warning's `requestId`; it
 identifies each browser request, including callers sharing an in-flight fetch.
 The record contains an ISO timestamp, provider, operation, category (`timeout`,
