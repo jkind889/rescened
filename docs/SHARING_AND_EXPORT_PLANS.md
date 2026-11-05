@@ -75,7 +75,7 @@ Link-preview crawlers (Discord, Slack, iMessage, X, and others) do not run JavaS
 3. Sitemap route.
 4. Frontend head tags, the default description, and `robots.txt`.
 5. `vercel.json` rewrites.
-6. Docs: a maintained `docs/SHARE_PREVIEWS.md`, the hosting note in `PC_HANDOFF.md`, `README.md` environment variables, and `docs/PROD_READINESS_2_0.md`.
+6. Docs: a maintained `docs/SHARE_PREVIEWS.md`, the hosting note in `PC_HANDOFF.md`, and `README.md` environment variables.
 
 ### Verification
 

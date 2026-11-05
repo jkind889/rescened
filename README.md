@@ -6,8 +6,6 @@ Rescened is a community-curated album catalog. Albums, reviews, review comments,
 
 Application, provider, and operator failures are cataloged in the [error and status code reference](./docs/ERROR_CODES.md), including HTTP meanings, rate-limit budgets, report reasons, workflow statuses, and command exit codes.
 
-Future feature ideas and optimizations are tracked in the living [Rescened 2.0 roadmap](./docs/RESCENED_2_0.md).
-
 ## Local development
 
 Point the root `.env` file's `MONGO_URI` at a dedicated development database such as `rescened_dev`, using a database user with `readWrite` access only to that database. Do not use production credentials or `readWriteAnyDatabase` for local development. A development database may share the Atlas cluster with production, but it remains an independent copy and shares cluster resources. To refresh it, keep a production dump outside the repository, review a `mongorestore --dryRun` with explicit source-to-development namespace mapping, and restore only into an empty development target. Restart the API after changing `.env` and confirm `/health` reports `status: "ok"`.
@@ -128,7 +126,7 @@ npm run db:migrate:review-ids -- --verify --report .migration/review-ids/review-
 
 ## Community submissions
 
-See [Phase 2 community album submissions](./docs/PHASE_2_SUBMISSIONS.md) for the contributor and moderator APIs, data model, configuration, validation, duplicate handling, approval publication, public feed, catalog corrections, and test contract. See the [moderator implementation guide](./docs/MODERATOR_IMPLEMENTATION_GUIDE.md) for a code-level walkthrough of the router, approval transactions, frontend workspace, errors, and tests. See [Phase 3 community-submission UI](./docs/PHASE_3_UI.md) for the authenticated contributor and moderator routes and workflows. The approved-feed and correction backends are present; historical reconciliation and their frontend presentation remain rollout work.
+See [Phase 2 community album submissions](./docs/PHASE_2_SUBMISSIONS.md) for the contributor and moderator APIs, data model, configuration, validation, duplicate handling, approval publication, public feed, catalog corrections, and test contract. See the [moderator implementation guide](./docs/MODERATOR_IMPLEMENTATION_GUIDE.md) for a code-level walkthrough of the router, approval transactions, frontend workspace, errors, and tests. The approved-feed and correction backends are present; historical reconciliation and their frontend presentation remain rollout work.
 
 ## Catalog bootstrap
 

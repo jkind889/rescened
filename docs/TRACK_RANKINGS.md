@@ -74,4 +74,4 @@ Baseline confirmation and corrections preserve existing `trackId` values. A corr
 
 ## Account deletion
 
-The account-deletion transaction deletes the user's rankings, together with the other user-owned data listed in [the Last.fm sync guide](LASTFM_SYNC.md#account-and-privacy-contracts).
+The account-deletion transaction deletes the user's rankings, together with the other user-owned data handled by [account deletion](../lib/accountDeletion.js) and [listening cleanup](../lib/listening/connections.js).

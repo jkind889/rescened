@@ -1,6 +1,6 @@
 # Mapping and tracklist queue metrics — November 1, 2026
 
-A dated snapshot from `npm run listening:queue-report`, run read-only against `rescened_dev` and production on 2026-11-01. It records the evidence behind putting AI-assisted review on hold ([plan](AI_ASSISTED_MAPPING_PLAN.md)). It is not a description of the current database state; rerun the report for that ([operator notes](LASTFM_SYNC.md#monitoring-and-verification)).
+A dated snapshot from `npm run listening:queue-report`, run read-only against `rescened_dev` and production on 2026-11-01. It records the evidence behind putting AI-assisted review on hold ([plan](AI_ASSISTED_MAPPING_PLAN.md)). It is not a description of the current database state; rerun the report for that ([report CLI](../scripts/listeningQueueReport.js)).
 
 Both environments run the Last.fm pilot behind an allowlist. Dev has one listener, who is also the moderator, so its decision times are not representative.
 

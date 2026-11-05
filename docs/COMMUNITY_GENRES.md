@@ -1,6 +1,6 @@
 # Community genres
 
-Albums carry a small, ordered set of genres from a vocabulary that the community grows and moderators approve. The design and its remaining rollout slices are in [plan 3 of the feature plans](NEXT_FEATURE_PLANS.md#3-community-genres). This guide is the maintained contract for what is built.
+Albums carry a small, ordered set of genres from a vocabulary that the community grows and moderators approve. This guide is the maintained contract for what is built.
 
 Built so far:
 
@@ -11,7 +11,7 @@ Built so far:
 - **Slice 5:** moderator vocabulary commands and the operator merge. See [Vocabulary maintenance](#vocabulary-maintenance).
 - **Slice 6:** the genre browse page, the search filter, and top genres in stats. See [Endpoints](#endpoints) and [Frontend](#frontend).
 
-What's left is the production rollout (slice 7 in the plan).
+What's left is the production rollout.
 
 ## Feature flag
 

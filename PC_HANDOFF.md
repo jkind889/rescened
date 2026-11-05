@@ -37,7 +37,7 @@ Recent work completed on `community-driven`:
 6. Implemented the authenticated Phase 3 contributor and moderator submission UI.
 7. Checked in an apply report for the 500-album seed showing 498 inserts, 2 refreshes, and no quarantined or conflicting rows.
 
-Phase 3 is now implemented and documented in `docs/PHASE_3_UI.md`. The signed-in frontend includes:
+Phase 3 is implemented; see [the moderator guide](docs/MODERATOR_IMPLEMENTATION_GUIDE.md#frontend-mental-model) for the frontend workflow. The signed-in frontend includes:
 
 - Contributor history, detail, create, revise, and withdraw workflows under `/suggestions`.
 - A moderator queue, submission detail, duplicate review, and approve/request-changes/reject/mark-duplicate workflows under `/moderation/album-suggestions`.
@@ -54,9 +54,9 @@ Source-of-truth project docs:
 - `README.md`
 - `docs/CATALOG_IMPORT.md`
 - `docs/PHASE_2_SUBMISSIONS.md`
-- `docs/PHASE_3_UI.md`
+- `docs/MODERATOR_IMPLEMENTATION_GUIDE.md`
 
-`docs/PHASE_2_SUBMISSIONS.md` remains the backend contract, but its opening Phase 2 status predates the completed UI work. Use `docs/PHASE_3_UI.md` for the current frontend status.
+`docs/PHASE_2_SUBMISSIONS.md` describes the backend contract; `docs/MODERATOR_IMPLEMENTATION_GUIDE.md` describes the frontend workflow and its API boundaries.
 
 ## Recommended PC setup: WSL2
 
@@ -266,7 +266,7 @@ Do not assume every local task or uncommitted file automatically appears on the 
 
 If chat handoff is unavailable, start a Codex task from the PC repository and use:
 
-> Read `PC_HANDOFF.md`, `README.md`, `docs/CATALOG_IMPORT.md`, `docs/PHASE_2_SUBMISSIONS.md`, and `docs/PHASE_3_UI.md`. Confirm the current branch, Git status, database target, and relevant verification results. Treat the authenticated Phase 3 UI as implemented, then help me continue the selected remaining Rescened work without changing unrelated files.
+> Read `PC_HANDOFF.md`, `README.md`, `docs/CATALOG_IMPORT.md`, `docs/PHASE_2_SUBMISSIONS.md`, and `docs/MODERATOR_IMPLEMENTATION_GUIDE.md`. Confirm the current branch, Git status, database target, and relevant verification results. Treat the authenticated Phase 3 UI as implemented, then help me continue the selected remaining Rescened work without changing unrelated files.
 
 ## Safe routine when switching machines
 

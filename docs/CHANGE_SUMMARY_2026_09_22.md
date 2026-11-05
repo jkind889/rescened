@@ -86,5 +86,3 @@ The actual deployment still needs verification of the separate API host, product
 - [API error reference](ERROR_CODES.md)
 - [Search behavior and catalog growth](SEARCH_AND_CATALOG_GROWTH.md)
 - [Benchmark and search-quality guide](../benchmarks/README.md)
-- [Historical performance results](PERFORMANCE_BENCHMARK_RESULTS.md)
-- [Rescened 2.0 roadmap](RESCENED_2_0.md)
