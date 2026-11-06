@@ -1,6 +1,12 @@
 const crypto = require("node:crypto");
 const mongoose = require("mongoose");
 
+const candidateSchema = require("./schemas/providerEdition");
+const editionProposalSchema = new mongoose.Schema({
+  previewId: { type: String, required: true, match: /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i },
+  candidate: { type: candidateSchema, required: true },
+}, { _id: false, strict: "throw" });
+
 const RELEASE_TYPES = [
   "album",
   "ep",
@@ -339,6 +345,7 @@ const revisionSchema = new mongoose.Schema(
     submittedAt: { type: Date, required: true },
     submissionType: { type: String, enum: SUBMISSION_TYPES, default: "new_album" },
     proposedMetadata: { type: proposedMetadataSchema },
+    editionProposal: { type: editionProposalSchema, default: null },
     supportingSources: {
       type: [supportingSourceSchema],
       required: true,
@@ -390,6 +397,7 @@ const albumSubmissionSchema = new mongoose.Schema(
     submissionType: { type: String, enum: SUBMISSION_TYPES, default: "new_album", required: true },
     submittedByUserId: { type: String, required: true, trim: true, maxlength: 128 },
     proposedMetadata: { type: proposedMetadataSchema },
+    editionProposal: { type: editionProposalSchema, default: null },
     supportingSources: {
       type: [supportingSourceSchema],
       required: true,

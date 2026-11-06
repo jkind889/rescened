@@ -61,6 +61,10 @@ router.post("/:kind/:id/candidates", authenticate, moderatorOnly, externalSearch
 router.post("/:kind/:id/preview", authenticate, moderatorOnly, externalSearchRateLimit, async (req, res) => {
   try { allowedKeys(req.body || {}, new Set(["releaseMbid", "releaseGroupMbid"]), "request body"); return res.json(await service.preview(req.params.kind, req.params.id, req.body)); } catch (error) { return sendError(res, error); }
 });
+router.post("/:kind/:id/proposal", authenticate, moderatorOnly, moderationEnabled, moderationMutationRateLimit, async (req, res) => {
+  try { allowedKeys(req.body || {}, new Set(["expectedTargetRevision"]), "request body"); return res.json(await service.previewProposal(req.params.kind, req.params.id, req.body)); }
+  catch (error) { return sendError(res, error); }
+});
 async function command(req, res, action) {
   try { return res.json(await service.performCommand({ kind: req.params.kind, id: req.params.id, action, body: req.body || {}, actorUserId: req.userId })); } catch (error) { return sendError(res, error); }
 }

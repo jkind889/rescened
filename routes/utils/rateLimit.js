@@ -27,6 +27,10 @@ const RATE_LIMITS = {
     duration: 60,
     message: "Too many searches. Please slow down and try again soon.",
   },
+  contributorEditions: {
+    keyPrefix: "rescened:contributor-editions", points: 10, duration: 60,
+    message: "Too many edition requests. Please try again soon.",
+  },
   externalSearch: {
     keyPrefix: "rescened:external-search",
     points: 30,
@@ -289,6 +293,7 @@ const commentMutationLimiter = createRateLimiter(RATE_LIMITS.commentMutation);
 const commentReportLimiter = createRateLimiter(RATE_LIMITS.commentReport);
 const boardMutationLimiter = createRateLimiter(RATE_LIMITS.boardMutation);
 const queueMutationLimiter = createRateLimiter(RATE_LIMITS.queueMutation);
+const contributorEditionLimiter = createRateLimiter(RATE_LIMITS.contributorEditions);
 const submissionCreateLimiter = createRateLimiter(RATE_LIMITS.submissionCreate);
 const submissionMutationLimiter = createRateLimiter(RATE_LIMITS.submissionMutation);
 const moderationMutationLimiter = createRateLimiter(RATE_LIMITS.moderationMutation);
@@ -327,6 +332,7 @@ module.exports = {
   consumeRateLimit,
   createRateLimitMiddleware,
   createRateLimiter,
+  contributorEditionRateLimit: createRateLimitMiddleware(contributorEditionLimiter, { keyGenerator: getAuthenticatedUserRateLimitKey, message: RATE_LIMITS.contributorEditions.message }),
   externalSearchRateLimit: createRateLimitMiddleware(externalSearchLimiter, {
     keyGenerator: getIpRateLimitKey,
     message: RATE_LIMITS.externalSearch.message,

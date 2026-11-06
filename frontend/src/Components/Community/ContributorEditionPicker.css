@@ -1,0 +1,9 @@
+.contributor-editions { display: grid; gap: 1rem; min-width: 0; margin-bottom: 1.5rem; }
+.contributor-editions-selection, .contributor-editions-discovery, .contributor-editions-controls { display: grid; gap: .75rem; min-width: 0; }
+.contributor-editions-selection { border: 1px solid var(--border-color, #39303d); padding: 1rem; }
+.contributor-editions-list { display: grid; gap: .5rem; list-style: none; padding: 0; margin: 0; }
+.contributor-editions-list .suggestion-form-add { width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.contributor-editions p, .contributor-editions a { overflow-wrap: anywhere; }
+.contributor-edition-tracks { display: grid; gap: .5rem; list-style: none; padding: 0; }
+.contributor-edition-tracks li { display: flex; flex-wrap: wrap; gap: .75rem; padding: .75rem; border: 1px solid var(--border-color, #39303d); }
+.contributor-edition-tracks li span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }

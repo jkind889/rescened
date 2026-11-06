@@ -319,6 +319,20 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
     }
   }
 
+  async function previewProposal() {
+    setCandidateLoading(true); setCandidateError(null);
+    providerController.current?.abort();
+    const controller = new AbortController(); providerController.current = controller;
+    try {
+      const data = await runRequest(`${API_BASE_URL}${BASE_PATH}/${kind}/${encodeURIComponent(id)}/proposal`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedTargetRevision: detail.target.submissionRevision }), signal: controller.signal,
+      }, "The contributor edition could not be loaded.");
+      if (!controller.signal.aborted) { setSelectedCandidate(data.candidate); setSelectedGroup(data.candidate.releaseGroupMbid); }
+    } catch (error) { if (!controller.signal.aborted) setCandidateError(displayError(error, "The contributor edition could not be loaded.")); }
+    finally { if (providerController.current === controller) providerController.current = null; if (!controller.signal.aborted) setCandidateLoading(false); }
+  }
+
   async function applyAction(action) {
     if (!canModerate || command.pending) return;
     const trimmedReason = reason.trim();
@@ -380,6 +394,12 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
         <span className={`community-status community-status-${detail?.status || "pending"}`}>{detail?.status || "pending"}</span>
       </div>
       {effort.panel}
+      {detail?.proposal ? <section className="baseline-candidate-preview">
+        <h3>Contributor edition</h3>
+        <p>{detail.proposal.title} · {detail.proposal.date} · {detail.proposal.country} · {detail.proposal.formats?.join(", ")}</p>
+        <p className="baseline-muted">Proposal awaiting moderator review.</p>
+        <button type="button" className="community-button" disabled={!canModerate || candidateLoading || command.pending} onClick={previewProposal}>Review proposed edition</button>
+      </section> : null}
       <div className="baseline-flag-row"><span>Discovery: {flagLabel(canDiscover)}</span><span>Moderation: {flagLabel(canModerate)}</span>{detail?.revision ? <span>Review revision {detail.revision}</span> : null}</div>
       {detail?.status === "stale" ? <p className="baseline-warning">The catalog record changed after this review. Suggest or preview a release again before confirming.</p> : null}
       {detail?.activeBaseline ? <p className={detail.status === "stale" ? "baseline-muted" : "baseline-success"}>{detail.status === "stale" ? "Previous" : "Active"} baseline v{detail.activeBaseline.version || "?"} · reviewed {detail.activeBaseline.reviewedAt ? new Date(detail.activeBaseline.reviewedAt).toLocaleDateString() : "date unavailable"}.</p> : null}

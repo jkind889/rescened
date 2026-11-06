@@ -324,6 +324,7 @@ export function SuggestionEditor({ mode = "create" }) {
           />
         ) : (
           <SuggestionForm
+            getToken={getToken}
             key={`${isRevision ? `${submission?.submissionId}-${submission?.currentRevision}` : externalMbid || "create"}-${draftKey}`}
             initialValue={submission}
             draftKey={draftKey}
