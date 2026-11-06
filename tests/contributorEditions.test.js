@@ -138,3 +138,55 @@ test('disabling new edition proposals still permits retaining the current owned 
   await assert.rejects(service.normalize(body(previewId), 'owner'), e => e.code === 'CONTRIBUTOR_EDITIONS_DISABLED');
   await assert.rejects(service.normalize(body(previewId), 'intruder', current), e => e.code === 'CONTRIBUTOR_EDITIONS_DISABLED');
 });
+
+
+test('actual shared MusicBrainz gate exhaustion keeps its safe 503 contract before any provider fetch', async () => {
+  const adapter = require('../lib/baselines/musicBrainz');
+  const { ProviderBudget } = require('../models/Listening');
+  const originalFactory = adapter.createBaselineMusicBrainz;
+  const originalSlot = ProviderBudget.findOneAndUpdate;
+  let attempts = 0; const sleeps = []; let fetched = false;
+  ProviderBudget.findOneAndUpdate = async () => { attempts += 1; return null; };
+  adapter.createBaselineMusicBrainz = () => originalFactory({
+    cache: false,
+    clock: () => new Date('2026-11-06T00:00:00Z'),
+    sleep: async (ms) => { sleeps.push(ms); },
+    fetch: async () => { fetched = true; throw new Error('Provider network must not be contacted'); },
+  });
+  try {
+    const response = await invoke('post', '/editions/candidates', {
+      testUserId: 'actual-shared-gate-exhaustion', body: { releaseGroupMbid: crypto.randomUUID() },
+    });
+    assert.equal(attempts, 4); assert.deepEqual(sleeps, [1100, 1100, 1100, 1100]); assert.equal(fetched, false);
+    assert.equal(response.statusCode, 503);
+    assert.deepEqual(response.body, { error: 'MusicBrainz request capacity is temporarily unavailable', code: 'MUSICBRAINZ_BUDGET_EXHAUSTED' });
+    // The current gate supplies no retry deadline; the route must not invent one.
+    assert.equal(response.headers['Retry-After'], undefined);
+  } finally {
+    adapter.createBaselineMusicBrainz = originalFactory;
+    ProviderBudget.findOneAndUpdate = originalSlot;
+  }
+});
+
+test('known plain gate errors sanitize messages and preserve only finite positive retry delays', async () => {
+  for (const [retryAfterMs, expected] of [[2100, '3'], [86401000, '86400'], [0, undefined], [-1, undefined], [Infinity, undefined], [NaN, undefined]]) {
+    discovery.searchGroups = async () => { throw Object.assign(new Error('private provider budget detail'), { status: 503, code: 'MUSICBRAINZ_BUDGET_EXHAUSTED', retryAfterMs }); };
+    const response = await invoke('get', '/editions/groups', { testUserId: 'safe-gate-delays', query: { q: 'album' } });
+    assert.equal(response.statusCode, 503);
+    assert.deepEqual(response.body, { error: 'MusicBrainz request capacity is temporarily unavailable', code: 'MUSICBRAINZ_BUDGET_EXHAUSTED' });
+    assert.equal(response.headers['Retry-After'], expected);
+  }
+});
+
+test('unknown plain 503 errors and mismatched gate statuses stay generic without private details', async () => {
+  for (const error of [
+    Object.assign(new Error('private upstream detail'), { status: 503, code: 'UNKNOWN_PROVIDER_FAILURE', retryAfterMs: 2000 }),
+    Object.assign(new Error('private gate detail'), { status: 500, code: 'MUSICBRAINZ_BUDGET_EXHAUSTED', retryAfterMs: 2000 }),
+  ]) {
+    discovery.searchGroups = async () => { throw error; };
+    const response = await invoke('get', '/editions/groups', { testUserId: 'unknown-plain-503', query: { q: 'album' } });
+    assert.equal(response.statusCode, 500);
+    assert.deepEqual(response.body, { error: 'Edition search failed' });
+    assert.equal(response.headers['Retry-After'], undefined);
+  }
+});

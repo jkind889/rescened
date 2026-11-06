@@ -76,6 +76,15 @@ function sendRouteError(res, error, fallback) {
   if (error?.name === "ValidationError" || error?.name === "CastError") {
     return res.status(400).json({ error: "Submission data is invalid", code: "INVALID_SUBMISSION" });
   }
+  // The shared provider gate throws a plain safeError before the adapter's
+  // typed-error wrapper. Allow only its exact public contract here.
+  if (error?.status === 503 && error.code === "MUSICBRAINZ_BUDGET_EXHAUSTED") {
+    const retryAfterMs = Number(error.retryAfterMs);
+    if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) {
+      res.set("Retry-After", String(Math.min(86400, Math.ceil(retryAfterMs / 1000))));
+    }
+    return res.status(503).json({ error: "MusicBrainz request capacity is temporarily unavailable", code: "MUSICBRAINZ_BUDGET_EXHAUSTED" });
+  }
   if (error?.status && error.status >= 400 && error.status <= 503
     && (error.status < 500 || error instanceof BaselineError || error instanceof BaselineMusicBrainzError)) {
     if (Number(error.retryAfterMs) > 0) res.set("Retry-After", String(Math.min(86400, Math.ceil(error.retryAfterMs / 1000))));
