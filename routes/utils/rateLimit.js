@@ -118,9 +118,15 @@ const RATE_LIMITS = {
   },
   submissionCreate: {
     keyPrefix: "rescened:submission-create",
-    points: 6,
+    points: 10,
     duration: 10 * 60,
     message: "Too many suggestion submissions. Please try again soon.",
+  },
+  correctionCreate: {
+    keyPrefix: "rescened:correction-create",
+    points: 6,
+    duration: 5 * 60,
+    message: "Too many correction submissions. Please try again soon.",
   },
   submissionMutation: {
     keyPrefix: "rescened:submission-mutation",
@@ -129,7 +135,7 @@ const RATE_LIMITS = {
     message: "Too many suggestion updates. Please try again soon.",
   },
   // Genre suggestions are small and frequent, so they get their own bucket
-  // rather than sharing the six-per-ten-minutes album suggestion limit.
+  // rather than sharing the album suggestion or correction creation limits.
   genreSuggestion: {
     keyPrefix: "rescened:genre-suggestion",
     points: 20,
@@ -295,6 +301,7 @@ const boardMutationLimiter = createRateLimiter(RATE_LIMITS.boardMutation);
 const queueMutationLimiter = createRateLimiter(RATE_LIMITS.queueMutation);
 const contributorEditionLimiter = createRateLimiter(RATE_LIMITS.contributorEditions);
 const submissionCreateLimiter = createRateLimiter(RATE_LIMITS.submissionCreate);
+const correctionCreateLimiter = createRateLimiter(RATE_LIMITS.correctionCreate);
 const submissionMutationLimiter = createRateLimiter(RATE_LIMITS.submissionMutation);
 const moderationMutationLimiter = createRateLimiter(RATE_LIMITS.moderationMutation);
 const notificationMutationLimiter = createRateLimiter(RATE_LIMITS.notificationMutation);
@@ -379,6 +386,10 @@ module.exports = {
   trackRankingMutationRateLimit: createRateLimitMiddleware(trackRankingMutationLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,
     message: RATE_LIMITS.trackRankingMutation.message,
+  }),
+  correctionCreateRateLimit: createRateLimitMiddleware(correctionCreateLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.correctionCreate.message,
   }),
   submissionCreateRateLimit: createRateLimitMiddleware(submissionCreateLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,

@@ -72,7 +72,7 @@ MODERATOR_USER_IDS=user_abc123,user_def456
 COMMUNITY_MODERATION_ENABLED=true
 ```
 
-The rate limiters use process memory, matching the rest of the current API. Each API instance therefore maintains its own counters. Each moderator receives 120 commands per 10 minutes; contributor creation remains 6 per 10 minutes and contributor revision/withdrawal remains 20 per 10 minutes. Shared storage is required before horizontally scaling the API. Except for `/health`, requests also pass through the global limit of 300 requests per IP per five minutes. `TRUST_PROXY_HOPS` controls Express proxy handling and therefore affects IP-based keys. Unexpected limiter failures log and fail open rather than taking down the API.
+The rate limiters use process memory, matching the rest of the current API. Each API instance therefore maintains its own counters. Each moderator receives 120 commands per 10 minutes; album suggestion creation allows 10 attempts per 10 minutes and correction creation allows 6 attempts per 5 minutes in a separate per-user bucket. Contributor revision/withdrawal remains 20 per 10 minutes. Shared storage is required before horizontally scaling the API. Except for `/health`, requests also pass through the global limit of 300 requests per IP per five minutes. `TRUST_PROXY_HOPS` controls Express proxy handling and therefore affects IP-based keys. Unexpected limiter failures log and fail open rather than taking down the API.
 
 ## Public identity and privacy
 
@@ -311,17 +311,21 @@ All routes are mounted below `/suggestions`. Private contributor routes require 
 Creates a submission.
 
 - Requires `COMMUNITY_SUBMISSIONS_ENABLED=true`.
-- Limited to 6 creations per authenticated user per 10 minutes.
+- Limited to 10 creation attempts per authenticated user per 10 minutes.
 - Normalizes and validates the body before any database write.
 - Records duplicate candidates without blocking creation.
 - Creates status `pending`, revision `1`, one full revision snapshot, and a `submitted` audit event.
 - Returns `201` with the detailed submission representation.
 
+Creation attempts consume only their own route-specific bucket; exhausting corrections does not consume the album suggestion or genre suggestion budget, and vice versa. Both creation buckets run before validation and remain cumulative with the global IP limit.
+
+For monitoring, distinguish `POST /suggestions` and `POST /suggestions/corrections` HTTP `429` responses in available request logs or browser network responses, using the `RATE_LIMITED` code, route-specific error message, `retryAfterSeconds`, and `Retry-After` header. The global limiter also emits `RATE_LIMITED`, so status/code alone cannot identify which bucket was exhausted. Ordinary rejections are not logged by the application limiter and there are no persistent per-bucket counters; submission history shows accepted creations only. No automated monitor is configured by this change.
+
 ### `POST /suggestions/corrections`
 
 Creates a `catalog_correction` submission against one exact local `albumId`.
 
-- Requires authentication, `COMMUNITY_SUBMISSIONS_ENABLED=true`, and the contributor create rate limit.
+- Requires authentication, `COMMUNITY_SUBMISSIONS_ENABLED=true`, and the separate correction create rate limit (6 attempts per user per 5 minutes).
 - Requires the target catalog album to exist before normalization.
 - Stores the target's internal relation, current `catalogRevision`, values/provenance for proposed groups, normalized changes, evidence, revision `1`, and a `submitted` event.
 - Never writes the catalog album during submission creation.
@@ -746,7 +750,7 @@ Example request:
 }
 ```
 
-The endpoint requires Clerk authentication, `COMMUNITY_SUBMISSIONS_ENABLED=true`, the contributor create rate limit, a valid local `albumId`, at least one effective change after normalization, and one to ten supporting sources. Unknown or client-owned workflow fields are rejected before any write.
+The endpoint requires Clerk authentication, `COMMUNITY_SUBMISSIONS_ENABLED=true`, the separate correction create rate limit (6 attempts per user per 5 minutes), a valid local `albumId`, at least one effective change after normalization, and one to ten supporting sources. Unknown or client-owned workflow fields are rejected before any write.
 
 Correction revisions use the existing `POST /suggestions/:submissionId/revise` route with the correction request shape selected by the stored `submissionType`. Contributor history and detail remain owner-private and add `submissionType`, `targetAlbum`, baseline, and proposed changes. The moderator queue adds an optional `submissionType` filter and returns the target album summary; moderator detail returns the complete baseline/current/proposed diff.
 
