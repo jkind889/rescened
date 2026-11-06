@@ -1,4 +1,8 @@
 const express = require("express");
+const editions = require("../lib/contributorEditions/service");
+const { BaselineError } = require("../lib/baselines/candidate");
+const { BaselineMusicBrainzError } = require("../lib/baselines/musicBrainz");
+const discovery = require("../lib/baselines/discovery");
 const { getAuth } = require("@clerk/express");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
@@ -16,7 +20,6 @@ const {
   isModerator,
   isSubmissionsEnabled,
   normalizeCorrectionPayload,
-  normalizeSubmissionPayload,
   correctionSnapshot,
   plain,
   serializeApprovedFeedItem,
@@ -26,6 +29,7 @@ const {
 const {
   correctionCreateRateLimit,
   genreSuggestionRateLimit,
+  contributorEditionRateLimit,
   submissionCreateRateLimit,
   submissionMutationRateLimit,
 } = require("./utils/rateLimit");
@@ -72,7 +76,18 @@ function sendRouteError(res, error, fallback) {
   if (error?.name === "ValidationError" || error?.name === "CastError") {
     return res.status(400).json({ error: "Submission data is invalid", code: "INVALID_SUBMISSION" });
   }
-  if (error?.status && error.status >= 400 && error.status < 500) {
+  // The shared provider gate throws a plain safeError before the adapter's
+  // typed-error wrapper. Allow only its exact public contract here.
+  if (error?.status === 503 && error.code === "MUSICBRAINZ_BUDGET_EXHAUSTED") {
+    const retryAfterMs = Number(error.retryAfterMs);
+    if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) {
+      res.set("Retry-After", String(Math.min(86400, Math.ceil(retryAfterMs / 1000))));
+    }
+    return res.status(503).json({ error: "MusicBrainz request capacity is temporarily unavailable", code: "MUSICBRAINZ_BUDGET_EXHAUSTED" });
+  }
+  if (error?.status && error.status >= 400 && error.status <= 503
+    && (error.status < 500 || error instanceof BaselineError || error instanceof BaselineMusicBrainzError)) {
+    if (Number(error.retryAfterMs) > 0) res.set("Retry-After", String(Math.min(86400, Math.ceil(error.retryAfterMs / 1000))));
     return res.status(error.status).json({ error: error.message, code: error.code });
   }
   return res.status(500).json({ error: fallback });
@@ -110,6 +125,7 @@ async function findSubmission(query) {
 function submissionUpdate(payload, duplicate, revision, status) {
   return {
     proposedMetadata: payload.proposedMetadata,
+    editionProposal: payload.editionProposal || null,
     supportingSources: payload.supportingSources,
     externalReferences: payload.externalReferences,
     normalizedFingerprint: duplicate.fingerprint,
@@ -144,9 +160,27 @@ async function queryResult(query) {
   return query && typeof query.exec === "function" ? query.exec() : query;
 }
 
+function editionsEnabled(req, res, next) {
+  if (!editions.enabled()) return res.status(503).json({ error: "Contributor editions are currently disabled", code: "CONTRIBUTOR_EDITIONS_DISABLED" });
+  return next();
+}
+router.get("/editions/capabilities", auth, (req, res) => res.json({ enabled: editions.enabled() && isSubmissionsEnabled() }));
+router.get("/editions/groups", auth, submissionsEnabled, editionsEnabled, contributorEditionRateLimit, async (req, res) => {
+  try { editions.keys(req.query, ["q"]); return res.json(await discovery.searchGroups(req.query.q)); }
+  catch (error) { return sendRouteError(res, error, "Edition search failed"); }
+});
+router.post("/editions/candidates", auth, submissionsEnabled, editionsEnabled, contributorEditionRateLimit, async (req, res) => {
+  try { return res.json(await editions.candidates(req.body)); }
+  catch (error) { return sendRouteError(res, error, "Edition discovery failed"); }
+});
+router.post("/editions/preview", auth, submissionsEnabled, editionsEnabled, contributorEditionRateLimit, async (req, res) => {
+  try { return res.json(await editions.preview(req.body, req.userId)); }
+  catch (error) { return sendRouteError(res, error, "Edition preview failed"); }
+});
+
 router.post("/", auth, submissionsEnabled, submissionCreateRateLimit, async (req, res) => {
   try {
-    const payload = normalizeSubmissionPayload(req.body);
+    const payload = await editions.normalize(req.body, req.userId);
     const duplicate = await findDuplicateSignals(payload);
     const submittedAt = new Date();
     const snapshot = snapshotForSubmission(payload, duplicate, submittedAt, 1);
@@ -369,7 +403,7 @@ router.post("/:submissionId/revise", auth, submissionsEnabled, submissionMutatio
         },
       };
     } else {
-      const payload = normalizeSubmissionPayload(req.body);
+      const payload = await editions.normalize(req.body, req.userId, current);
       const duplicate = await findDuplicateSignals(payload, { excludeSubmissionId: current._id });
       const snapshot = snapshotForSubmission(payload, duplicate, submittedAt, revision);
       update = {

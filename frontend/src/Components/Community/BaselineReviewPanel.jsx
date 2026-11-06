@@ -141,7 +141,7 @@ function CandidateSummary({ candidate, rationale, incomplete, coverage, ambiguou
       {manual ? <p className="baseline-muted">Selected by the moderator instead of the recommendation. Check its edition details before confirming.</p> : null}
       {explanation ? <p className="baseline-rationale">{explanation}</p> : null}
       <CandidateTracks candidate={candidate} />
-      <a className="baseline-source-link" href={candidate.sourceUrl} rel="noreferrer" target="_blank">Open MusicBrainz release ↗</a>
+      {candidate.sourceUrl ? <a className="baseline-source-link" href={candidate.sourceUrl} rel="noreferrer" target="_blank">Open MusicBrainz release ↗</a> : <p className="baseline-muted">No source is available for this release.</p>}
     </section>
   );
 }
@@ -236,13 +236,14 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
   const knownGroup = detail?.target?.releaseGroupMbid || target?.releaseGroupMbid || "";
   const canDiscover = flags.discovery !== false;
   const canModerate = flags.moderation !== false;
+  const hasReviewEvidence = Boolean(selectedCandidate?.sourceUrl && Array.isArray(selectedCandidate?.tracks) && selectedCandidate.tracks.length);
   const isRecommended = Boolean(selectedCandidate?.releaseMbid && selectedCandidate.releaseMbid === recommendation?.candidate?.releaseMbid);
   // A release group alone is not confirmable; the command needs a previewed release snapshot.
   const confirmHint = !canModerate
     ? "Baseline moderation is disabled on this server."
     : !selectedGroup
       ? "Choose a MusicBrainz release group first."
-      : !selectedCandidate && !candidateLoading
+      : !hasReviewEvidence && !candidateLoading
         ? canDiscover ? "Select “Suggest a release” or preview a release before confirming." : "A previewed release is required, but MusicBrainz discovery is disabled."
         : "";
   const candidates = useMemo(() => Array.isArray(recommendation?.items) ? recommendation.items : [], [recommendation]);
@@ -319,10 +320,24 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
     }
   }
 
+  async function previewProposal() {
+    setCandidateLoading(true); setCandidateError(null);
+    providerController.current?.abort();
+    const controller = new AbortController(); providerController.current = controller;
+    try {
+      const data = await runRequest(`${API_BASE_URL}${BASE_PATH}/${kind}/${encodeURIComponent(id)}/proposal`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedTargetRevision: detail.target.submissionRevision }), signal: controller.signal,
+      }, "The contributor edition could not be loaded.");
+      if (!controller.signal.aborted) { setSelectedCandidate(data.candidate); setSelectedGroup(data.candidate.releaseGroupMbid); }
+    } catch (error) { if (!controller.signal.aborted) setCandidateError(displayError(error, "The contributor edition could not be loaded.")); }
+    finally { if (providerController.current === controller) providerController.current = null; if (!controller.signal.aborted) setCandidateLoading(false); }
+  }
+
   async function applyAction(action) {
     if (!canModerate || command.pending) return;
     const trimmedReason = reason.trim();
-    if (["confirm", "replace"].includes(action) && !selectedCandidate) {
+    if (["confirm", "replace"].includes(action) && !hasReviewEvidence) {
       setCommand({ pending: false, error: { message: "Select and preview a complete MusicBrainz release first.", code: "CANDIDATE_REQUIRED" }, success: "" });
       return;
     }
@@ -380,6 +395,12 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
         <span className={`community-status community-status-${detail?.status || "pending"}`}>{detail?.status || "pending"}</span>
       </div>
       {effort.panel}
+      {detail?.proposal ? <section className="baseline-candidate-preview">
+        <h3>Contributor edition</h3>
+        <p>{detail.proposal.title} · {detail.proposal.date} · {detail.proposal.country} · {detail.proposal.formats?.join(", ")}</p>
+        <p className="baseline-muted">Proposal awaiting moderator review.</p>
+        <button type="button" className="community-button" disabled={!canModerate || candidateLoading || command.pending} onClick={previewProposal}>Review proposed edition</button>
+      </section> : null}
       <div className="baseline-flag-row"><span>Discovery: {flagLabel(canDiscover)}</span><span>Moderation: {flagLabel(canModerate)}</span>{detail?.revision ? <span>Review revision {detail.revision}</span> : null}</div>
       {detail?.status === "stale" ? <p className="baseline-warning">The catalog record changed after this review. Suggest or preview a release again before confirming.</p> : null}
       {detail?.activeBaseline ? <p className={detail.status === "stale" ? "baseline-muted" : "baseline-success"}>{detail.status === "stale" ? "Previous" : "Active"} baseline v{detail.activeBaseline.version || "?"} · reviewed {detail.activeBaseline.reviewedAt ? new Date(detail.activeBaseline.reviewedAt).toLocaleDateString() : "date unavailable"}.</p> : null}
@@ -390,11 +411,13 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
         <div className="baseline-group-selected"><span>Release group</span><code>{selectedGroup}</code><button className="community-text-button" disabled={Boolean(knownGroup)} onClick={() => { setSelectedGroup(""); setSelectedCandidate(null); setRecommendation(null); }} title={knownGroup ? "The release group is bound to this catalog identity." : "Choose another release group"} type="button">Change</button></div>
       )}
 
-      {selectedGroup && canDiscover ? <section className="baseline-discovery"><div className="baseline-section-heading"><div><h3>Recommended standard release</h3><p className="baseline-muted">The recommendation uses official status, exact title, edition markers, date, and MBID. Track count never decides identity.</p></div><button className="community-secondary-button" disabled={candidateLoading} onClick={() => loadCandidates(0)} type="button">{candidateLoading ? "Loading…" : "Suggest a release"}</button></div>{candidateError ? <div className="community-message community-message-error" role="alert"><strong>{candidateError.message}</strong>{candidateError.code ? <code>{candidateError.code}</code> : null}</div> : null}<CandidateSummary ambiguous={isRecommended && recommendation?.ambiguous} candidate={selectedCandidate} coverage={recommendation?.coverage} incomplete={recommendation?.incomplete} manual={Boolean(selectedCandidate && recommendation && !isRecommended)} rationale={isRecommended ? recommendation?.rationale : ""} /><ReleaseComparisons comparisons={recommendation?.comparisons} onPreview={(releaseMbid) => { setReleaseInput(releaseMbid); previewRelease({ preventDefault() {} }, releaseMbid); }} />{candidates.length ? <div className="baseline-alternative-list"><h4>Alternative releases</h4>{candidates.map((item) => <button className={`baseline-choice${selectedCandidate?.releaseMbid === item.releaseMbid ? " baseline-choice-selected" : ""}`} key={item.releaseMbid} onClick={() => { setReleaseInput(item.releaseMbid); previewRelease({ preventDefault() {} }, item.releaseMbid); }} type="button"><strong>{candidateLabel(item)}</strong><small>{item.date || "Date unavailable"} · {item.status || "Status unavailable"}{item.disambiguation ? ` · ${item.disambiguation}` : ""}</small></button>)}{candidateOffset ? <button className="community-secondary-button" disabled={candidateLoading} onClick={() => loadCandidates(Number(candidateOffset))} type="button">Load more releases</button> : null}</div> : null}<form className="baseline-direct-preview" onSubmit={previewRelease}><label htmlFor="baseline-release-input">Preview an alternative release ID or MusicBrainz URL</label><div className="baseline-inline-form"><input id="baseline-release-input" onChange={(event) => setReleaseInput(event.target.value)} placeholder="Release UUID or https://musicbrainz.org/release/…" value={releaseInput} /><button className="community-secondary-button" disabled={candidateLoading || !releaseInput.trim()} type="submit">{candidateLoading ? "Loading…" : "Preview alternative"}</button></div></form></section> : null}
+      {selectedGroup && canDiscover ? <section className="baseline-discovery"><div className="baseline-section-heading"><div><h3>Recommended standard release</h3><p className="baseline-muted">The recommendation uses official status, exact title, edition markers, date, and MBID. Track count never decides identity.</p></div><button className="community-secondary-button" disabled={candidateLoading} onClick={() => loadCandidates(0)} type="button">{candidateLoading ? "Loading…" : "Suggest a release"}</button></div>{candidateError ? <div className="community-message community-message-error" role="alert"><strong>{candidateError.message}</strong>{candidateError.code ? <code>{candidateError.code}</code> : null}</div> : null}<ReleaseComparisons comparisons={recommendation?.comparisons} onPreview={(releaseMbid) => { setReleaseInput(releaseMbid); previewRelease({ preventDefault() {} }, releaseMbid); }} />{candidates.length ? <div className="baseline-alternative-list"><h4>Alternative releases</h4>{candidates.map((item) => <button className={`baseline-choice${selectedCandidate?.releaseMbid === item.releaseMbid ? " baseline-choice-selected" : ""}`} key={item.releaseMbid} onClick={() => { setReleaseInput(item.releaseMbid); previewRelease({ preventDefault() {} }, item.releaseMbid); }} type="button"><strong>{candidateLabel(item)}</strong><small>{item.date || "Date unavailable"} · {item.status || "Status unavailable"}{item.disambiguation ? ` · ${item.disambiguation}` : ""}</small></button>)}{candidateOffset ? <button className="community-secondary-button" disabled={candidateLoading} onClick={() => loadCandidates(Number(candidateOffset))} type="button">Load more releases</button> : null}</div> : null}<form className="baseline-direct-preview" onSubmit={previewRelease}><label htmlFor="baseline-release-input">Preview an alternative release ID or MusicBrainz URL</label><div className="baseline-inline-form"><input id="baseline-release-input" onChange={(event) => setReleaseInput(event.target.value)} placeholder="Release UUID or https://musicbrainz.org/release/…" value={releaseInput} /><button className="community-secondary-button" disabled={candidateLoading || !releaseInput.trim()} type="submit">{candidateLoading ? "Loading…" : "Preview alternative"}</button></div></form></section> : null}
       {candidateError && (!selectedGroup || !canDiscover) ? <div className="community-message community-message-error" role="alert"><strong>{candidateError.message}</strong>{candidateError.code ? <code>{candidateError.code}</code> : null}</div> : null}
       {!canDiscover ? <p className="baseline-muted">MusicBrainz discovery is disabled. Existing catalog or submission moderation remains available.</p> : null}
 
-      <section className="baseline-decision"><h3>Record baseline decision</h3><p className="baseline-muted">A reviewed baseline enables later listening comparison. It does not create diary entries. Catalog track correction remains a separate workflow.</p><label htmlFor="baseline-decision-reason">Reason <span>optional</span><textarea id="baseline-decision-reason" maxLength={1000} onChange={(event) => setReason(event.target.value)} placeholder="Optional. Leave blank to record a standard note." rows="3" value={reason} /></label>{command.error ? <div className="community-message community-message-error" role="alert"><strong>{command.error.message}</strong>{command.error.code ? <code>{command.error.code}</code> : null}</div> : null}{command.success ? <div className="community-message community-message-success" role="status">{command.success}</div> : null}<div className="baseline-actions"><button className="community-primary-button" disabled={!canModerate || command.pending || candidateLoading || !selectedCandidate} onClick={() => applyAction(isReviewed ? "replace" : "confirm")} type="button">{command.pending ? "Saving…" : isReviewed ? "Replace baseline" : "Confirm baseline"}</button>{isReviewed ? null : <button className="community-secondary-button" disabled={!canModerate || command.pending || candidateLoading} onClick={() => applyAction("defer")} type="button">Defer</button>}{canRevoke ? <button className="community-text-button" disabled={!canModerate || command.pending || candidateLoading} onClick={() => applyAction("revoke")} type="button">Revoke baseline</button> : null}</div>{confirmHint ? <p className="baseline-muted">{confirmHint}</p> : null}</section>
+      <CandidateSummary ambiguous={isRecommended && recommendation?.ambiguous} candidate={selectedCandidate} coverage={recommendation?.coverage} incomplete={recommendation?.incomplete} manual={Boolean(selectedCandidate && recommendation && !isRecommended)} rationale={isRecommended ? recommendation?.rationale : ""} />
+
+      <section className="baseline-decision"><h3>Record baseline decision</h3><p className="baseline-muted">A reviewed baseline enables later listening comparison. It does not create diary entries. Catalog track correction remains a separate workflow.</p><label htmlFor="baseline-decision-reason">Reason <span>optional</span><textarea id="baseline-decision-reason" maxLength={1000} onChange={(event) => setReason(event.target.value)} placeholder="Optional. Leave blank to record a standard note." rows="3" value={reason} /></label>{command.error ? <div className="community-message community-message-error" role="alert"><strong>{command.error.message}</strong>{command.error.code ? <code>{command.error.code}</code> : null}</div> : null}{command.success ? <div className="community-message community-message-success" role="status">{command.success}</div> : null}<div className="baseline-actions"><button className="community-primary-button" disabled={!canModerate || command.pending || candidateLoading || !hasReviewEvidence} onClick={() => applyAction(isReviewed ? "replace" : "confirm")} type="button">{command.pending ? "Saving…" : isReviewed ? "Replace baseline" : "Confirm baseline"}</button>{isReviewed ? null : <button className="community-secondary-button" disabled={!canModerate || command.pending || candidateLoading} onClick={() => applyAction("defer")} type="button">Defer</button>}{canRevoke ? <button className="community-text-button" disabled={!canModerate || command.pending || candidateLoading} onClick={() => applyAction("revoke")} type="button">Revoke baseline</button> : null}</div>{confirmHint ? <p className="baseline-muted">{confirmHint}</p> : null}</section>
     </section>
   );
 }
