@@ -37,15 +37,50 @@ test('profile pins development target and rejects live, unknown, and unsafe sett
     (p) => { p.server.MONGO_URI += '&tls=false'; },
     (p) => { p.server.MONGO_URI += '&tlsAllowInvalidCertificates=true'; },
     (p) => { p.extra = true; },
+    (p) => { p.preview = { LASTFM_SYNC_ENABLED: true }; },
+    (p) => { p.preview = null; },
+    (p) => { p.preview = []; },
   ]) { const p = profile(); mutate(p); assert.throws(() => wt.validateProfile(p), (e) => !e.message.includes('PASSWORD_VALUE_SHOULD_NOT_APPEAR')); }
 });
+test('preview allowlists reject broad, malformed, duplicate, and excessive entries', () => {
+  for (const key of ['listeningPilotUserIds', 'moderatorUserIds']) {
+    for (const value of [null, 'user_test', {}, ['*'], [''], ['user_test,user_other'], ['user_test\n'], [' user_test'], ['user_test', 'user_test'], ['user_' + 'x'.repeat(124)], Array.from({ length: 101 }, (_, i) => `user_test${i}`)]) {
+      const p = profile(); p.preview = { [key]: value };
+      assert.throws(() => wt.validateProfile(p), /allowlists/);
+    }
+    const p = profile(); p.preview = { [key]: ['user_test', 'user_other'] };
+    assert.equal(wt.validateProfile(p), p);
+  }
+});
 test('environment construction isolates frontend secrets and overrides inherited production flags', () => {
-  const { backend, frontend } = wt.buildEnvironments(profile(), { apiPort: 3101, webPort: 5201 }, { PATH: '/bin', MONGO_URI: 'production', NODE_OPTIONS: '--require evil.js', VITE_SECRET: 'secret', LASTFM_SYNC_ENABLED: 'true', PORT: '9999' });
+  const { backend, frontend } = wt.buildEnvironments(profile(), { apiPort: 3101, webPort: 5201 }, { PATH: '/bin', MONGO_URI: 'production', NODE_OPTIONS: '--require evil.js', VITE_SECRET: 'secret', LASTFM_SYNC_ENABLED: 'true', PORT: '9999', MODERATOR_USER_IDS: 'user_unapproved', LASTFM_PILOT_USER_IDS: 'user_unapproved' });
   assert.equal(backend.PORT, '3101'); assert.equal(backend.CORS_ALLOWED_ORIGINS, 'http://127.0.0.1:5201');
   assert.equal(frontend.VITE_API_URL, 'http://127.0.0.1:3101');
   for (const flag of wt.DISABLED) assert.equal(backend[flag], 'false');
   for (const key of ['MONGO_URI', 'CLERK_SECRET_KEY', 'NODE_OPTIONS', 'VITE_SECRET', 'LASTFM_SYNC_ENABLED']) assert.equal(frontend[key], undefined);
   assert.equal(backend.NODE_OPTIONS, undefined); assert.equal(backend.VITE_SECRET, undefined);
+  assert.equal(backend.MODERATOR_USER_IDS, ''); assert.equal(backend.LASTFM_PILOT_USER_IDS, '');
+});
+test('approved preview enables only detection and approval flags, with server-only user scopes', () => {
+  const p = profile(); p.preview = { listeningPilotUserIds: ['user_test', 'user_pilot'], moderatorUserIds: ['user_test'] };
+  const { backend, frontend } = wt.buildEnvironments(p, { apiPort: 3101, webPort: 5201 }, {});
+  const enabled = ['LISTENING_DETECTION_ENABLED', 'COMMUNITY_MODERATION_ENABLED', 'ALBUM_MAPPING_MODERATION_ENABLED', 'TRACKLIST_BASELINE_MODERATION_ENABLED'];
+  for (const flag of wt.DISABLED) assert.equal(backend[flag], enabled.includes(flag) ? 'true' : 'false', flag);
+  assert.equal(backend.LASTFM_PILOT_USER_IDS, 'user_test,user_pilot');
+  assert.equal(backend.MODERATOR_USER_IDS, 'user_test');
+  assert.deepEqual(Object.keys(frontend).sort(), ['NODE_ENV', 'VITE_API_URL', 'VITE_CLERK_PUBLISHABLE_KEY']);
+  const { detectionEnabledFor } = require('../lib/listening/detectionView');
+  assert.deepEqual(detectionEnabledFor('user_test', backend), { enabled: true, pilotAllowed: true, autoDiary: false });
+  assert.deepEqual(detectionEnabledFor('user_unapproved', backend), { enabled: true, pilotAllowed: false, autoDiary: false });
+  assert.equal(Object.values(frontend).some((value) => value.includes('user_test')), false);
+});
+test('pilot and moderator scopes are independent; empty or absent lists retain disabled defaults', () => {
+  for (const preview of [{}, { listeningPilotUserIds: [], moderatorUserIds: [] }, { listeningPilotUserIds: ['user_pilot'] }, { moderatorUserIds: ['user_moderator'] }]) {
+    const p = profile(); p.preview = preview;
+    const { backend } = wt.buildEnvironments(p, { apiPort: 3101, webPort: 5201 }, {});
+    assert.equal(backend.LISTENING_DETECTION_ENABLED, String(Boolean(preview.listeningPilotUserIds?.length)));
+    for (const flag of ['COMMUNITY_MODERATION_ENABLED', 'ALBUM_MAPPING_MODERATION_ENABLED', 'TRACKLIST_BASELINE_MODERATION_ENABLED']) assert.equal(backend[flag], String(Boolean(preview.moderatorUserIds?.length)));
+  }
 });
 test('create leaves primary unchanged; setup is idempotent and reserves distinct pairs', async (t) => {
   const f = await childTree(t);
@@ -58,6 +93,31 @@ test('create leaves primary unchanged; setup is idempotent and reserves distinct
   await assert.rejects(wt.setup(f.ctx), /primary/);
   await assert.rejects(wt.create(f.ctx, '../escape', 'main'), /name/);
   await assert.rejects(wt.create(f.ctx, 'example', 'main'), /exists/);
+});
+test('repository-local creation base is honored, explicit base wins, and removal still uses origin/main', async (t) => {
+  const f = fixture(t);
+  const original = git(f.root, 'rev-parse', 'HEAD');
+  git(f.root, 'update-ref', 'refs/remotes/origin/main', original);
+  assert.equal(wt.defaultCreateBase(f.ctx), 'origin/main');
+  const ordinary = await wt.create(f.ctx, 'ordinary');
+  assert.equal(git(ordinary.root, 'rev-parse', 'HEAD'), original);
+  fs.writeFileSync(path.join(f.root, 'setup.txt'), 'approved worktree setup\n');
+  git(f.root, 'add', 'setup.txt'); git(f.root, 'commit', '-m', 'prepared base');
+  const prepared = git(f.root, 'rev-parse', 'HEAD');
+  git(f.root, 'branch', 'prepared-base');
+  git(f.root, 'config', '--local', 'rescened.worktreeBase', 'refs/heads/prepared-base');
+  const child = await wt.create(f.ctx, 'inherits-setup');
+  assert.equal(git(child.root, 'rev-parse', 'HEAD'), prepared);
+  assert.equal(wt.defaultCreateBase(wt.context(child.root)), 'refs/heads/prepared-base');
+  const explicit = await wt.create(f.ctx, 'explicit-old-base', 'origin/main');
+  assert.equal(git(explicit.root, 'rev-parse', 'HEAD'), original);
+  await assert.rejects(wt.remove(f.ctx, child.root), /commits not contained/);
+  git(f.root, 'config', '--local', 'rescened.worktreeBase', 'missing-base');
+  await assert.rejects(wt.create(f.ctx, 'invalid-base'), /Git operation failed/);
+  assert.equal(fs.existsSync(path.join(f.dir, 'rescened-worktrees/invalid-base')), false);
+  git(f.root, 'config', '--local', '--add', 'rescened.worktreeBase', 'main');
+  assert.throws(() => wt.defaultCreateBase(f.ctx), /exactly one/);
+  assert.equal(git(f.root, 'status', '--porcelain'), '');
 });
 test('allocator skips occupied ports and registry locking fails closed', async (t) => {
   const f = fixture(t); const server = net.createServer();
@@ -110,9 +170,10 @@ test('foreground launcher starts only paired mock apps and stops its own child p
   const root = f.state.root;
   fs.mkdirSync(path.join(root, 'node_modules/express'), { recursive: true });
   const viteDir = path.join(root, 'frontend/node_modules/vite/bin'); fs.mkdirSync(viteDir, { recursive: true });
-  fs.writeFileSync(path.join(root, 'server.js'), `const net=require('node:net'); exports.app={listen:(port,host,cb)=>net.createServer().listen(port,host,cb)}; exports.startServer=async({listen})=>{listen(Number(process.env.PORT),()=>console.log('mock-api-ready'));};`);
-  fs.writeFileSync(path.join(viteDir, 'vite.js'), `const net=require('node:net'); const port=Number(process.argv[process.argv.indexOf('--port')+1]); if(process.env.MONGO_URI||process.env.CLERK_SECRET_KEY) process.exit(9); net.createServer().listen(port,'127.0.0.1',()=>console.log('mock-vite-ready'));`);
-  const p = path.join(f.dir, 'profile.json'); fs.writeFileSync(p, JSON.stringify(profile()), { mode: 0o600 });
+  fs.writeFileSync(path.join(root, 'server.js'), `const net=require('node:net'); const assert=require('node:assert/strict'); for(const key of ['LISTENING_DETECTION_ENABLED','COMMUNITY_MODERATION_ENABLED','ALBUM_MAPPING_MODERATION_ENABLED','TRACKLIST_BASELINE_MODERATION_ENABLED']) assert.equal(process.env[key],'true'); for(const key of ['LASTFM_CONNECTION_ENABLED','LASTFM_SYNC_ENABLED','LASTFM_DISCOVERY_ENABLED','LASTFM_DEEP_SWEEP_ENABLED','LISTENING_AUTO_DIARY_ENABLED','TRACKLIST_ENRICHMENT_ENABLED','COMMUNITY_SUBMISSIONS_ENABLED']) assert.equal(process.env[key],'false'); assert.equal(process.env.MODERATOR_USER_IDS,'user_test'); assert.equal(process.env.LASTFM_PILOT_USER_IDS,'user_test'); exports.app={listen:(port,host,cb)=>net.createServer().listen(port,host,cb)}; exports.startServer=async({listen})=>{listen(Number(process.env.PORT),()=>console.log('mock-api-ready'));};`);
+  fs.writeFileSync(path.join(viteDir, 'vite.js'), `const net=require('node:net'); const port=Number(process.argv[process.argv.indexOf('--port')+1]); if(process.env.MONGO_URI||process.env.CLERK_SECRET_KEY||process.env.MODERATOR_USER_IDS||process.env.LASTFM_PILOT_USER_IDS) process.exit(9); net.createServer().listen(port,'127.0.0.1',()=>console.log('mock-vite-ready'));`);
+  const configured = profile(); configured.preview = { listeningPilotUserIds: ['user_test'], moderatorUserIds: ['user_test'] };
+  const p = path.join(f.dir, 'profile.json'); fs.writeFileSync(p, JSON.stringify(configured), { mode: 0o600 });
   const child = spawn(process.execPath, [cli, 'start', '--profile', p], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = ''; child.stdout.on('data', (b) => { output += b; }); child.stderr.on('data', (b) => { output += b; });
   const finished = once(child, 'exit');
@@ -123,6 +184,7 @@ test('foreground launcher starts only paired mock apps and stops its own child p
   assert.equal(code, 0, output); assert.equal(fs.existsSync(wt.runPath(f.child)), false);
   assert.equal(await wt.pairFree(f.state.apiPort, f.state.webPort), true);
   assert.equal(output.includes('sk_test_fixture'), false);
+  assert.equal(output.includes('user_test'), false);
 });
 test('argument parser rejects unknown options and missing values', () => {
   assert.throws(() => wt.parseArgs(['start', '--profile']), /Missing/);

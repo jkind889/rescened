@@ -13,7 +13,7 @@ const DISABLED = [
   'TRACKLIST_BASELINE_MODERATION_ENABLED', 'EXTERNAL_ALBUM_SEARCH_ENABLED',
   'COMMUNITY_SUBMISSIONS_ENABLED', 'COMMUNITY_MODERATION_ENABLED', 'GENRES_ENABLED',
   'DATA_EXPORT_ENABLED', 'REVIEW_COMMENTS_ENABLED', 'REVIEW_EPISODES_ENABLED',
-  'REVIEW_EFFORT_TIMER_ENABLED', 'SHARE_PREVIEWS_ENABLED',
+  'REVIEW_EFFORT_TIMER_ENABLED', 'SHARE_PREVIEWS_ENABLED', 'CONTRIBUTOR_EDITIONS_ENABLED',
 ];
 const fail = (message) => { throw new Error(message); };
 function git(root, args) {
@@ -72,7 +72,7 @@ async function setup(ctx) {
 }
 function validateProfile(p) {
   if (!p || Array.isArray(p) || typeof p !== 'object') fail('Development profile must be an object.');
-  const allowed = ['environment', 'database', 'mongoHost', 'server'];
+  const allowed = ['environment', 'database', 'mongoHost', 'server', 'preview'];
   if (Object.keys(p).some((k) => !allowed.includes(k)) || p.environment !== 'shared-development') fail('Only an explicit shared-development profile is accepted.');
   if (!/^rescened_dev(?:_[a-z0-9]+)*$/.test(p.database || '')) fail('Database must be rescened_dev or a rescened_dev_ prefixed development name.');
   if (typeof p.mongoHost !== 'string' || !/^[a-z0-9.-]+(?::[0-9]+)?$/.test(p.mongoHost)) fail('Pin one development Mongo host (and port, if used).');
@@ -86,6 +86,14 @@ function validateProfile(p) {
     if (!['retryWrites', 'w', 'authSource', 'replicaSet', 'appName', 'tls'].includes(key) || (key === 'tls' && value !== 'true')) fail('Mongo URI contains an unsupported or unsafe option.');
   }
   if (!/^sk_test_[A-Za-z0-9_-]+$/.test(p.server.CLERK_SECRET_KEY) || !/^pk_test_[A-Za-z0-9_-]+$/.test(p.server.CLERK_PUBLISHABLE_KEY)) fail('Use Clerk test keys, never live keys.');
+  if (p.preview !== undefined) {
+    const keys = ['listeningPilotUserIds', 'moderatorUserIds'];
+    if (!p.preview || Array.isArray(p.preview) || typeof p.preview !== 'object' || Object.keys(p.preview).some((key) => !keys.includes(key))) fail('Preview accepts only listeningPilotUserIds and moderatorUserIds.');
+    for (const key of keys) {
+      const ids = p.preview[key] === undefined ? [] : p.preview[key];
+      if (!Array.isArray(ids) || ids.length > 100 || ids.some((id) => typeof id !== 'string' || id.length > 128 || id.trim() !== id || !/^user_[A-Za-z0-9]+$/.test(id)) || new Set(ids).size !== ids.length) fail('Preview allowlists must contain at most 100 unique Clerk test user IDs, without spaces or wildcards.');
+    }
+  }
   return p;
 }
 function loadProfile(filename, ctx) {
@@ -105,9 +113,16 @@ function buildEnvironments(profile, state, inherited = process.env) {
   const base = {};
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'TERM']) if (inherited[key]) base[key] = inherited[key];
   const frontendOrigin = `http://127.0.0.1:${state.webPort}`;
+  const pilots = profile.preview?.listeningPilotUserIds || [];
+  const moderators = profile.preview?.moderatorUserIds || [];
   const backend = { ...base, ...Object.fromEntries(DISABLED.map((key) => [key, 'false'])), ...profile.server,
     NODE_ENV: 'development', PORT: String(state.apiPort), CORS_ALLOWED_ORIGINS: frontendOrigin,
-    FRONTEND_URL: frontendOrigin, TRUST_PROXY_HOPS: '0', MODERATOR_USER_IDS: '', DOTENV_CONFIG_QUIET: 'true' };
+    FRONTEND_URL: frontendOrigin, TRUST_PROXY_HOPS: '0', DOTENV_CONFIG_QUIET: 'true',
+    LASTFM_PILOT_USER_IDS: pilots.join(','), MODERATOR_USER_IDS: moderators.join(','),
+    LISTENING_DETECTION_ENABLED: String(pilots.length > 0),
+    COMMUNITY_MODERATION_ENABLED: String(moderators.length > 0),
+    ALBUM_MAPPING_MODERATION_ENABLED: String(moderators.length > 0),
+    TRACKLIST_BASELINE_MODERATION_ENABLED: String(moderators.length > 0) };
   const frontend = { ...base, NODE_ENV: 'development', VITE_API_URL: `http://127.0.0.1:${state.apiPort}`, VITE_CLERK_PUBLISHABLE_KEY: profile.server.CLERK_PUBLISHABLE_KEY };
   return { backend, frontend };
 }
@@ -149,6 +164,7 @@ async function start(ctx, profilePath) {
   process.once('SIGTERM', stop);
   try {
     display(state);
+    console.log(`Detection pilots: ${profile.preview?.listeningPilotUserIds?.length || 0}; moderators with approval access: ${profile.preview?.moderatorUserIds?.length || 0}.`);
     console.log('Starting API + Vite only. Ctrl+C stops this pair. Shared development writes persist after worktree removal.');
     const specs = [
       { args: [path.join(__dirname, 'worktree-server.cjs'), path.join(ctx.root, 'server.js')], cwd: ctx.root, env: envs.backend },
@@ -169,11 +185,22 @@ async function start(ctx, profilePath) {
   }
   if (failure) fail('One app exited unexpectedly. Its paired process was stopped.');
 }
-async function create(ctx, name, base = 'origin/main') {
+function defaultCreateBase(ctx) {
+  let configured;
+  try { configured = execFileSync('git', ['-C', ctx.root, 'config', '--local', '--get-all', 'rescened.worktreeBase'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
+  catch (error) {
+    if (error.status === 1) return 'origin/main';
+    fail('Could not read the repository-local worktree base. Inspect Git configuration.');
+  }
+  if (!configured || /[\r\n\0]/.test(configured)) fail('Configure exactly one nonempty rescened.worktreeBase value.');
+  return configured;
+}
+async function create(ctx, name, base) {
   if (!/^[a-z][a-z0-9-]{0,59}$/.test(name || '')) fail('Use a short lowercase worktree name containing letters, digits, and hyphens.');
+  if (base === undefined) base = defaultCreateBase(ctx);
   const primary = git(ctx.root, ['worktree', 'list', '--porcelain']).split('\n')[0].slice(9);
   const destination = path.join(path.dirname(primary), 'rescened-worktrees', name);
-  const commit = git(ctx.root, ['rev-parse', '--verify', `${base}^{commit}`]);
+  const commit = git(ctx.root, ['rev-parse', '--verify', '--end-of-options', `${base}^{commit}`]);
   if (fs.existsSync(destination)) fail('Destination already exists; it was not changed.');
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   git(ctx.root, ['worktree', 'add', '--no-track', '-b', `work/${name}`, destination, commit]);
@@ -216,7 +243,7 @@ function parseArgs(args) {
 async function main(args = process.argv.slice(2)) {
   const { positional: [command, target, ...extra], options } = parseArgs(args);
   if (!command || command === 'help') {
-    console.log('worktree create NAME [--base origin/main]\nworktree setup\nworktree status\nworktree start --profile /absolute/private/dev.json\nworktree remove /absolute/worktree [--base origin/main] [--discard-generated]\n\nSee docs/WORKTREES.md. Setup never copies secrets or connects to a database.');
+    console.log('worktree create NAME [--base REF]\nworktree setup\nworktree status\nworktree start --profile /absolute/private/dev.json\nworktree remove /absolute/worktree [--base origin/main] [--discard-generated]\n\nCreate uses repository-local rescened.worktreeBase, otherwise origin/main.\nSee docs/WORKTREES.md. Setup never copies secrets or connects to a database.');
     return;
   }
   if (extra.length || (target && !['create', 'remove'].includes(command))) fail('Unexpected positional argument.');
@@ -231,4 +258,4 @@ async function main(args = process.argv.slice(2)) {
   else fail(`Unknown command: ${command}`);
 }
 if (require.main === module) main().catch((error) => { console.error(`Worktree: ${error.message}`); process.exitCode = 1; });
-module.exports = { DISABLED, context, statePath, runPath, setup, create, remove, validateProfile, loadProfile, buildEnvironments, rejectEnvFiles, pairFree, parseArgs, main };
+module.exports = { DISABLED, context, statePath, runPath, setup, defaultCreateBase, create, remove, validateProfile, loadProfile, buildEnvironments, rejectEnvFiles, pairFree, parseArgs, main };

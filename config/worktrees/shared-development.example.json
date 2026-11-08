@@ -6,5 +6,9 @@
     "MONGO_URI": "mongodb+srv://DEV_USER:REPLACE_LOCALLY@YOUR-DEV-CLUSTER.mongodb.net/rescened_dev?retryWrites=true&w=majority",
     "CLERK_SECRET_KEY": "sk_test_REPLACE_LOCALLY",
     "CLERK_PUBLISHABLE_KEY": "pk_test_REPLACE_LOCALLY"
+  },
+  "preview": {
+    "listeningPilotUserIds": ["user_REPLACE"],
+    "moderatorUserIds": ["user_REPLACE"]
   }
 }

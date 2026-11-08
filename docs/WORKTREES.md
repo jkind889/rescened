@@ -17,8 +17,12 @@ The profile accepts only:
 - `mongoHost`: the exact development host, including a port when present in the URI.
 - `server.MONGO_URI`: one `mongodb://` or `mongodb+srv://` URI with the exact pinned host and database. Atlas SRV and single-host local replica-set URIs are supported. Multi-host seed lists are not supported by this first version. Supported options are `retryWrites`, `w`, `authSource`, `replicaSet`, `appName`, and `tls=true`; insecure TLS options are rejected.
 - `server.CLERK_SECRET_KEY` and `server.CLERK_PUBLISHABLE_KEY`: matching test-instance keys (`sk_test_` / `pk_test_`), never live keys. Matching the same Clerk instance must be verified by the operator.
+- Optional `preview.listeningPilotUserIds`: an array of approved Clerk development/test user IDs. A nonempty list enables `LISTENING_DETECTION_ENABLED` and supplies `LASTFM_PILOT_USER_IDS` for only those accounts.
+- Optional `preview.moderatorUserIds`: an array of approved Clerk development/test moderator IDs. A nonempty list supplies `MODERATOR_USER_IDS` and enables `COMMUNITY_MODERATION_ENABLED`, `ALBUM_MAPPING_MODERATION_ENABLED`, and `TRACKLIST_BASELINE_MODERATION_ENABLED` together. This allows actual moderation commands, not just queue viewing.
 
-No provider credentials, moderator allowlists, production settings, or arbitrary environment variables are accepted. Frontend processes receive only the publishable Clerk key and their paired API URL, plus a small operating-system environment allowlist. Inherited `NODE_OPTIONS`, database credentials, `VITE_*` values, feature flags, and production settings are not forwarded.
+Replace `user_REPLACE` in the example with an approved test user ID in the private profile only. Each list accepts at most 100 unique `user_` IDs with an alphanumeric suffix, up to 128 characters total, without whitespace or wildcards. The two lists are independent: an account can be a detection pilot without being a moderator, or vice versa. Use `[]` or omit a list to disable its feature group. Older profiles with no `preview` object retain all features disabled. These local validations cannot prove which Clerk instance owns an ID; the operator must verify that the account belongs to the configured development instance.
+
+No provider credentials, production settings, arbitrary feature switches, or other environment variables are accepted. User allowlists remain server-only and are not logged. Frontend processes receive only the publishable Clerk key and their paired API URL, plus a small operating-system environment allowlist. Inherited `NODE_OPTIONS`, database credentials, `VITE_*` values, user allowlists, feature flags, and production settings are not forwarded.
 
 This is a shared **writable development** database, not read-only mode. Ordinary app actions and API startup's model/index initialization can write to it. Other worktrees see those changes immediately. Use a development-only account and deliberate test data. Removing a worktree never undoes its database changes.
 
@@ -35,7 +39,22 @@ npm ci
 npm --prefix frontend ci
 ```
 
-`create` defaults to the existing `origin/main` ref. It prints the exact source commit and creates a non-tracking `work/my-change` branch in `../rescened-worktrees/my-change`, relative to the primary checkout. It does not fetch automatically or update the primary branch. Use `--base <ref>` for an explicitly chosen local base. Existing destinations and branches are never overwritten. If a later setup step fails, the new tree is preserved; inspect it and run `setup` there.
+`create` uses an explicit `--base <ref>` first, then the repository-local `rescened.worktreeBase` setting, otherwise the existing `origin/main` ref. It prints the exact source commit and creates a non-tracking `work/my-change` branch in `../rescened-worktrees/my-change`, relative to the primary checkout. It does not fetch automatically or update the primary branch. An invalid configured base fails instead of silently falling back. Existing destinations and branches are never overwritten. If a later setup step fails, the new tree is preserved; inspect it and run `setup` there.
+
+To make a committed setup branch the basis for new trees before it is merged:
+
+```sh
+git config --local rescened.worktreeBase refs/heads/chore/reusable-worktree-setup
+git config --local --get rescened.worktreeBase
+```
+
+This setting is shared by the linked worktrees of this local repository, contains no credentials, and changes only this helper's creation default. New helper-created trees inherit the setup branch's committed files; uncommitted edits are never copied. It does not change another checkout, set an upstream, or change removal's default merge check against `origin/main`. A persistent branch base will not pick up later `main` changes automatically. Once the setup commits are merged into `main`, fetch the reviewed base and remove this temporary setting to resume creating from current `origin/main`:
+
+```sh
+git config --local --unset-all rescened.worktreeBase
+```
+
+Direct `git worktree add` and editor/Codex worktree creation do not consult this helper setting. Choose the configured ref explicitly in those workflows, then run `setup` in the resulting tree. The repository's `AGENTS.md` records this convention, but it cannot intercept arbitrary worktree creation. A reviewed merge into the normal base branch is still needed to make these files available by default to other clones, machines, and tools that use `main`. Do not push or merge merely to enforce this convention without the user's authorization.
 
 For a linked worktree already created by Codex or `git worktree add`, run:
 
@@ -55,7 +74,13 @@ npm run worktree -- start --profile "$HOME/.config/rescened/shared-development.j
 
 The command runs in the foreground. It starts only the API and Vite, bound to `127.0.0.1`, using the printed ports. Vite uses `--strictPort`, the frontend API URL points to the matching API, and CORS permits that exact frontend origin. Use the printed `127.0.0.1` URL, not a different localhost origin. Verify that your Clerk development setup accepts that origin; the helper never changes Clerk settings.
 
-Every optional provider/listening/moderation/submission feature is disabled in this initial narrow profile. No listening worker is launched. Existing workers elsewhere are not inspected, stopped, or restarted, so any independently running development worker can still affect the shared database. Worker/provider or feature-specific testing requires a separate, deliberate workflow.
+Only detection and moderation are enabled by the profile's explicit user allowlists. Last.fm connection, sync, discovery and deep sweep, automatic diary publication, provider/tracklist enrichment, contributor editions, community submissions, and all other optional feature flags remain off. The helper offers no switch to enable them. No listening worker is launched. Existing workers elsewhere are not inspected, stopped, or restarted, so any independently running development worker can still affect the shared database.
+
+Detection access does not ingest plays, run detection jobs, or publish new diary listens. Its view requires an existing active/paused Last.fm connection and stored detection records for the approved test account; without those, the view can be empty. Changing a connected account's time zone still writes shared connection state and queues detection work. Automatic diary opt-in, confirmation and publication stay disabled. Ordinary app actions, including manually recording a listen, are not made read-only by these flags.
+
+Moderators can review stored queues and perform submission, album-mapping, and tracklist-baseline decisions. Approvals/revocations can change the shared catalog, mappings, baselines and audit history, and enqueue reprocessing/discovery jobs for an independently running worker. Disabling provider flags in this API does not stop that worker. Tracklist candidate discovery/refresh that requires provider enrichment remains unavailable; existing candidate snapshots may still be reviewed. Use deliberate shared-dev fixtures, and do not approve real records merely to test the setup.
+
+Editing a private profile does not reconfigure an already running preview. Stop its owning terminal with Ctrl+C, then run the same start command to apply the new profile. Startup can initialize listening/baseline indexes when their flags are enabled. Profile changes do not authorize a database copy, production access, seed, reset, or worker launch. Any production-to-development data refresh is a separate, reviewed operation.
 
 The launcher refuses existing root/frontend `.env` variants, rather than letting dotenv or Vite silently load different settings. It never overwrites those files. Preserve and move them yourself if enrolling an older tree. `.env*` files are ignored by Git except explicit example/sample/template files, but ignored does not mean safe to delete.
 
@@ -89,4 +114,4 @@ Squash/rebase merges may not preserve commit ancestry. The conservative check ca
 
 ## Verification
 
-`npm run test:worktree` is offline and uses disposable Git repositories, fake credential strings, loopback sockets, and mock API/Vite processes. It covers profile restrictions, environment isolation, idempotent setup, port collisions, safe removal, and process shutdown without connecting to MongoDB, Clerk, or a provider. Run `npm test` for the broader backend test suite; see [repository verification guidance](../AGENTS.md) for the full gate.
+`npm run test:worktree` is offline and uses disposable Git repositories, fake credential strings, loopback sockets, and mock API/Vite processes. It covers profile restrictions, independent user scopes, detection access for approved/unapproved users, disabled ingestion/publication flags, frontend isolation, configured/explicit creation bases, idempotent setup, port collisions, safe removal, and process shutdown without connecting to MongoDB, Clerk, or a provider. Run `npm test` for the broader backend test suite; see [repository verification guidance](../AGENTS.md) for the full gate. A read-only UI check can verify signed-in queue access and existing detections after an approved restart; do not perform a moderation command, time-zone update, or diary mutation unless that specific shared-dev test is authorized.
