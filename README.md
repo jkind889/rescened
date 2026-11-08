@@ -10,6 +10,8 @@ Future feature ideas and optimizations are tracked in the living [Rescened 2.0 r
 
 ## Local development
 
+For short-lived parallel checkouts, use the [shared-development worktree workflow](docs/WORKTREES.md). It assigns paired ports, starts only the API and frontend, and keeps credentials outside every checkout.
+
 Point the root `.env` file's `MONGO_URI` at a dedicated development database such as `rescened_dev`, using a database user with `readWrite` access only to that database. Do not use production credentials or `readWriteAnyDatabase` for local development. A development database may share the Atlas cluster with production, but it remains an independent copy and shares cluster resources. To refresh it, keep a production dump outside the repository, review a `mongorestore --dryRun` with explicit source-to-development namespace mapping, and restore only into an empty development target. Restart the API after changing `.env` and confirm `/health` reports `status: "ok"`.
 
 Set `MONGO_URI`, `CLERK_SECRET_KEY`, and either `CLERK_PUBLISHABLE_KEY` or `VITE_CLERK_PUBLISHABLE_KEY`. Spotify credentials are not used or required. Set `COMMUNITY_SUBMISSIONS_ENABLED=true` to enable contributor submission mutations and `COMMUNITY_MODERATION_ENABLED=true` to enable moderator commands; both are disabled by default. Set `MODERATOR_USER_IDS` to a comma-separated Clerk allowlist. Start the API with `npm run devStart` and the frontend from `frontend/` with `npm run dev`.
