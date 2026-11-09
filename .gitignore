@@ -7,3 +7,9 @@ dist/
 .DS_Store
 .agents/
 data/
+
+# Local dotenv variants may contain credentials. Commit examples only.
+.env.*
+!.env.example
+!.env.sample
+!.env.template
