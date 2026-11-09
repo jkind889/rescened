@@ -12,7 +12,7 @@ import { earlierOrderTarget, normalizeDraft, orderLimitOf, rankMap, sameOrder, s
 import "../features/boards/boards.css";
 import Cover from "../Components/Cover";
 
-const MAX_DESCRIPTION_LENGTH = 280;
+const MAX_DESCRIPTION_LENGTH = 500;
 const UNSAVED_ORDER_HINT = "Save or discard your new order first";
 
 function byText(first, second) {
@@ -567,7 +567,7 @@ export function BoardDetail() {
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               maxLength={MAX_DESCRIPTION_LENGTH}
-              rows={2}
+              rows={5}
               placeholder="Add a description"
               aria-label="Board description"
             />

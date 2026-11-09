@@ -18,14 +18,14 @@ function auth(req, res, next) {
   req.userId = userId;
   next();
 }
-const MAX_DESCRIPTION_LENGTH = 280;
+const MAX_DESCRIPTION_LENGTH = 500;
 function title(value) { return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : ""; }
 // Descriptions keep line breaks but drop trailing spaces and runs of blank lines.
 function description(value) {
   if (value === undefined) return undefined;
   if (typeof value !== "string") throw fail(400, "INVALID_BOARD_DESCRIPTION", "Board description must be text");
   const text = value.replace(/\r\n?/g, "\n").split("\n").map((line) => line.trimEnd()).join("\n").replace(/\n{3,}/g, "\n\n").trim();
-  if (text.length > MAX_DESCRIPTION_LENGTH) throw fail(400, "INVALID_BOARD_DESCRIPTION", "Board description must be 280 characters or fewer");
+  if (text.length > MAX_DESCRIPTION_LENGTH) throw fail(400, "INVALID_BOARD_DESCRIPTION", "Board description must be 500 characters or fewer");
   return text;
 }
 function body(req, allowed) {

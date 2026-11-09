@@ -10815,14 +10815,15 @@ label.moderation-candidate-choice {
 
 .board-description-form textarea {
   width: 100%;
-  min-height: 3.2rem;
+  min-height: 9rem;
   padding: 0.55rem 0.7rem;
   border: 1px solid var(--app-line);
   border-radius: 0;
   background: var(--app-surface);
   color: var(--app-text);
   font: inherit;
-  font-size: 0.9rem;
+  font-size: 1rem;
+  line-height: 1.5;
   resize: vertical;
 }
 

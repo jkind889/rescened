@@ -278,3 +278,25 @@ for (const [setter, otherSetter, handler, field, otherField] of [
     assert.equal(after.board.revision, 2);
   });
 }
+
+test("board description editor allows and saves all 500 characters", async () => {
+  assert.match(source, /const MAX_DESCRIPTION_LENGTH = 500;/);
+  assert.match(source, /maxLength=\{MAX_DESCRIPTION_LENGTH\}/);
+  assert.match(source, /\{description.length\}\/\{MAX_DESCRIPTION_LENGTH\}/);
+  const page = await pageHarness();
+  const description = "x".repeat(500);
+  page.render().setDescription(description);
+  await page.render().saveDescription(event);
+  assert.equal(page.calls.find((call) => call.method === "PATCH").body.description, description);
+  assert.equal(page.render().board.description, description);
+});
+
+test("board description editor provides five readable, resizable rows", () => {
+  const textarea = source.match(/<textarea[\s\S]*?aria-label="Board description"[\s\S]*?\/>/)[0];
+  assert.match(textarea, /rows=\{5\}/);
+  const styles = read("App.css").match(/\.board-description-form textarea \{([^}]+)\}/)[1];
+  assert.match(styles, /min-height: 9rem;/);
+  assert.match(styles, /font-size: 1rem;/);
+  assert.match(styles, /line-height: 1\.5;/);
+  assert.match(styles, /resize: vertical;/);
+});
