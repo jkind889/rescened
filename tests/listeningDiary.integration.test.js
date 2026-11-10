@@ -116,6 +116,66 @@ integration("standalone diary logging creates a profile but no board membership 
   noInternalIds(diary.body, [stored._id, album._id]);
 });
 
+integration("diary picker annotates exact listens for the selected board across pages and membership changes", async () => {
+  const linked = (await log({ boardIds: [board.boardId], listenedOn: "2020-01-03" })).listen;
+  const repeat = (await log({ listenedOn: "2020-01-03" })).listen;
+  const otherBoard = (await log({ boardIds: [secondBoard.boardId] })).listen;
+  await Listen.collection.updateOne({ listenId: otherBoard.listenId }, { $set: { source: "automatic" } });
+  const url = `/diary?albumId=${album.albumId}&membershipBoardId=${board.boardId}&limit=2`;
+  const first = await request("GET", url);
+  assert.equal(first.status, 200);
+  assert.ok(first.body.nextCursor);
+  const older = await request("GET", `${url}&cursor=${encodeURIComponent(first.body.nextCursor)}`);
+  assert.equal(older.status, 200);
+  const listens = [...first.body.listens, ...older.body.listens];
+  assert.equal(listens.length, 3);
+  assert.deepEqual(Object.fromEntries(listens.map((listen) => [listen.listenId, listen.inBoard])), {
+    [linked.listenId]: true, [repeat.listenId]: false, [otherBoard.listenId]: false,
+  });
+  assert.equal(older.body.listens[0].source, "automatic");
+  noInternalIds({ listens }, [board._id, secondBoard._id, album._id]);
+  assert.equal(JSON.stringify(listens).includes(secondBoard.boardId), false);
+  const normal = await request("GET", "/diary");
+  assert.ok(normal.body.listens.every((listen) => !Object.hasOwn(listen, "inBoard")));
+
+  assert.equal((await request("PUT", `/boards/${board.boardId}/listens/${otherBoard.listenId}`)).status, 200);
+  const readMembership = async () => (await request("GET", `/diary?membershipBoardId=${board.boardId}`)).body.listens.find((listen) => listen.listenId === otherBoard.listenId).inBoard;
+  assert.equal(await readMembership(), true);
+  assert.equal((await request("DELETE", `/boards/${board.boardId}/listens/${otherBoard.listenId}`)).status, 200);
+  assert.equal(await readMembership(), false);
+  const otherContext = await request("GET", `/diary?membershipBoardId=${secondBoard.boardId}`);
+  assert.equal(otherContext.body.listens.find((listen) => listen.listenId === otherBoard.listenId).inBoard, true);
+
+  for (const context of ["", `&membershipBoardId=${secondBoard.boardId}`]) {
+    const changed = await request("GET", `/diary?albumId=${album.albumId}&limit=2${context}&cursor=${encodeURIComponent(first.body.nextCursor)}`);
+    assert.equal(changed.status, 400);
+    assert.equal(changed.body.code, "INVALID_DIARY_CURSOR");
+  }
+});
+
+integration("membership annotations require an owned board and the authenticated diary endpoint", async () => {
+  const { listen } = await log();
+  await request("PUT", `/boards/default/listens/${listen.listenId}`);
+  const defaults = await request("GET", "/diary?membershipBoardId=default");
+  assert.equal(defaults.status, 200);
+  assert.equal(defaults.body.listens[0].inBoard, true);
+  const foreign = await Board.create({ userId: "foreign", title: "Foreign" });
+  for (const id of [foreign.boardId, crypto.randomUUID()]) {
+    assert.equal((await request("GET", `/diary?membershipBoardId=${id}`)).status, 404);
+  }
+  assert.equal((await request("GET", "/diary?membershipBoardId=invalid")).status, 400);
+  assert.equal((await request("GET", `/diary?membershipBoardId=${board.boardId}&membershipBoardId=${secondBoard.boardId}`)).status, 400);
+  assert.equal((await request("GET", `/diary?membershipBoardId=${board.boardId}`, { userId: "" })).status, 401);
+  for (const path of [
+    `/profile/${owner}/diary`,
+    `/profile/${owner}/boards/${board.boardId}/albums/${album.albumId}/listens`,
+    `/boards/${board.boardId}/albums/${album.albumId}/listens`,
+  ]) {
+    const response = await request("GET", `${path}?membershipBoardId=${board.boardId}`);
+    assert.equal(response.status, 400, path);
+  }
+});
+
 integration("creation retries are atomic and distinct keys preserve intentional same-day listens", async () => {
   const key = crypto.randomUUID();
   const body = input({ boardIds: [board.boardId, secondBoard.boardId] });

@@ -9823,6 +9823,20 @@ label.moderation-candidate-choice {
   cursor: not-allowed;
 }
 
+.board-listens-list li.is-in-board {
+  color: var(--app-muted);
+  opacity: 0.65;
+}
+
+.board-listens-list li.is-in-board button,
+.board-listens-list li.is-in-board .listen-source-label {
+  color: var(--app-muted);
+}
+
+.board-listens-list li.is-in-board button:disabled {
+  opacity: 1;
+}
+
 .board-listens-message {
   font-size: 0.85rem;
   color: var(--app-accent);

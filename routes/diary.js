@@ -20,7 +20,7 @@ function errorResponse(res, error) {
 }
 
 router.get("/", async (req, res) => {
-  try { res.json(await listListens(req.userId, req.query)); }
+  try { res.json(await listListens(req.userId, req.query, {}, { withBoardMembership: true })); }
   catch (error) { errorResponse(res, error); }
 });
 router.get("/unreviewed", async (req, res) => {
