@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const Board = require("../models/Board");
 const BoardItem = require("../models/BoardItem");
+const BoardItemNote = require("../models/BoardItemNote");
 const BoardListen = require("../models/BoardListen");
 const Follow = require("../models/Follow");
 const Listen = require("../models/Listen");
@@ -507,4 +508,10 @@ test("board model accepts 500 description characters and rejects 501", () => {
   assert.equal(board.validateSync(), undefined);
   board.description = "x".repeat(501);
   assert.equal(board.validateSync()?.errors.description.kind, "maxlength");
+});
+
+// Notes are empty in these pre-existing board fixtures.
+test.beforeEach((t) => {
+  t.mock.method(BoardItemNote, "find", () => ({ lean: async () => [] }));
+  t.mock.method(BoardItemNote, "deleteMany", async () => ({}));
 });

@@ -15,6 +15,7 @@ const files = [
   "tests/listeningDiary.integration.test.js",
   "tests/listenQueue.integration.test.js",
   "tests/boardOrder.integration.test.js",
+  "tests/boardNotes.integration.test.js",
   "tests/dataExport.integration.test.js",
   "tests/accountDeletion.integration.test.js",
   "tests/searchQuality.integration.test.js",

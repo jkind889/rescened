@@ -1,5 +1,6 @@
 const Board = require("../../models/Board");
 const BoardItem = require("../../models/BoardItem");
+const BoardItemNote = require("../../models/BoardItemNote");
 const BoardListen = require("../../models/BoardListen");
 const { CATALOG_ALBUM_FIELDS, normalizeCatalogAlbum } = require("./albumCatalog");
 const { fail } = require("./diaryValidation");
@@ -166,13 +167,30 @@ function boardPayload(board, albums, { albums: includeAlbums = false, revision =
     itemCount: albums.length, listenCount: albums.reduce((sum, album) => sum + album.listenCount, 0),
     // Albums saved on purpose, the only ones "Pick something for me" can suggest.
     explicitSaveCount: albums.filter((album) => album.explicitlySaved).length,
-    previewAlbums: albums.slice(0, 4), ...(includeAlbums ? { albums } : {}),
+    previewAlbums: albums.slice(0, 4).map(({ note, ...album }) => album), ...(includeAlbums ? { albums } : {}),
     ...(revision ? { revision: Number(board.interactionRevision) || 0 } : {}),
   };
 }
 
+// Fetch only live board/album pairs in bounded batches. Notes on missing or
+// foreign memberships never leak into a board, shelf, preview, or export.
+async function includeNotes(entries, session = null) {
+  for (let offset = 0; offset < entries.length; offset += 250) {
+    const batch = entries.slice(offset, offset + 250);
+    const query = BoardItemNote.find({ $or: batch.map((entry) => ({
+      boardId: entry.boardKey, albumCatalogId: entry.key, userId: entry.album.userId,
+    })) }, "boardId albumCatalogId note").lean();
+    if (session) query.session(session);
+    const notes = new Map((await query).map((row) => [`${row.boardId}:${row.albumCatalogId}`, row.note]));
+    for (const entry of batch) entry.album.note = notes.get(`${entry.boardKey}:${entry.key}`) || "";
+  }
+  return entries;
+}
+
 async function formatBoard(board, options = {}) {
-  return boardPayload(board, (await boardEntries(board)).map((entry) => entry.album), options);
+  const entries = await boardEntries(board, options.session);
+  if (options.albums) await includeNotes(entries, options.session);
+  return boardPayload(board, entries.map((entry) => entry.album), options);
 }
 
 // Formats a list of boards from one membership read instead of one per board.
@@ -183,6 +201,7 @@ async function formatBoards(boards, options = {}) {
     { boardId: { $in: boards.map((board) => board._id) } }, null,
     { maxRows: options.maxRows, boardCount: boards.length, albumFields: options.albumFields, batchSize: options.batchSize },
   );
+  if (options.albums) await includeNotes(entries);
   const byBoard = new Map();
   for (const entry of entries) {
     if (!byBoard.has(entry.boardKey)) byBoard.set(entry.boardKey, []);

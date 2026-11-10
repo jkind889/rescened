@@ -11,6 +11,7 @@ const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
 const Board = require("../models/Board");
 const BoardItem = require("../models/BoardItem");
+const BoardItemNote = require("../models/BoardItemNote");
 const BoardListen = require("../models/BoardListen");
 const Follow = require("../models/Follow");
 const Like = require("../models/Like");
@@ -29,7 +30,7 @@ const { mutateReviewLike } = require("../routes/utils/reviewInteractions");
 
 const enabled = process.env.RUN_MONGO_INTEGRATION === "true";
 const models = [
-  AccountFence, AlbumCatalog, AlbumSubmission, Board, BoardItem, BoardListen, Follow, Like, Listen, ListenCreation, Notification, Review, TrackRanking, UserProfile,
+  AccountFence, AlbumCatalog, AlbumSubmission, Board, BoardItem, BoardItemNote, BoardListen, Follow, Like, Listen, ListenCreation, Notification, Review, TrackRanking, UserProfile,
   ...Object.values(Listening), ...Object.values(Automatic),
 ];
 let replSet;
@@ -117,6 +118,8 @@ integration("account deletion removes diary, boards, social data, and profile, a
   await log(deleted, { listenedOn: "2020-01-03" });
   await setMembership(deleted, board.boardId, (await log(deleted, { listenedOn: "2020-01-04" })).listen.listenId, true);
   await saveAlbum(deleted, board.boardId, album._id);
+  await BoardItemNote.create({ userId: deleted, boardId: board._id, albumCatalogId: album._id, note: "Delete this note" });
+  await BoardItemNote.create({ userId: other, boardId: otherBoard._id, albumCatalogId: album._id, note: "Keep this note" });
   // Another user's data that must survive.
   await log(other, { boardIds: [otherBoard.boardId] });
   await saveAlbum(other, otherBoard.boardId, album._id);
@@ -147,6 +150,8 @@ integration("account deletion removes diary, boards, social data, and profile, a
   assert.deepEqual(await accountCounts(deleted), {
     listens: 0, memberships: 0, receipts: 0, boards: 0, items: 0, likes: 0, follows: 0, notifications: 0, profiles: 0, reviews: 0, rankings: 0,
   });
+  assert.equal(await BoardItemNote.countDocuments({ userId: deleted }), 0);
+  assert.equal((await BoardItemNote.findOne({ userId: other })).note, "Keep this note");
   assert.equal(await BoardListen.countDocuments({ boardId: { $in: [board._id, secondBoard._id] } }), 0);
   // The other user keeps everything except the follow edge and notification involving the deleted user.
   assert.deepEqual(await accountCounts(other), { ...otherBefore, follows: 0, notifications: 0 });

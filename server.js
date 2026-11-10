@@ -80,6 +80,7 @@ async function startServer({
   initializeDiary = async () => Promise.all([
     require("./models/Listen").init(),
     require("./models/BoardListen").init(),
+    require("./models/BoardItemNote").init(),
     require("./models/ListenCreation").init(),
     ...Object.values(require("./models/AutomaticListen")).map((Model) => Model.init()),
   ]),

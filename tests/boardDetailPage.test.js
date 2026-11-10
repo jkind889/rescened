@@ -11,14 +11,16 @@ const source = read("Pages/BoardDetail.jsx");
 const client = read("features/boards/boardOrder.js").replace(/^import .*;\n/gm, "").replace(/export /g, "");
 const queue = read("features/queue/queue.js");
 const moveItem = queue.slice(queue.indexOf("export function moveItem"), queue.indexOf("async function failure")).replace("export ", "");
+const noteText = read("features/boards/boardNoteText.js").replace(/export /g, "");
 const pageSource = source.slice(source.indexOf("const MAX_DESCRIPTION_LENGTH"), source.indexOf("  function renderListeningSummary"))
   .replace("export function", "function") + `
   return { board, title, description, order, isOrderDirty, isBoardBusy, isRefreshing, needsRefresh, actionError, orderStatus,
     setTitle, setDescription, setSelectedAlbum, fetchBoard, retryRefresh, renameBoard, saveDescription,
-    updateOrderSettings, removeAlbum, keepAlbumSaved, moveAlbum, saveOrder, discardOrder };
+    updateOrderSettings, removeAlbum, keepAlbumSaved, moveAlbum, saveOrder, discardOrder,
+    activeNote, isSavingNote, editNote, changeNote, saveNote, setNoteEditor, filteredAlbums, setAlbumFilter };
 }
 return BoardDetail();`;
-const renderSource = `(() => { ${client}\n${moveItem}\n${pageSource}\n})()`;
+const renderSource = `(() => { ${client}\n${noteText}\n${moveItem}\n${pageSource}\n})()`;
 const ids = (value) => Array.from(value, (album) => album.albumId || album);
 const event = { preventDefault() {} };
 function deferred() {
@@ -71,6 +73,13 @@ async function pageHarness() {
       const hold = holds.get(method);
       if (hold) { holds.delete(method); hold.reached.resolve(); await hold.release.promise; }
       if (method === "GET") return failGet ? reply({ error: "Offline" }, 503) : reply(server);
+      if (method === "PATCH" && url.endsWith("/note")) {
+        if (body.revision !== server.revision) return reply({ code: "BOARD_CHANGED", error: "Changed" }, 409);
+        const albumId = url.split("/").at(-2);
+        server.albums = server.albums.map((album) => album.albumId === albumId ? { ...album, note: body.note } : album);
+        server.revision++;
+        return reply(server);
+      }
       if (method === "PATCH") {
         server = { ...server, ...body, revision: server.revision + 1 };
         const { albums, ...summary } = server;
@@ -91,6 +100,7 @@ async function pageHarness() {
   return {
     render, calls,
     reverseElsewhere() { server.albums.reverse(); server.revision++; },
+    changeListensElsewhere(count) { server.albums = server.albums.map((album, index) => index === 0 ? { ...album, listenCount: count, explicitlySaved: true } : album); server.revision++; },
     failReads(value = true) { failGet = value; },
     navigate() { params = { boardId: "22222222-2222-4222-8222-222222222222" }; render(); },
     hold(method) {
@@ -299,4 +309,74 @@ test("board description editor provides five readable, resizable rows", () => {
   assert.match(styles, /font-size: 1rem;/);
   assert.match(styles, /line-height: 1\.5;/);
   assert.match(styles, /resize: vertical;/);
+});
+
+test("notes save and clear with a complete snapshot, blocking other mutations and repeated clicks", async () => {
+  const page = await pageHarness();
+  page.render().editNote(page.render().board.albums[0]);
+  page.render().changeNote("  A short note  ");
+  assert.equal(page.render().isBoardBusy, true);
+  page.render().moveAlbum(1, 0); assert.equal(page.render().isOrderDirty, false);
+  const hold = page.hold("PATCH");
+  const first = page.render().saveNote(event); await hold.reached;
+  await page.render().saveNote(event); await page.render().removeAlbum("A");
+  assert.equal(page.calls.filter((call) => call.method === "PATCH").length, 1);
+  assert.equal(page.calls.filter((call) => call.method === "DELETE").length, 0);
+  hold.release(); await first;
+  assert.equal(page.render().activeNote, null); assert.equal(page.render().board.albums[0].note, "A short note");
+  assert.equal(page.render().board.revision, 2); assert.equal(page.render().isBoardBusy, false);
+  page.render().editNote(page.render().board.albums[0]); page.render().changeNote(" ");
+  await page.render().saveNote(event); assert.equal(page.render().board.albums[0].note, "");
+});
+
+test("a stale note edit keeps its draft and requires an explicit save after refreshing", async () => {
+  const page = await pageHarness();
+  page.render().editNote(page.render().board.albums[0]); page.render().changeNote("Keep my draft");
+  page.reverseElsewhere(); await page.render().saveNote(event);
+  assert.equal(page.render().activeNote.draft, "Keep my draft");
+  assert.match(page.render().activeNote.error, /changed elsewhere/);
+  assert.deepEqual(ids(page.render().board.albums), ["C", "B", "A"]);
+  await page.render().saveNote(event);
+  assert.equal(page.render().board.albums.find((album) => album.albumId === "A").note, "Keep my draft");
+  assert.equal(page.render().activeNote, null);
+});
+
+test("a failed conflict refresh preserves the note draft and blocks saving until refreshed", async () => {
+  const page = await pageHarness();
+  page.render().editNote(page.render().board.albums[0]); page.render().changeNote("Kept offline");
+  page.reverseElsewhere(); page.failReads(); await page.render().saveNote(event);
+  assert.equal(page.render().needsRefresh, true); assert.equal(page.render().activeNote.draft, "Kept offline");
+  const writes = page.calls.filter((call) => call.method === "PATCH").length;
+  await page.render().saveNote(event); assert.equal(page.calls.filter((call) => call.method === "PATCH").length, writes);
+  page.failReads(false); await page.render().retryRefresh(); await page.render().saveNote(event);
+  assert.equal(page.render().activeNote, null);
+});
+
+test("unsaved ordering and overlong notes cannot send note writes; navigation ignores late results", async () => {
+  const page = await pageHarness();
+  page.render().moveAlbum(1, 0); page.render().editNote(page.render().board.albums[0]);
+  assert.equal(page.render().activeNote, null); page.render().discardOrder();
+  page.render().editNote(page.render().board.albums[0]); page.render().changeNote("👨‍👩‍👧‍👦".repeat(101));
+  await page.render().saveNote(event); assert.equal(page.calls.some((call) => call.method === "PATCH"), false);
+  page.render().changeNote("A note"); const hold = page.hold("PATCH");
+  const saving = page.render().saveNote(event); await hold.reached; page.navigate(); hold.release(); await saving;
+  assert.equal(page.render().activeNote, null); assert.equal(page.render().board.albums[0].note, undefined);
+});
+
+
+test("a conflict that filters out a still-saved album keeps the note editor reachable", async () => {
+  const page = await pageHarness();
+  page.changeListensElsewhere(1); await page.render().fetchBoard(true);
+  page.render().setAlbumFilter("listened");
+  page.render().editNote(page.render().filteredAlbums[0]); page.render().changeNote("Keep my filtered draft");
+  page.changeListensElsewhere(0); await page.render().saveNote(event);
+  const state = page.render();
+  assert.equal(state.activeNote.draft, "Keep my filtered draft");
+  assert.equal(state.filteredAlbums.length, 0);
+  assert.ok(state.board.albums.some((album) => album.albumId === state.activeNote.album.albumId));
+  // The fallback must use visibility, not membership, so Save/Cancel stay reachable.
+  assert.match(source, /activeNote && !filteredAlbums\.some\([\s\S]*?renderNote\(\s*albumsById\.get\(activeNote\.album\.albumId\) \|\| activeNote\.album, !albumsById\.has/);
+  await page.render().saveNote(event);
+  assert.equal(page.render().activeNote, null);
+  assert.equal(page.render().board.albums[0].note, "Keep my filtered draft");
 });

@@ -5,7 +5,8 @@ const { findAlbumByPublicId } = require("./utils/albumCatalog");
 const { albumSaveRateLimit, boardMutationRateLimit, diaryMutationRateLimit } = require("./utils/rateLimit");
 const { fail, fields } = require("./utils/diaryValidation");
 const { getDefaultBoard, ownedBoard, formatBoard, formatBoards, albumBoards, publicBoardId } = require("./utils/boardLibrary");
-const { saveAlbum, removeAlbum, deleteBoard, setMembership, updateBoard, reorderBoard } = require("./utils/boardMutations");
+const { saveAlbum, removeAlbum, deleteBoard, setMembership, updateBoard, reorderBoard, updateBoardNote } = require("./utils/boardMutations");
+const { noteInput } = require("./utils/boardNoteInput");
 const { orderInput, settingsInput } = require("./utils/boardOrder");
 const { listListens } = require("./utils/listeningDiary");
 const { pickUnplayedAlbum } = require("./utils/boardPick");
@@ -134,6 +135,15 @@ router.post("/:boardId/albums", auth, albumSaveRateLimit, async (req, res) => {
     const { albums, ...summary } = formatted;
     res.status(201).json({ board: summary, album: albums.find((item) => item.albumId === album.albumId) || null });
   } catch (error) { sendError(res, error, "Failed to save album to board"); }
+});
+
+// A note belongs to this board/album membership, never to the catalog album.
+router.patch("/:boardId/albums/:albumId/note", auth, boardMutationRateLimit, async (req, res) => {
+  try {
+    const input = noteInput(req.body);
+    const album = await findAlbumByPublicId(req.params.albumId);
+    res.json(await updateBoardNote(req.userId, target(req), album._id, input));
+  } catch (error) { sendError(res, error, "Failed to save board note"); }
 });
 
 router.delete("/:boardId/albums/:albumId", auth, async (req, res) => {

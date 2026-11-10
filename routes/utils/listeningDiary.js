@@ -10,7 +10,7 @@ const UserProfile = require("../../models/UserProfile");
 const { DiaryAlbumFence } = require("../../models/AutomaticListen");
 const { normalizeCatalogAlbum } = require("./albumCatalog");
 const { fail, uuid, fields, calendarDate, listeningDate, creationInput, isCalendarDate } = require("./diaryValidation");
-const { transaction, claimBoard, touchBoard, syncOrder, claimListen } = require("./boardMutations");
+const { transaction, claimBoard, touchBoard, syncOrder, claimListen, pruneBoardNote } = require("./boardMutations");
 const { ownedBoard } = require("./boardLibrary");
 const { removeListenedAlbum } = require("./listenQueue");
 
@@ -135,7 +135,10 @@ async function deleteListen(userId, listenId) {
     const listen = await claimListen(userId, id, session);
     await BoardListen.deleteMany({ listenId: listen._id }, { session });
     await Listen.deleteOne({ _id: listen._id, userId }, { session });
-    for (const board of boards) await syncOrder(board, session);
+    for (const board of boards) {
+      await pruneBoardNote(board, listen.albumCatalogId, session);
+      await syncOrder(board, session);
+    }
   });
 }
 

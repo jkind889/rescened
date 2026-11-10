@@ -35,7 +35,7 @@ function connection(overrides = {}) {
 // Stubs every model write account deletion performs and records it in order.
 function stubAccountModels(calls, { failOn } = {}) {
   const names = {
-    Board: "../models/Board", BoardItem: "../models/BoardItem", BoardListen: "../models/BoardListen", Follow: "../models/Follow",
+    Board: "../models/Board", BoardItemNote: "../models/BoardItemNote", BoardItem: "../models/BoardItem", BoardListen: "../models/BoardListen", Follow: "../models/Follow",
     Like: "../models/Like", Listen: "../models/Listen", ListenCreation: "../models/ListenCreation",
     Notification: "../models/Notification", Review: "../models/Reviews", TrackRanking: "../models/TrackRanking", UserProfile: "../models/UserProfile",
     CommentReport: "../models/CommentReport", ReviewComment: "../models/ReviewComment",
@@ -298,6 +298,7 @@ test("Clerk user deletion webhook rejects unsigned requests and accepts a valid 
       ["BoardListen.deleteMany", userOrBoard, true],
       ["Listen.deleteMany", { userId: user }, true],
       ["ListenCreation.deleteMany", { userId: user }, true],
+      ["BoardItemNote.deleteMany", userOrBoard, true],
       ["BoardItem.deleteMany", userOrBoard, true],
       ["UserProfile.updateMany", { pinnedBoardId: { $in: ["board-1"] } }, true],
       ["Board.deleteMany", { userId: user }, true],
