@@ -677,7 +677,7 @@ export function AlbumDetail()
 
         return firstDisc - secondDisc || firstTrack - secondTrack;
     });
-    const albumTabs = ["artist", "release", "format", "tracks", ...(sortedTracks.length > 0 ? ["ranking"] : []), ...(genresEnabled ? ["genres"] : [])];
+    const albumTabs = ["artist", "release", "format", "tracks", ...(sortedTracks.length > 0 ? ["ranking"] : [])];
     const selectedTab = albumTabs.includes(activeTab) ? activeTab : "artist";
     function handleTabKeyDown(event) {
         const index = albumTabs.indexOf(selectedTab);
@@ -972,6 +972,44 @@ export function AlbumDetail()
                             {album.label && <span>{album.label}</span>}
                             {sortedTracks.length > 0 && <span>{sortedTracks.length} track{sortedTracks.length === 1 ? "" : "s"}{runtimeLabel ? ` · ${runtimeLabel}` : ""}</span>}
                         </div>
+                        {genresEnabled && (
+                            <section className="album-genres" aria-labelledby="album-genres-heading">
+                                <div className="album-genres-header">
+                                    <h2 id="album-genres-heading">Genres</h2>
+                                    {!openGenreSuggestion && (canUseAuthenticatedActions ? (
+                                        <Link className="album-genre-suggest" to={`/suggestions/genres/${album.albumId}`}>
+                                            Suggest genres
+                                        </Link>
+                                    ) : (
+                                        <SignInButton mode="modal">
+                                            <button className="album-genre-suggest" type="button">Suggest genres</button>
+                                        </SignInButton>
+                                    ))}
+                                </div>
+                                {album.genres.length > 0 ? (
+                                    <ul className="album-genre-list" aria-label="Album genres">
+                                        {album.genres.map((genre, index) => (
+                                            <li key={genre.genreId}>
+                                                <Link
+                                                    className={`album-genre-badge ${index === 0 ? "album-genre-badge-primary" : "album-genre-badge-secondary"}`}
+                                                    to={`/genre/${genre.slug}`}
+                                                    aria-label={index === 0 ? `${genre.name} (primary genre)` : undefined}
+                                                >
+                                                    {genre.name}
+                                                </Link>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : <p className="album-genre-empty">No genres yet.</p>}
+                                {openGenreSuggestion && (
+                                    <p className="album-genre-pending">
+                                        {openGenreSuggestion.status === "needs_changes"
+                                            ? <>A moderator asked for changes to your genre suggestion. <Link to={`/suggestions/${openGenreSuggestion.submissionId}/revise`}>Revise it</Link></>
+                                            : <>Your genre suggestion is waiting for review. <Link to={`/suggestions/${openGenreSuggestion.submissionId}`}>View it</Link></>}
+                                    </p>
+                                )}
+                            </section>
+                        )}
                     </div>
 
                     <div className="album-tabs" role="tablist" aria-label="Album sections">
@@ -994,37 +1032,6 @@ export function AlbumDetail()
                     </div>
 
                     <section className="album-info-panel" id="album-section-panel" role="tabpanel" aria-labelledby={`album-tab-${selectedTab}`} tabIndex={0}>
-                        {selectedTab === "genres" && genresEnabled && (
-                            <div className="album-genres-panel">
-                                {album.genres.length > 0 ? (
-                                    <ul className="album-genre-list" aria-label="Genres">
-                                        {album.genres.map((genre, index) => (
-                                            <li key={genre.genreId}>
-                                                <Link className={`album-genre-badge ${index === 0 ? "album-genre-badge-primary" : "album-genre-badge-secondary"}`} to={`/genre/${genre.slug}`}>
-                                                    {genre.name}
-                                                </Link>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                ) : <p className="album-empty-copy">No genres yet.</p>}
-                                {openGenreSuggestion && (
-                                    <p className="album-genre-pending">
-                                        {openGenreSuggestion.status === "needs_changes"
-                                            ? <>A moderator asked for changes to your genre suggestion. <Link to={`/suggestions/${openGenreSuggestion.submissionId}/revise`}>Revise it</Link></>
-                                            : <>Your genre suggestion is waiting for review. <Link to={`/suggestions/${openGenreSuggestion.submissionId}`}>View it</Link></>}
-                                    </p>
-                                )}
-                                <div className="album-genre-actions">
-                                    {canUseAuthenticatedActions ? (
-                                        openGenreSuggestion ? null : (
-                                            <Link className="album-side-action" to={`/suggestions/genres/${album.albumId}`}>
-                                                Suggest genres
-                                            </Link>
-                                        )
-                                    ) : renderSignInAction("Suggest genres")}
-                                </div>
-                            </div>
-                        )}
                         {selectedTab === "artist" && (
                             <dl className="album-facts">
                                 <div>

@@ -3269,24 +3269,64 @@ html:has(.search-results-page) .search-submit {
   background: rgba(148, 163, 184, 0.7);
 }
 
-.album-genres-panel {
-  display: grid;
-  gap: 1rem;
+.album-genres {
+  margin-top: 1rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--app-line);
 }
 
-.album-genres-panel .album-genre-list,
-.album-genres-panel .album-genre-pending,
-.album-genres-panel .album-empty-copy {
-  margin: 0;
-}
-
-.album-genre-actions {
-  justify-self: start;
-}
-
-.album-genre-actions .album-side-action {
+.album-genres-header {
+  display: flex;
   min-height: 44px;
-  border: 1px solid var(--app-line);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+}
+
+.album-genres-header h2 {
+  margin: 0;
+  color: var(--app-muted);
+  font-size: 0.65rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.album-genre-suggest {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--app-muted);
+  font: inherit;
+  font-size: 0.7rem;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+.album-genre-suggest:hover {
+  color: var(--app-text);
+}
+
+.album-genre-suggest:focus-visible,
+.album-genre-badge:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 3px;
+}
+
+.album-genre-empty {
+  margin: 0;
+  color: var(--app-muted);
+  font-size: 0.75rem;
+}
+
+.album-genres .album-genre-pending {
+  margin: 0.65rem 0 0;
+  line-height: 1.5;
 }
 
 .album-tab:focus-visible,
@@ -3299,17 +3339,27 @@ html:has(.search-results-page) .search-submit {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
-  margin: 1rem 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
+.album-genre-list li {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .album-genre-badge {
   border: 1px solid var(--app-line-strong);
-  display: inline-block;
-  padding: 0.32rem 0.6rem;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 36px;
+  max-width: 100%;
+  padding: 0.45rem 0.7rem;
   font-size: 0.7rem;
-  line-height: 1;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
   letter-spacing: 0.04em;
   text-decoration: none;
 }
@@ -3324,6 +3374,12 @@ html:has(.search-results-page) .search-submit {
   background: var(--app-accent);
   /* The page background reads clearly on the accent in both themes. */
   color: var(--app-bg);
+}
+
+@media (max-width: 680px) {
+  .album-genre-badge {
+    min-height: 44px;
+  }
 }
 
 .album-genre-badge-secondary {
