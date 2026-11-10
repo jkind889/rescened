@@ -489,3 +489,13 @@
 .genre-page-more {
   margin-top: 1rem;
 }
+
+/* Embedded in the existing album form, including its disabled fieldset. */
+.genre-form-embedded { padding: 0; min-width: 0; }
+.genre-form-embedded .genre-result { flex-wrap: wrap; }
+.genre-form-embedded .genre-result > span { overflow-wrap: anywhere; min-width: 0; }
+.genre-form-embedded .genre-addition-heading { flex-wrap: wrap; }
+
+@media (max-width: 600px) {
+  .suggestion-form-section:has(> .genre-form-embedded) { scroll-margin-top: 175px; }
+}

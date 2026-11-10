@@ -23,6 +23,9 @@ const SEARCH_DELAY_MS = 250;
 // can be existing genres or up to two new names, which moderators review.
 export function GenreSuggestionForm({
   album,
+  embedded = false,
+  value = null,
+  onChange = null,
   currentGenres,
   initialChanges = null,
   onSubmit,
@@ -31,7 +34,8 @@ export function GenreSuggestionForm({
   submitLabel = "Send for review",
   submittingLabel = "Sending…",
 }) {
-  const [form, setForm] = useState(() => initialGenreForm(currentGenres, initialChanges));
+  const [localForm, setForm] = useState(() => initialGenreForm(currentGenres, initialChanges));
+  const form = value || localForm;
   const [query, setQuery] = useState("");
   // Results remember the query they answer, so a stale response never shows.
   const [search, setSearch] = useState({ query: "", results: [], status: "idle" });
@@ -80,7 +84,8 @@ export function GenreSuggestionForm({
 
   function update(change) {
     setClientError("");
-    setForm((current) => ({ ...current, ...change(current) }));
+    if (onChange) onChange({ ...form, ...change(form) });
+    else setForm((current) => ({ ...current, ...change(current) }));
   }
 
   function toggleRemoval(genre) {
@@ -133,9 +138,11 @@ export function GenreSuggestionForm({
   }
 
   const shownError = communityGenreError(error);
+  const Container = embedded ? "div" : "form";
 
   return (
-    <form className="genre-form community-panel" onSubmit={submit} noValidate>
+    <Container className={embedded ? "genre-form genre-form-embedded" : "genre-form community-panel"} {...(embedded ? {} : { onSubmit: submit, noValidate: true })}>
+      {!embedded ? (
       <section className="genre-form-section" aria-labelledby={`${searchId}-current`}>
         <h2 className="genre-form-title" id={`${searchId}-current`}>Current genres</h2>
         {currentGenres.length ? (
@@ -154,6 +161,7 @@ export function GenreSuggestionForm({
           </ul>
         ) : <p className="genre-form-muted">This album has no genres yet.</p>}
       </section>
+      ) : null}
 
       <section className="genre-form-section">
         <label className="genre-form-title" htmlFor={searchId}>Add genres</label>
@@ -164,10 +172,12 @@ export function GenreSuggestionForm({
           id={searchId}
           maxLength={40}
           onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => { if (embedded && event.key === "Enter") event.preventDefault(); }}
           placeholder={atLimit ? `This album would have ${MAX_ALBUM_GENRES} genres` : "Search genres, e.g. jazz rap"}
           type="search"
           value={query}
         />
+        {searchState === "loading" ? <p className="genre-form-muted" role="status">Searching genres…</p> : null}
         {searchState === "error" ? <p className="genre-form-muted" role="alert">Genre search is unavailable right now.</p> : null}
         {results.length || canProposeNew ? (
           <ul className="genre-result-list">
@@ -229,7 +239,7 @@ export function GenreSuggestionForm({
 
       <section className="genre-form-section">
         <h2 className="genre-form-title">
-          After approval <span className={`genre-count${preview.length > MAX_ALBUM_GENRES ? " genre-count-over" : ""}`}>{preview.length} of {MAX_ALBUM_GENRES}</span>
+          {embedded ? "Suggested genres" : "After approval"} <span className={`genre-count${preview.length > MAX_ALBUM_GENRES ? " genre-count-over" : ""}`}>{preview.length} of {MAX_ALBUM_GENRES}</span>
         </h2>
         {preview.length ? (
           <fieldset className="genre-primary-list">
@@ -247,7 +257,7 @@ export function GenreSuggestionForm({
               </label>
             ))}
           </fieldset>
-        ) : <p className="genre-form-muted">The album would have no genres.</p>}
+        ) : <p className="genre-form-muted">{embedded ? "No genres selected. You can send the album without them." : "The album would have no genres."}</p>}
       </section>
 
       <div className="community-field">
@@ -275,10 +285,10 @@ export function GenreSuggestionForm({
         ) : null}
       </div>
 
-      <button className="community-primary-button" disabled={isSubmitting} type="submit">
+      {!embedded ? <button className="community-primary-button" disabled={isSubmitting} type="submit">
         {isSubmitting ? submittingLabel : submitLabel}
-      </button>
-    </form>
+      </button> : null}
+    </Container>
   );
 }
 

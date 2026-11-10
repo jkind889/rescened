@@ -18,6 +18,7 @@ const {
   isTransactionUnavailable,
 } = require("./moderation");
 
+const { queueAlbumGenreProposal } = require("../../lib/genres/albumSuggestions");
 const { approveGenreSuggestion } = require("../../lib/genres/approval");
 const { recordSuggestionStatus } = require("./notifications");
 
@@ -743,6 +744,8 @@ async function approveAlbumSubmission({
         });
       }
 
+      const linkedGenreSubmissionId = await queueAlbumGenreProposal({ submission: current, album: plain(album), submittedAt: approvedAt, session });
+
       const updated = await AlbumSubmission.findOneAndUpdate(
         { _id: current._id, submissionId, status: "pending", currentRevision: current.currentRevision },
         {
@@ -752,6 +755,7 @@ async function approveAlbumSubmission({
             duplicateOfSubmissionId: null,
             approvedAt,
             approvalPublicationType: albumId ? "catalog_linked" : "catalog_created",
+            ...(linkedGenreSubmissionId ? { linkedGenreSubmissionId } : {}),
           },
           $push: {
             moderationHistory: {
@@ -777,6 +781,9 @@ async function approveAlbumSubmission({
   } catch (error) {
     if (error instanceof ApprovalUnavailableError) throw error;
     if (isTransactionUnavailable(error)) throw new ApprovalUnavailableError();
+    if (error?.code === 11000 && Object.keys(error.keyPattern || error.keyValue || {}).includes("openGenreSuggestionKey")) {
+      throw new ModerationConflictError("The contributor already has an open genre suggestion for this album", "GENRE_SUGGESTION_EXISTS");
+    }
     if (error?.code === 11000) {
       throw new ModerationConflictError("Approval collided with an existing catalog reference; choose an explicit albumId", "EXACT_CATALOG_MATCH");
     }

@@ -188,3 +188,62 @@ test("the submission model requires genre fields and keeps sources optional only
   const correctionErrors = await validationErrors(new AlbumSubmission({ ...base, submissionType: "catalog_correction" }));
   assert.match(correctionErrors.supportingSources.message, /One to ten sources/);
 });
+
+test("album proposals validate optional genres with the shared vocabulary rules", async (t) => {
+  const { normalizeAlbumGenreProposal } = require("../lib/genres/albumSuggestions");
+  const previous = process.env.GENRES_ENABLED;
+  t.after(() => { if (previous === undefined) delete process.env.GENRES_ENABLED; else process.env.GENRES_ENABLED = previous; });
+  process.env.GENRES_ENABLED = "true";
+  const normalize = (body) => normalizeAlbumGenreProposal(body, { GenreModel });
+  assert.equal(await normalize(undefined), null);
+  const changes = await normalize({ add: [{ newGenre: { name: "Rap" } }, { newGenre: { name: "Cloud jazz", parentGenreId: jazz.genreId }, primary: true }], note: " Private context " });
+  assert.equal(changes.additions[0].genre.genreId, hipHop.genreId);
+  assert.equal(changes.additions[1].newGenre.parent.genreId, jazz.genreId);
+  assert.deepEqual(changes.primary, { genre: null, addIndex: 1 });
+  assert.equal(changes.note, "Private context");
+  for (const key of ["albumId", "remove", "primaryGenreId", "status", "targetAlbumCatalogId"]) {
+    await rejects(normalize({ add: [{ genreId: jazz.genreId }], [key]: "forged" }), /not allowed/);
+  }
+  await rejects(normalize({ add: [] }), /does not change/);
+  await rejects(normalize({ add: [{ genreId: jazz.genreId }, { newGenre: { name: "Jazz" } }] }), /repeats/);
+  await rejects(normalize({ add: [{ genreId: vaporwave.genreId }] }), /retired/, "GENRE_RETIRED");
+  await rejects(normalize({ add: [{ newGenre: { name: "<script>" } }] }), /name/);
+  await rejects(normalize({ add: ["Cloud jazz", "Space funk", "Moon disco"].map((name) => ({ newGenre: { name } })) }), /at most 2/);
+  await rejects(normalize({ add: Array(6).fill({ genreId: jazz.genreId }) }), /at most 5/);
+  await rejects(normalize({ add: [{ genreId: jazz.genreId }], note: "x".repeat(501) }), /500/);
+  process.env.GENRES_ENABLED = "false";
+  await rejects(normalize({ add: [{ genreId: jazz.genreId }] }), /disabled/, "GENRES_DISABLED");
+  assert.equal(await normalize(undefined), null);
+});
+
+test("album proposal serialization preserves private genre snapshots and public linked IDs", () => {
+  const { snapshotForSubmission, serializeApprovedFeedItem } = require("../routes/utils/submissions");
+  const genreChanges = { additions: [{ genre: { genreId: jazz.genreId, name: jazz.name, slug: jazz.slug, _id: jazz._id } }], removals: [], primary: null, note: "Private moderator note" };
+  const source = { submissionType: "new_album", genreChanges, sourceAlbumSubmissionId: crypto.randomUUID(), linkedGenreSubmissionId: crypto.randomUUID() };
+  const snapshot = snapshotForSubmission(source, { fingerprint: "f".repeat(64), duplicateSignals: [] }, new Date(), 1);
+  assert.deepEqual(snapshot.genreChanges, genreChanges);
+  const serialized = serializeSubmission({ ...source, revisions: [snapshot] }, { detail: true });
+  assert.equal(serialized.proposedGenres.note, genreChanges.note);
+  assert.equal(serialized.revisions[0].proposedGenres.add[0].genre.genreId, jazz.genreId);
+  assert.equal(serialized.linkedGenreSubmissionId, source.linkedGenreSubmissionId);
+  assert.equal("_id" in serialized.proposedGenres.add[0].genre, false);
+  const feed = serializeApprovedFeedItem({ ...source, submissionId: crypto.randomUUID(), status: "approved", approvedAt: new Date(), approvalPublicationType: "catalog_created", approvedAlbumCatalogId: { albumId: crypto.randomUUID(), title: "Album", artistDisplayName: "Artist" } });
+  assert.equal("proposedGenres" in feed, false);
+  assert.equal("linkedGenreSubmissionId" in feed, false);
+  assert.equal(JSON.stringify(feed).includes("Private moderator note"), false);
+});
+
+test("new-name quota persistence fails closed without transactions but leaves existing-genre writes lightweight", async (t) => {
+  const AccountFence = require("../models/AccountFence");
+  const { withNewGenreAllowance } = require("../lib/genres/suggestions");
+  let writes = 0;
+  const operation = async (session) => { assert.equal(session, null); writes += 1; return "saved"; };
+  assert.equal(await withNewGenreAllowance("user", { genreChanges: { additions: [{ genre: { genreId: jazz.genreId } }] } }, operation), "saved");
+  t.mock.method(AccountFence, "init", async () => {});
+  t.mock.method(mongoose, "startSession", async () => ({
+    withTransaction: async () => { throw Object.assign(new Error("Transaction numbers are only allowed on a replica set"), { code: 20 }); },
+    endSession: async () => {},
+  }));
+  await assert.rejects(withNewGenreAllowance("user", { genreChanges: { additions: [{ newGenre: { name: "Cloud scene" } }] } }, operation), (error) => error.status === 503 && error.code === "GENRE_SUBMISSION_UNAVAILABLE");
+  assert.equal(writes, 1, "the new-name proposal has no non-transactional write fallback");
+});

@@ -30,12 +30,13 @@ const {
 } = require("./utils/rateLimit");
 const { isGenresEnabled } = require("./utils/serverConfig");
 const {
-  assertNewGenreAllowance,
+  withNewGenreAllowance,
   genreSuggestionFields,
   genreSuggestionSnapshot,
   normalizeGenreSuggestion,
   openGenreSuggestionKey,
 } = require("../lib/genres/suggestions");
+const { normalizeAlbumGenreProposal } = require("../lib/genres/albumSuggestions");
 const { buildSearchPattern } = require("./utils/catalogSearch");
 
 const router = express.Router();
@@ -71,6 +72,7 @@ function sendRouteError(res, error, fallback) {
   if (error?.name === "ValidationError" || error?.name === "CastError") {
     return res.status(400).json({ error: "Submission data is invalid", code: "INVALID_SUBMISSION" });
   }
+  if (["GENRES_DISABLED", "GENRE_SUBMISSION_UNAVAILABLE"].includes(error?.code)) return res.status(503).json({ error: error.message, code: error.code });
   if (error?.status && error.status >= 400 && error.status < 500) {
     return res.status(error.status).json({ error: error.message, code: error.code });
   }
@@ -109,6 +111,7 @@ async function findSubmission(query) {
 function submissionUpdate(payload, duplicate, revision, status) {
   return {
     proposedMetadata: payload.proposedMetadata,
+    genreChanges: payload.genreChanges || null,
     supportingSources: payload.supportingSources,
     externalReferences: payload.externalReferences,
     normalizedFingerprint: duplicate.fingerprint,
@@ -143,19 +146,26 @@ async function queryResult(query) {
   return query && typeof query.exec === "function" ? query.exec() : query;
 }
 
+async function createSubmission(data, session) {
+  if (!session) return AlbumSubmission.create(data);
+  const [submission] = await AlbumSubmission.create([data], { session });
+  return submission;
+}
+
 router.post("/", auth, submissionsEnabled, submissionCreateRateLimit, async (req, res) => {
   try {
     const payload = normalizeSubmissionPayload(req.body);
+    payload.genreChanges = await normalizeAlbumGenreProposal(payload.proposedGenres);
     const duplicate = await findDuplicateSignals(payload);
     const submittedAt = new Date();
     const snapshot = snapshotForSubmission(payload, duplicate, submittedAt, 1);
-    const submission = await AlbumSubmission.create({
+    const submission = await withNewGenreAllowance(req.userId, payload, (session) => createSubmission({
       submittedByUserId: req.userId,
       submissionType: "new_album",
       ...submissionUpdate(payload, duplicate, 1, "pending"),
       revisions: [snapshot],
       moderationHistory: [{ actorUserId: req.userId, action: "submitted", reason: "", createdAt: submittedAt }],
-    });
+    }, session));
     return res.status(201).json(serializeSubmission(submission, { detail: true }));
   } catch (error) {
     return sendRouteError(res, error, "Failed to create suggestion");
@@ -194,15 +204,14 @@ router.post("/genres", auth, submissionsEnabled, genresEnabled, genreSuggestionR
     const open = await queryResult(AlbumSubmission.findOne({ openGenreSuggestionKey: key }).select("submissionId"));
     if (open) return genreSuggestionExists(res, open.submissionId);
     const payload = await normalizeGenreSuggestion(req.body, album);
-    await assertNewGenreAllowance(req.userId, payload);
     const submittedAt = new Date();
-    const submission = await AlbumSubmission.create({
+    const submission = await withNewGenreAllowance(req.userId, payload, (session) => createSubmission({
       submittedByUserId: req.userId,
       ...genreSuggestionFields(payload, 1, "pending"),
       openGenreSuggestionKey: key,
       revisions: [genreSuggestionSnapshot(payload, submittedAt, 1)],
       moderationHistory: [{ actorUserId: req.userId, action: "submitted", reason: "", createdAt: submittedAt }],
-    });
+    }, session));
     return res.status(201).json({
       ...serializeSubmission({ ...plain(submission), targetAlbumCatalogId: album }, { detail: true }),
       resolvedNewGenres: payload.resolvedNewGenres,
@@ -339,6 +348,7 @@ router.post("/:submissionId/revise", auth, submissionsEnabled, submissionMutatio
     const revision = current.currentRevision + 1;
     const submittedAt = new Date();
     let update;
+    let genreAllowancePayload = null;
     if (current.submissionType === "genre_suggestion") {
       if (!isGenresEnabled()) return res.status(503).json({ error: "Genres are currently disabled", code: "GENRES_DISABLED" });
       const targetId = plain(current.targetAlbumCatalogId)?._id || current.targetAlbumCatalogId;
@@ -346,7 +356,7 @@ router.post("/:submissionId/revise", auth, submissionsEnabled, submissionMutatio
       if (!target) return res.status(409).json({ error: "The suggestion's album is no longer available", code: "CATALOG_TARGET_MISSING" });
       const body = { ...(req.body || {}), albumId: req.body?.albumId || plain(target).albumId };
       const payload = await normalizeGenreSuggestion(body, target);
-      await assertNewGenreAllowance(req.userId, payload, { excludeSubmissionId: current._id });
+      genreAllowancePayload = payload;
       update = {
         $set: genreSuggestionFields(payload, revision, "pending"),
         $push: {
@@ -369,6 +379,8 @@ router.post("/:submissionId/revise", auth, submissionsEnabled, submissionMutatio
       };
     } else {
       const payload = normalizeSubmissionPayload(req.body);
+      payload.genreChanges = await normalizeAlbumGenreProposal(payload.proposedGenres);
+      genreAllowancePayload = payload;
       const duplicate = await findDuplicateSignals(payload, { excludeSubmissionId: current._id });
       const snapshot = snapshotForSubmission(payload, duplicate, submittedAt, revision);
       update = {
@@ -379,11 +391,11 @@ router.post("/:submissionId/revise", auth, submissionsEnabled, submissionMutatio
         },
       };
     }
-    const updated = await AlbumSubmission.findOneAndUpdate(
+    const updated = await withNewGenreAllowance(req.userId, genreAllowancePayload, (session) => AlbumSubmission.findOneAndUpdate(
       { submissionId: req.params.submissionId, submittedByUserId: req.userId, status: "needs_changes", currentRevision: current.currentRevision },
       update,
-      { returnDocument: "after", runValidators: true },
-    );
+      { returnDocument: "after", runValidators: true, ...(session ? { session } : {}) },
+    ), { excludeSubmissionId: current._id });
     if (!updated) return res.status(409).json({ error: "Suggestion changed while it was being revised", code: "REVISION_CONFLICT" });
     const responseSubmission = ["catalog_correction", "genre_suggestion"].includes(current.submissionType)
       ? await findSubmission({ submissionId: req.params.submissionId })

@@ -227,8 +227,9 @@ function normalizeSources(value) {
 
 function normalizeSubmissionPayload(body) {
   assertRecord(body, "request body");
-  assertKeys(body, new Set(["proposedMetadata", "supportingSources", "externalReferences"]), "request body");
+  assertKeys(body, new Set(["proposedMetadata", "supportingSources", "externalReferences", "proposedGenres"]), "request body");
   return {
+    ...(body.proposedGenres !== undefined ? { proposedGenres: body.proposedGenres } : {}),
     proposedMetadata: normalizeMetadata(body.proposedMetadata),
     supportingSources: normalizeSources(body.supportingSources),
     externalReferences: normalizeExternalReferences(body.externalReferences),
@@ -630,6 +631,7 @@ function snapshotForSubmission(payload, duplicate, submittedAt, revision) {
     submittedAt,
     submissionType: "new_album",
     proposedMetadata: payload.proposedMetadata,
+    genreChanges: payload.genreChanges || null,
     supportingSources: payload.supportingSources,
     externalReferences: payload.externalReferences,
     normalizedFingerprint: duplicate.fingerprint,
@@ -680,6 +682,9 @@ function publicSnapshot(value) {
     externalReferences: source.externalReferences || [],
     candidateAlbumId: publicAlbumId(source.candidateAlbumCatalogId) || undefined,
   };
+  if (result.submissionType === "new_album" && source.genreChanges) {
+    result.proposedGenres = publicGenreChanges(source.genreChanges);
+  }
   if (result.submissionType === "catalog_correction") {
     result.targetAlbumId = publicAlbumId(source.targetAlbumCatalogId) || undefined;
     result.baseCatalogRevision = source.baseCatalogRevision;
@@ -722,6 +727,11 @@ function serializeSubmission(value, { detail = false, moderator = false } = {}) 
     createdAt: source.createdAt,
     updatedAt: source.updatedAt,
   };
+  if (submissionType === "new_album" && source.genreChanges) {
+    result.proposedGenres = publicGenreChanges(source.genreChanges);
+  }
+  if (source.linkedGenreSubmissionId) result.linkedGenreSubmissionId = source.linkedGenreSubmissionId;
+  if (source.sourceAlbumSubmissionId) result.sourceAlbumSubmissionId = source.sourceAlbumSubmissionId;
   if (submissionType === "catalog_correction") {
     result.baseCatalogRevision = source.baseCatalogRevision;
     result.baseValues = source.baseValues || {};

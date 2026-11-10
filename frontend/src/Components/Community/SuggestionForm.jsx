@@ -4,6 +4,8 @@ import {
   SOURCE_TYPE_OPTIONS,
 } from "../../features/community/community";
 import { clearDraft, readDraft, useDraftAutosave } from "../../features/community/drafts.js";
+import GenreSuggestionForm from "./GenreSuggestionForm";
+import { albumGenreChanges, buildAlbumGenreProposal, initialGenreForm } from "../../features/community/genres.js";
 import DraftNotice from "./DraftNotice";
 
 const MAX_ARTISTS = 20;
@@ -97,6 +99,7 @@ function createDraft(initialValue) {
       coverSourceUrl: stringValue(metadata.coverSourceUrl),
       tracks,
     },
+    proposedGenres: source.proposedGenres || null,
     supportingSources: sources,
     externalReferences: references,
   };
@@ -258,7 +261,9 @@ function buildPayload(draft) {
     proposedMetadata.releaseDatePrecision = parsedDate.precision;
   }
 
+  const proposedGenres = buildAlbumGenreProposal(draft.proposedGenres);
   return {
+    ...(proposedGenres ? { proposedGenres } : {}),
     proposedMetadata,
     supportingSources: draft.supportingSources.map((source) => ({
       type: source.type,
@@ -326,6 +331,7 @@ export function SuggestionForm({
 }) {
   const generatedId = useId();
   const [storedDraft] = useState(() => readDraft(draftKey));
+  const [genreFormGeneration, setGenreFormGeneration] = useState(0);
   const [restoredAt, setRestoredAt] = useState(storedDraft?.savedAt || null);
   // Stored drafts are normalized through the same path as server records.
   const [draft, setDraft] = useState(() => createDraft(storedDraft?.value || initialValue));
@@ -445,6 +451,7 @@ export function SuggestionForm({
 
   function discardDraft() {
     clearDraft(draftKey);
+    setGenreFormGeneration((current) => current + 1);
     setDraft(createDraft(initialValue));
     setValidationErrors([]);
     setRestoredAt(null);
@@ -453,6 +460,9 @@ export function SuggestionForm({
   async function handleSubmit(event) {
     event.preventDefault();
     const errors = validateDraft(draft);
+    if (draft.proposedGenres?.note?.trim() && !draft.proposedGenres?.add?.length) {
+      errors.push("Choose a genre for your moderator note, or clear the note to submit without genres.");
+    }
     setValidationErrors(errors);
 
     if (errors.length || controlsDisabled || typeof onSubmit !== "function") {
@@ -489,6 +499,7 @@ export function SuggestionForm({
         <a href={`#${idPrefix}-sources`}><span>03</span> Evidence</a>
         <a href={`#${idPrefix}-references`}><span>04</span> IDs</a>
         <a href={`#${idPrefix}-tracks`}><span>05</span> Tracks</a>
+        <a href={`#${idPrefix}-genres`}><span>06</span> Genres</a>
       </nav>
 
       <div className="suggestion-form-layout">
@@ -933,6 +944,22 @@ export function SuggestionForm({
             + Add track
           </button>
         </section>
+        <section className="suggestion-form-section" id={`${idPrefix}-genres`} aria-labelledby={`${idPrefix}-genres-heading`}>
+          <SectionHeading
+            eyebrow="06 / Genres"
+            title="Suggest genres"
+            description="Optional. Choose existing genres or propose a new name while you're here. After the album is approved, these choices go to genre review. Nothing is applied automatically."
+            headingId={`${idPrefix}-genres-heading`}
+          />
+          <GenreSuggestionForm
+            key={genreFormGeneration}
+            embedded
+            currentGenres={[]}
+            value={initialGenreForm([], draft.proposedGenres)}
+            onChange={(form) => setDraft((current) => ({ ...current, proposedGenres: albumGenreChanges(form) }))}
+            isSubmitting={controlsDisabled}
+          />
+        </section>
         </fieldset>
 
         <aside className="suggestion-form-summary" aria-labelledby={`${idPrefix}-summary-heading`}>
@@ -955,6 +982,10 @@ export function SuggestionForm({
             <div>
               <dt>External IDs</dt>
               <dd>{draft.externalReferences.length}</dd>
+            </div>
+            <div>
+              <dt>Genres</dt>
+              <dd>{draft.proposedGenres?.add?.length ? `${draft.proposedGenres.add.length} for separate review` : "Not added"}</dd>
             </div>
             <div>
               <dt>Tracks</dt>

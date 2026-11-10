@@ -36,7 +36,7 @@ function GenreChangesBlock({ changes, baseGenres, compact = false }) {
 
   return (
     <div className={`genre-changes${compact ? " genre-changes-compact" : ""}`}>
-      <p className="genre-form-muted">When suggested: {genreNames(baseGenres) || "no genres"}</p>
+      {baseGenres ? <p className="genre-form-muted">When suggested: {genreNames(baseGenres) || "no genres"}</p> : null}
       <ul className="genre-change-list">
         {add.map((entry, index) => (
           <li className="genre-change-add" key={`add-${index}`}>
@@ -384,6 +384,7 @@ function RevisionHistory({ revisions, headingLevel = 3 }) {
               ) : (
                 <>
                   <MetadataBlock metadata={revision.proposedMetadata} compact headingLevel={nestedHeadingLevel} />
+                  {revision.proposedGenres ? <GenreChangesBlock changes={revision.proposedGenres} compact /> : null}
                   <EvidenceBlock
                     supportingSources={revision.supportingSources}
                     externalReferences={revision.externalReferences}
@@ -501,6 +502,22 @@ export function SubmissionDetails({
           <strong className="suggestion-detail-notice-title">Duplicate check flagged this suggestion.</strong>
           <p className="suggestion-detail-notice-copy">This is advisory and does not prevent moderator review.</p>
         </div>
+      ) : null}
+
+      {submission.sourceAlbumSubmissionId ? <p className="suggestion-detail-note">Submitted with an <Link to={`${showContributor ? "/moderation/album-suggestions" : "/suggestions"}/${submission.sourceAlbumSubmissionId}`}>album proposal</Link>. These genres still need their own moderator decision.</p> : null}
+
+      {submission.proposedGenres ? (
+        <section className="suggestion-detail-section">
+          <div className="suggestion-detail-section-heading">
+            <SectionHeadingTag className="suggestion-detail-section-title">Suggested genres</SectionHeadingTag>
+          </div>
+          <GenreChangesBlock changes={submission.proposedGenres} />
+          <p className="suggestion-detail-note">
+            {submission.linkedGenreSubmissionId
+              ? <Link to={`${showContributor ? "/moderation/album-suggestions" : "/suggestions"}/${submission.linkedGenreSubmissionId}`}>Open the separate genre review</Link>
+              : "These choices go to a separate genre review if the album is approved. Album approval alone does not apply them."}
+          </p>
+        </section>
       ) : null}
 
       <CorrectionDiffBlock submission={submission} headingLevel={sectionHeadingLevel} />
