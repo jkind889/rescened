@@ -1,7 +1,7 @@
 import { API_BASE_URL } from "../../config/api";
 import { getApiErrorMessage } from "../../utils/apiErrors";
 
-export const MAX_REVIEW_LENGTH = 300;
+export { MAX_REVIEW_LENGTH } from "./reviewDrafts";
 
 export async function updateReview(token, reviewId, { rating, reviewText }) {
   const response = await fetch(`${API_BASE_URL}/reviews/review/user/${encodeURIComponent(reviewId)}`, {

@@ -330,8 +330,8 @@ Correction approval now writes provenance as dotted `fieldProvenance.<field>` pa
 The frontend treats an `album.genres` array on album detail as the signal that genres are enabled. When the field is absent, no genre UI appears. Shared logic (previews, payloads, and decision bodies) is in `frontend/src/features/community/genres.js`, and the styles are in `Components/Community/GenreSuggestion.css`.
 
 - **Album page:**
-  - The Genres tab contains the genre chips (primary genre filled), the suggestion action, and any pending/revision notice. Each chip links to `/genre/:slug`; untagged albums show “No genres yet.” The tab is absent when genres are disabled.
-  - Signed-in users get a "Suggest genres" action inside that tab; signed-out users get the sign-in prompt. The album tab bar supports Left/Right, Home/End, and Tab keyboard navigation, including on the album reviews route.
+  - The album header shows genre chips below the release metadata, with the primary genre filled and identified for screen readers. Each chip links to `/genre/:slug`; untagged albums show “No genres yet.” Genres stay visible when changing album tabs and on the reviews route. The entire section is absent when genres are disabled.
+  - Signed-in users get a compact "Suggest genres" link next to the genre heading; signed-out users get the sign-in prompt. The album tab bar supports Left/Right, Home/End, and Tab keyboard navigation, including on the album reviews route.
   - If the viewer has an open genre suggestion for the album (`GET /suggestions/genres/open`), the action is hidden. A note links to the suggestion, or to "Revise it" when a moderator asked for changes.
 - **Suggestion form:** `/suggestions/genres/:albumId`, and `/suggestions/:submissionId/revise` for a genre suggestion, both use `GenreSuggestionForm`. A contributor can:
   - mark current genres for removal
@@ -368,3 +368,29 @@ The frontend treats an `album.genres` array on album detail as the signal that g
 
 - `tests/genres.test.js` covers name rules, the album model's limits, dataset validation and checksums, seed planning, CLI argument rules, and the disabled flag.
 - `tests/genres.integration.test.js` (in `npm run test:integration`) covers dry run versus apply, checksum enforcement, idempotent re-runs, conflict rollback, search, detail, alias slugs, retired genres, and album detail.
+
+## Genres in an album proposal
+
+The new-album form (including MusicBrainz-prefilled records and requested revisions) includes an optional genre section. Contributors can search existing genres, propose up to two new names, choose a broader genre for a new name, select the primary genre, and add a private moderator note. Up to five genres can be proposed. The existing per-user browser draft also stores these choices; restoring or discarding the album draft includes the genres.
+
+`POST /suggestions` and a new album's `POST /suggestions/:submissionId/revise` accept an optional `proposedGenres` object:
+
+```json
+{
+  "proposedGenres": {
+    "add": [
+      { "genreId": "<public genre UUID>" },
+      { "newGenre": { "name": "Cloud jazz", "parentGenreId": "<public top-level genre UUID>" }, "primary": true }
+    ],
+    "note": "Optional private explanation, up to 500 characters"
+  }
+}
+```
+
+Only `add` and `note` are allowed within `proposedGenres`; the additions use the existing genre suggestion validation. Names and aliases are matched to existing active genres before saving, and invalid or retired references, duplicate choices, multiple primary choices, and unknown fields are rejected. Omit the field (or use `null`) to submit without genres. The feature flag is required only when optional genres are supplied, so a contributor can remove them and still submit an album when genres are disabled. Proposed new names count toward the shared ten-open-name allowance across both album and genre suggestions. Requests that add new names claim the existing hashed account fence, count open names, and persist the proposal in one MongoDB transaction. This serializes concurrent album/genre creates and revisions across app processes; a rejected request saves neither a new revision nor an extra proposal. First-ever concurrent account claims are retried once if their fence upserts collide. Replica-set or sharded MongoDB is therefore required for new-name proposals (`503 GENRE_SUBMISSION_UNAVAILABLE` without transactions); existing-genre-only and genre-free submissions keep their previous lightweight write path.
+
+The normalized operations are stored privately as `genreChanges` on the album submission and each append-only revision. Owner/moderator responses expose public snapshots as `proposedGenres`; public approved feeds never expose the proposal or its note.
+
+Album approval does **not** publish those genres or create vocabulary entries. In the same transaction as catalog creation (or linking), approval creates one pending `genre_suggestion` targeting the resulting catalog album. The album submission's `linkedGenreSubmissionId` and the genre submission's `sourceAlbumSubmissionId` are server-owned public UUID links. The details pages link the records, and the existing genre queue supports approve/map/skip/request-changes/reject as usual. Bulk album approval follows the same handoff. Repeated or concurrent album approvals create only one linked review; failures roll back publication and the review together. If genres are later switched off, already-stored proposals can still be queued privately for review when the feature returns.
+
+When linking an album proposal to an existing catalog album, an already-open genre suggestion from the same contributor returns `409 GENRE_SUGGESTION_EXISTS` and leaves both records unchanged. The moderator must request that the contributor remove the optional genres from the album revision or withdraw their existing genre suggestion. No proposal is silently merged or overwritten. Genre choices on a rejected, withdrawn, or duplicate-marked album proposal remain private and are not queued.

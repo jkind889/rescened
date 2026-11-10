@@ -76,3 +76,39 @@ Deleting a board deletes its order with it.
 - `tests/boardDetailPage.test.js`: metadata snapshot/revision coupling, dirty-draft protection, delayed writes and refreshes, listen-modal gating, repeated saves, navigation, and conflict recovery failures/retries. These execute the real page handlers; rendered controls and mouse dragging are checked separately in browser QA.
 - `tests/boardPublicIdContract.test.js`: ordered reads without catalog IDs, reorder validation before any claim, and the stale-revision `409`.
 - `tests/boardOrder.integration.test.js` (replica set): switching and reordering, a remove racing a reorder, two concurrent reorders, the saved-shelf union, board deletion, listen links, the limit on switching, a board growing past the limit, and public reads without Mongo IDs.
+
+## Notes on board albums
+
+Each visible album can have one optional note for this board, including albums
+present only through linked diary listens. Notes are separate from album reviews
+and individual listens. The owner edits them inline in grid or list view with an
+explicit Save/Cancel action. Other viewers see the plain text whenever the
+profile's existing privacy rules allow them to read the board.
+
+`PATCH /boards/:boardId/albums/:albumId/note` accepts exactly `{ note, revision }`.
+`boardId` and `albumId` are public UUIDs; the owner's `default` alias also works.
+The note is normalized to NFC, whitespace is collapsed to a single space, and
+leading/trailing whitespace is removed. The limit is 100 Unicode grapheme
+clusters, counted identically in client/server helpers; emoji and combining
+characters do not consume their UTF-16 code-unit length. Blank text clears it.
+Invalid text/revisions return `400 INVALID_BOARD_NOTE`. Unknown fields use the
+existing request-validation error. Non-owners cannot mutate the board.
+
+Notes use `BoardItemNote`, uniquely keyed by internal board/catalog-album IDs.
+They never create membership, change saved dates/order, or make a listen-only
+album explicitly saved. The transaction claims the board at the submitted
+revision, verifies live membership, writes the note, and returns the complete
+board plus its revision from the same snapshot. Stale edits return
+`409 BOARD_CHANGED`; the UI refreshes while keeping the draft for review and an
+explicit retry. Missing membership returns `404 BOARD_ITEM_NOT_FOUND`.
+
+Removing an album clears its note. Detaching/deleting the last linked listen
+also clears it unless an explicit save remains. Board/account deletion removes
+notes transactionally. Re-adding an album does not restore an old note. Notes
+are loaded only for live memberships in bounded batches, and are excluded from
+the cross-board saved shelf and board preview album metadata.
+
+Existing records need no data backfill: a missing note is returned as an empty
+string. Startup initializes the new collection/index before serving writes.
+Board CSV/JSON exports include the per-album `note` field, with the existing CSV
+formula protection. See [data export](DATA_EXPORT.md).

@@ -6,6 +6,7 @@ const Like = require("../../models/Like");
 const { normalizeCatalogAlbum } = require("./albumCatalog");
 const { persistedReviewId } = require("./reviewInteractions");
 const { getListenActivity } = require("./listenActivity");
+const { getSuggestionActivity } = require("./suggestionActivity");
 const { getRankingActivity } = require("./trackRankings");
 const { commentCounts } = require("../../lib/reviewComments/read");
 
@@ -84,11 +85,12 @@ async function getNetworkActivity(viewerId, getAuthors) {
   if (visibleIds.length === 0) return [];
 
   // Fetch bounded candidates across all visible accounts for each event type.
-  const [reviews, listens, rankings, commentActivities] = await Promise.all([
+  const [reviews, listens, rankings, commentActivities, suggestionActivities] = await Promise.all([
     Review.aggregate(buildNetworkReviewsPipeline(visibleIds, viewerId)),
     getListenActivity(visibleIds, NETWORK_ACTIVITY_LIMIT),
     getRankingActivity(visibleIds, NETWORK_ACTIVITY_LIMIT),
     getCommentActivity(visibleIds, NETWORK_ACTIVITY_LIMIT, getAuthors),
+    getSuggestionActivity(visibleIds, NETWORK_ACTIVITY_LIMIT),
   ]);
   const comments = await commentCounts(reviews.map((review) => review._id));
   const reviewActivities = reviews.map((review) => {
@@ -109,7 +111,7 @@ async function getNetworkActivity(viewerId, getAuthors) {
     };
   });
   // Stable ties preserve each query's internal ordering, with reviews first.
-  const activities = [...reviewActivities, ...listens, ...rankings, ...commentActivities]
+  const activities = [...reviewActivities, ...listens, ...rankings, ...commentActivities, ...suggestionActivities]
     .sort(compareActivity)
     .slice(0, NETWORK_ACTIVITY_LIMIT);
   if (activities.length === 0) return [];

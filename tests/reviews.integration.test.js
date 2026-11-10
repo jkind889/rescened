@@ -504,3 +504,78 @@ test("an edit racing deletion or account anonymization never resurrects or rewri
   assert.equal(stored.reviewText, "racer review");
   assert.equal(stored.editedAt, null);
 });
+
+test("profile search finds older album and artist matches before pagination in every sort", { skip: !enabled }, async (t) => {
+  const owner = "search-owner";
+  const album = await createAlbum("Search (Live).* Album");
+  await AlbumCatalog.updateOne({ _id: album._id }, { $set: { artistDisplayName: "The Search Artist", artistCredits: [{ name: "Guest Search Credit", role: "guest" }] } });
+  const unrelated = await createAlbum("Search fixture unrelated");
+  const missing = await createAlbum("Search (Live).* Missing");
+  const matching = [];
+  for (let i = 0; i < 5; i += 1) matching.push(await createReview(album, owner, i + 1, new Date(`2026-01-0${i + 1}T00:00:00Z`)));
+  for (let i = 0; i < 22; i += 1) await createReview(unrelated, owner, 3, new Date("2026-02-01T00:00:00Z"));
+  await createReview(album, "search-other-owner", 5, new Date());
+  await createReview(missing, owner, 5, new Date());
+  await AlbumCatalog.deleteOne({ _id: missing._id });
+  await UserProfile.create({ userId: owner, isPrivate: true });
+  await Like.create({ userId: "search-liker", targetType: "review", reviewId: matching[0]._id });
+  const request = reviewFeedClient(t, owner);
+
+  for (const sort of ["recent", "popular", "highest", "lowest"]) {
+    const results = [];
+    let cursor;
+    do {
+      const page = await request("/review/user/", {}, { q: "  sEArCh   (LIVE).* ", sort, limit: "2", ...(cursor ? { cursor } : {}) });
+      assert.equal(page.status, 200);
+      assert.ok(page.reviews.length <= 2);
+      results.push(...page.reviews);
+      cursor = page.nextCursor;
+      if (cursor) {
+        const changed = await request("/review/user/", {}, { q: "other query", sort, cursor });
+        assert.equal(changed.status, 400);
+        assert.equal(changed.code, "INVALID_REVIEW_CURSOR");
+      }
+      assert.ok(results.length <= 5, "pagination must terminate without repeats");
+    } while (cursor);
+    assert.equal(results.length, 5);
+    assert.equal(new Set(results.map((review) => review.reviewId)).size, 5);
+    assert.ok(results.every((review) => review.userId === owner && review.albumId === album.albumId && review._id === undefined && review.albumCatalogId === undefined));
+    const expected = sort === "lowest" ? [1, 2, 3, 4, 5] : sort === "popular" ? [1, 5, 4, 3, 2] : [5, 4, 3, 2, 1];
+    assert.deepEqual(results.map((review) => review.rating), expected);
+  }
+
+  const anonymous = reviewFeedClient(t, "");
+  for (const q of ["THE SEARCH ARTIST", "guest search credit"]) {
+    const page = await anonymous("/review/user/:userId", { userId: owner }, { q });
+    assert.equal(page.status, 200, "private profiles still expose their public reviews");
+    assert.equal(page.reviews.length, 5);
+  }
+  assert.equal((await request("/review/user/", {}, { q: "no-such-title" })).reviews.length, 0);
+  assert.equal((await request("/review/user/", {}, { q: "x".repeat(201) })).code, "INVALID_REVIEW_SEARCH");
+  assert.equal((await request("/review/user/", {}, { q: ["a", "b"] })).code, "INVALID_REVIEW_SEARCH");
+  assert.equal((await anonymous("/review/user/:userId", { userId: Review.DELETED_AUTHOR_ID }, { q: "search" })).reviews.length, 0);
+  const normal = await request("/review/user/", {}, {});
+  const blank = await request("/review/user/", {}, { q: "   " });
+  assert.deepEqual(blank.reviews.map((review) => review.reviewId), normal.reviews.map((review) => review.reviewId));
+  await AlbumCatalog.updateOne({ _id: album._id }, { $set: { title: "Corrected catalog title" } });
+  assert.equal((await request("/review/user/", {}, { q: "search (live).*" })).reviews.length, 0);
+  assert.equal((await request("/review/user/", {}, { q: "corrected catalog title" })).reviews.length, 5);
+});
+
+test("profile search preserves exact Unicode letters without case-fold length expansion", { skip: !enabled }, async (t) => {
+  const owner = "unicode-search-owner";
+  const city = await createAlbum("İstanbul");
+  const longTitle = await createAlbum("İ".repeat(101));
+  const nbsp = await createAlbum("Whitespace\u00a0City");
+  const wideSpace = await createAlbum("Whitespace\u3000Village");
+  await createReview(city, owner, 4, new Date());
+  await createReview(longTitle, owner, 3, new Date());
+  await createReview(nbsp, owner, 2, new Date());
+  await createReview(wideSpace, owner, 1, new Date());
+  const request = reviewFeedClient(t, owner);
+  for (const [q, album] of [["İstanbul", city], ["İ".repeat(101), longTitle], ["Whitespace\u00a0City", nbsp], ["Whitespace City", nbsp], ["Whitespace\u3000Village", wideSpace], ["Whitespace Village", wideSpace]]) {
+    const page = await request("/review/user/", {}, { q });
+    assert.equal(page.status, 200);
+    assert.deepEqual(page.reviews.map((review) => review.albumId), [album.albumId]);
+  }
+});

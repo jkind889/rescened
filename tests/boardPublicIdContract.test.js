@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const Board = require("../models/Board");
 const BoardItem = require("../models/BoardItem");
+const BoardItemNote = require("../models/BoardItemNote");
 const BoardListen = require("../models/BoardListen");
 const Follow = require("../models/Follow");
 const Listen = require("../models/Listen");
@@ -336,10 +337,27 @@ test("board descriptions are optional, normalized, bounded, and patchable on the
   await invokeLastHandler(router, "/", "post", { userId: "owner", body: { title: "No description" } });
   assert.equal(created.description, "");
 
-  for (const description of ["x".repeat(281), 42]) {
+  for (const description of ["x".repeat(501), 42]) {
     const rejected = await invokeLastHandler(router, "/", "post", { userId: "owner", body: { title: "Too much", description } });
     assert.equal(rejected.status, 400);
     assert.equal(rejected.body.code, "INVALID_BOARD_DESCRIPTION");
+  }
+
+  for (const [path, method, status] of [["/", "post", 201], ["/:boardId", "patch", 200]]) {
+    const accepted = await invokeLastHandler(router, path, method, {
+      userId: "owner", params: { boardId: BOARD_ID },
+      body: { ...(method === "post" ? { title: "Long description" } : {}), description: "x".repeat(500) },
+    });
+    assert.equal(accepted.status, status);
+    assert.equal(accepted.body.description, "x".repeat(500));
+
+    const rejected = await invokeLastHandler(router, path, method, {
+      userId: "owner", params: { boardId: BOARD_ID },
+      body: { ...(method === "post" ? { title: "Too long" } : {}), description: "x".repeat(501) },
+    });
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.body.code, "INVALID_BOARD_DESCRIPTION");
+    assert.equal(rejected.body.error, "Board description must be 500 characters or fewer");
   }
 
   const patched = await invokeLastHandler(router, "/:boardId", "patch", {
@@ -483,4 +501,17 @@ test("a reorder at a stale revision returns 409 BOARD_CHANGED without writing", 
   await invokeLastHandler(router, "/:boardId/order", "put", { userId: "owner", params: { boardId: BOARD_ID }, body: { albumIds: [ALBUM_ID], revision: 0 } });
   assert.deepEqual(claims[1].interactionRevision, { $in: [0, null] }, "a never-claimed board has no stored revision");
   assert.equal(write.mock.callCount(), 0);
+});
+
+test("board model accepts 500 description characters and rejects 501", () => {
+  const board = new Board({ userId: "owner", title: "Long description", description: "x".repeat(500) });
+  assert.equal(board.validateSync(), undefined);
+  board.description = "x".repeat(501);
+  assert.equal(board.validateSync()?.errors.description.kind, "maxlength");
+});
+
+// Notes are empty in these pre-existing board fixtures.
+test.beforeEach((t) => {
+  t.mock.method(BoardItemNote, "find", () => ({ lean: async () => [] }));
+  t.mock.method(BoardItemNote, "deleteMany", async () => ({}));
 });

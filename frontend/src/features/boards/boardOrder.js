@@ -62,3 +62,8 @@ export function saveBoardOrder(getToken, board, albumIds) {
 export function saveBoardSettings(getToken, board, settings) {
   return boardWrite(getToken, board.boardId, "PATCH", settings, "Could not update how this board is ordered.");
 }
+
+// Notes return the full board and revision from the write's transaction snapshot.
+export function saveBoardNote(getToken, board, albumId, note) {
+  return boardWrite(getToken, `${board.boardId}/albums/${albumId}/note`, "PATCH", { note, revision: board.revision }, "Could not save this note.");
+}

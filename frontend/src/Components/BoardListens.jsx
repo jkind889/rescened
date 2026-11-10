@@ -15,6 +15,7 @@ export default function BoardListens({ album, boardId, userId, onClose, onChange
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const requestRef = useRef(null);
+  const mutationRef = useRef(false);
   const dialogRef = useRef(null);
 
   const load = useCallback(async (nextCursor = null) => {
@@ -26,7 +27,7 @@ export default function BoardListens({ album, boardId, userId, onClose, onChange
     try {
       const token = isSignedIn ? await getToken() : null;
       const base = mode === "diary"
-        ? `${API_BASE_URL}/diary?albumId=${album.albumId}`
+        ? `${API_BASE_URL}/diary?albumId=${album.albumId}&membershipBoardId=${encodeURIComponent(boardId)}`
         : `${API_BASE_URL}${readOnly ? `/profile/${encodeURIComponent(userId)}` : ""}/boards/${boardId}/albums/${album.albumId}/listens?limit=20`;
       const response = await fetch(`${base}${nextCursor ? `&cursor=${encodeURIComponent(nextCursor)}` : ""}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: controller.signal,
@@ -65,7 +66,9 @@ export default function BoardListens({ album, boardId, userId, onClose, onChange
   }
 
   async function membership(listenId) {
-    if (busy || readOnly || !isSignedIn) return;
+    if (mutationRef.current || busy || loading || readOnly || !isSignedIn) return;
+    if (mode === "diary" && listens.find((listen) => listen.listenId === listenId)?.inBoard) return;
+    mutationRef.current = true;
     setBusy(true);
     setError("");
     setMessage("");
@@ -77,11 +80,19 @@ export default function BoardListens({ album, boardId, userId, onClose, onChange
       });
       if (!response.ok) throw new Error(await getApiErrorMessage(response, "Could not update this board listen."));
       setMessage(mode === "diary" ? "Listen added to this board." : "Removed from this board. The listen remains in your diary.");
-      await Promise.all([load(), onChanged()]);
+      if (mode === "diary") {
+        // Keep older loaded pages visible and mark this exact listen immediately,
+        // even if refreshing the parent board fails after the successful write.
+        setListens((current) => current.map((listen) => listen.listenId === listenId ? { ...listen, inBoard: true } : listen));
+        await onChanged();
+      } else {
+        await Promise.all([load(), onChanged()]);
+      }
       dialogRef.current?.focus();
     } catch (failure) {
       setError(failure.message || "Could not update this board listen.");
     } finally {
+      mutationRef.current = false;
       setBusy(false);
     }
   }
@@ -121,15 +132,18 @@ export default function BoardListens({ album, boardId, userId, onClose, onChange
           }} />
         ) : (
           <>
-            {mode === "diary" && <p>Choose an existing listen. Adding it again won’t create a duplicate.</p>}
+            {mode === "diary" && <p>Choose an existing listen. Greyed-out listens are already in this board.</p>}
             <ul className="board-listens-list">
-              {listens.map((listen) => (
-                <li key={listen.listenId}>
-                  <time dateTime={listen.listenedOn}>{listen.listenedOn}</time>
-                  {listen.source === "automatic" && <span className="listen-source-label">Automatically logged</span>}
-                  {!readOnly && <button type="button" disabled={busy || loading} onClick={() => membership(listen.listenId)}>{mode === "diary" ? "Add to board" : "Remove from board"}</button>}
-                </li>
-              ))}
+              {listens.map((listen) => {
+                const alreadyAdded = mode === "diary" && listen.inBoard;
+                return (
+                  <li key={listen.listenId} className={alreadyAdded ? "is-in-board" : undefined}>
+                    <time dateTime={listen.listenedOn}>{listen.listenedOn}</time>
+                    {listen.source === "automatic" && <span className="listen-source-label">Automatically logged</span>}
+                    {!readOnly && <button type="button" disabled={busy || loading || alreadyAdded} onClick={() => membership(listen.listenId)}>{alreadyAdded ? "Already in board" : mode === "diary" ? "Add to board" : "Remove from board"}</button>}
+                  </li>
+                );
+              })}
             </ul>
             {loading && <p role="status">Loading listening dates…</p>}
             {!loading && !error && !listens.length && <p>{mode === "diary" ? "No listens logged for this album yet." : "No listening dates in this board yet."}</p>}

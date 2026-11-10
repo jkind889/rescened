@@ -1,12 +1,13 @@
 const mongoose = require("mongoose");
 const Board = require("../../models/Board");
 const BoardItem = require("../../models/BoardItem");
+const BoardItemNote = require("../../models/BoardItemNote");
 const BoardListen = require("../../models/BoardListen");
 const Listen = require("../../models/Listen");
 const UserProfile = require("../../models/UserProfile");
 const { isTransactionUnavailable } = require("./transactions");
 const { fail, uuid } = require("./diaryValidation");
-const { boardEntries } = require("./boardLibrary");
+const { boardEntries, formatBoard, liveMembershipStages } = require("./boardLibrary");
 const { orderMode, nextSettings, reconciledOrder, seededOrder, requestedOrder } = require("./boardOrder");
 
 async function transaction(domain, callback) {
@@ -86,6 +87,7 @@ async function saveAlbum(userId, boardId, albumCatalogId) {
 async function removeAlbum(userId, boardId, albumCatalogId) {
   return transaction("BOARD", async (session) => {
     const board = await claimBoard(userId, boardId, session);
+    await BoardItemNote.deleteOne({ boardId: board._id, albumCatalogId }, { session });
     await BoardItem.deleteOne({ boardId: board._id, albumCatalogId }, { session });
     await BoardListen.deleteMany({ boardId: board._id, albumCatalogId }, { session });
     await syncOrder(board, session);
@@ -97,6 +99,7 @@ async function deleteBoard(userId, boardId) {
   return transaction("BOARD", async (session) => {
     const board = await claimBoard(userId, boardId, session);
     if (board.isDefault) throw fail(400, "DEFAULT_BOARD_REQUIRED", "The default board cannot be deleted");
+    await BoardItemNote.deleteMany({ boardId: board._id }, { session });
     await BoardItem.deleteMany({ boardId: board._id }, { session });
     await BoardListen.deleteMany({ boardId: board._id }, { session });
     await UserProfile.updateMany({ pinnedBoardId: board._id }, { $set: { pinnedBoardId: null } }, { session });
@@ -118,9 +121,43 @@ async function setMembership(userId, boardId, listenId, attached) {
       );
     } else {
       await BoardListen.deleteOne({ boardId: board._id, listenId: listen._id }, { session });
+      await pruneBoardNote(board, listen.albumCatalogId, session);
     }
     await syncOrder(board, session);
     await touchBoard(board, session);
+  });
+}
+
+async function hasBoardAlbum(board, albumCatalogId, session) {
+  const match = { userId: board.userId, boardId: board._id, albumCatalogId };
+  if (await BoardItem.exists(match).session(session)) return true;
+  const linked = await BoardListen.aggregate([...liveMembershipStages(match), { $limit: 1 }]).session(session);
+  return linked.length > 0;
+}
+
+// Called after detaching/deleting a listen, under the board's transaction claim.
+async function pruneBoardNote(board, albumCatalogId, session) {
+  if (!await hasBoardAlbum(board, albumCatalogId, session)) {
+    await BoardItemNote.deleteOne({ boardId: board._id, albumCatalogId }, { session });
+  }
+}
+
+async function updateBoardNote(userId, boardId, albumCatalogId, { note, revision }) {
+  return transaction("BOARD", async (session) => {
+    const board = await claimBoard(userId, boardId, session, { revision });
+    if (!await hasBoardAlbum(board, albumCatalogId, session)) {
+      throw fail(404, "BOARD_ITEM_NOT_FOUND", "This album is no longer in the board");
+    }
+    const match = { userId, boardId: board._id, albumCatalogId };
+    if (note) {
+      await BoardItemNote.updateOne(match, { $set: { note }, $setOnInsert: match }, { upsert: true, session, runValidators: true });
+    } else {
+      await BoardItemNote.deleteOne(match, { session });
+    }
+    await touchBoard(board, session);
+    // Read the albums, notes, and revision from this same transaction snapshot.
+    const current = await Board.findById(board._id).select("+interactionRevision").session(session);
+    return formatBoard(current, { albums: true, revision: true, session });
   });
 }
 
@@ -157,5 +194,5 @@ async function reorderBoard(userId, boardId, { albumIds, revision }) {
 }
 
 module.exports = {
-  transaction, claimBoard, touchBoard, syncOrder, claimListen, saveAlbum, removeAlbum, deleteBoard, setMembership, updateBoard, reorderBoard,
+  transaction, claimBoard, touchBoard, syncOrder, claimListen, saveAlbum, removeAlbum, deleteBoard, setMembership, updateBoard, reorderBoard, updateBoardNote, pruneBoardNote,
 };

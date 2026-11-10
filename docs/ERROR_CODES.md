@@ -64,7 +64,7 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 | `INVALID_SUBMISSION` | `400` | A suggestion or correction payload, value, URL, date, count, or persisted submission fails validation. |
 | `INVALID_MODERATION_REQUEST` | `400` | A moderation body, filter, limit, public ID, reason, or `applyFields` selection is invalid. |
 | `INVALID_BOARD_ID` | `400` | A board mutation supplied a client-owned `boardId` or Mongo `_id`; board IDs are server-generated UUID-v4 values. |
-| `INVALID_BOARD_DESCRIPTION` | `400` | A board create or update supplied a description that is not text or is longer than 280 characters. |
+| `INVALID_BOARD_DESCRIPTION` | `400` | A board create or update supplied a description that is not text or is longer than 500 characters. |
 | `INVALID_REVIEW` | `400` | A review create or edit has an invalid rating (not a whole or half number from 1 to 5), missing or overlong text (over 300 characters), or, on edit, a field other than `rating` and `reviewText`. |
 | `INVALID_REVIEW_ID` | `400` | A review lookup or mutation received a malformed or client-supplied public UUID-v4 `reviewId`; Mongo ObjectIds are rejected. |
 | `INVALID_REVIEW_CURSOR` | `400` | A review-list pagination cursor could not be decrypted, does not match its list/sort or supported version, or refers to an expired popular-ranking snapshot. Reload the list from its first page. |

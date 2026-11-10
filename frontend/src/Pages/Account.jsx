@@ -1,5 +1,5 @@
 import { API_BASE_URL } from "../config/api";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import {
   RedirectToSignIn,
@@ -23,6 +23,9 @@ import { getApiErrorMessage } from "../utils/apiErrors";
 import { REVIEW_SORTS, REVIEW_SORT_OPTIONS } from "../utils/reviewSorts";
 import Cover from "../Components/Cover";
 import EditedTag from "../features/reviews/EditedTag";
+import useProfileReviews from "../features/reviews/useProfileReviews";
+import { MAX_REVIEW_SEARCH_LENGTH, normalizeReviewSearch } from "../features/reviews/profileReviewSearch";
+import { suggestionActivityLabels } from "../utils/activityLabels";
 
 const tabs = [
   { id: "overview", label: "Overview" },
@@ -106,13 +109,12 @@ export function Account() {
   const [activeTab, setActiveTab] = useState(requestedTab || "overview");
   const [savedViewMode, setSavedViewMode] = useState("grid");
   const [savedAlbums, setSavedAlbums] = useState([]);
-  const [reviews, setReviews] = useState([]);
   const [recentReviewPreviews, setRecentReviewPreviews] = useState([]);
   const [recentPreviewHasMore, setRecentPreviewHasMore] = useState(false);
   const [popularReviewPreviews, setPopularReviewPreviews] = useState([]);
-  const [nextReviewCursor, setNextReviewCursor] = useState(null);
   const [reviewSort, setReviewSort] = useState("recent");
-  const [isLoadingMoreReviews, setIsLoadingMoreReviews] = useState(false);
+  const [reviewSearch, setReviewSearch] = useState("");
+  const reviewSearchInput = useRef(null);
   const [deletingReviewId, setDeletingReviewId] = useState("");
   const [deleteErrors, setDeleteErrors] = useState({});
   const [activityItems, setActivityItems] = useState([]);
@@ -166,7 +168,6 @@ export function Account() {
 
       if (!isPublicProfile && !isSignedIn) {
         setSavedAlbums([]);
-        setReviews([]);
         setActivityItems([]);
         setNetworkItems([]);
         setBoards([]);
@@ -252,11 +253,9 @@ export function Account() {
         }
 
         setSavedAlbums(Array.isArray(savedData) ? savedData : []);
-        setReviews(Array.isArray(reviewsData.reviews) ? reviewsData.reviews : []);
         setRecentReviewPreviews((Array.isArray(reviewsData.reviews) ? reviewsData.reviews : []).slice(0, REVIEW_PREVIEW_LIMIT));
         setRecentPreviewHasMore(Boolean(reviewsData.nextCursor));
         setPopularReviewPreviews(Array.isArray(popularReviewsData.reviews) ? popularReviewsData.reviews : []);
-        setNextReviewCursor(reviewsData.nextCursor || null);
         setActivityItems(Array.isArray(activityData) ? activityData : []);
         setNetworkItems(Array.isArray(networkData) ? networkData : []);
         setBoards(Array.isArray(boardsData) ? boardsData : []);
@@ -285,7 +284,6 @@ export function Account() {
 
         if (isCurrent) {
           setSavedAlbums([]);
-          setReviews([]);
           setActivityItems([]);
           setNetworkItems([]);
           setBoards([]);
@@ -359,53 +357,21 @@ export function Account() {
   const moreReviewsPath = profileUserId
     ? `/profile/${encodeURIComponent(profileUserId)}/reviews`
     : "/viewreviews";
-  const reviewListEndpoint = isPublicProfile && profileUserId
-    ? `${API_BASE_URL}/reviews/review/user/${encodeURIComponent(profileUserId)}`
+  const reviewListEndpoint = isPublicProfile
+    ? `${API_BASE_URL}/reviews/review/user/${encodeURIComponent(publicUserId)}`
     : `${API_BASE_URL}/reviews/review/user/`;
   const socialPath = isPublicProfile && profileUserId
     ? `/profile/${encodeURIComponent(profileUserId)}/network`
     : "/account/network";
 
-  async function requestReviewPage(sort, cursor = null) {
-    const token = isSignedIn ? await getToken() : null;
-    const params = new URLSearchParams({ sort });
-    if (cursor) params.set("cursor", cursor);
-    const response = await fetch(`${reviewListEndpoint}?${params.toString()}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-    if (!response.ok) throw new Error(await getApiErrorMessage(response, "Could not load reviews."));
-    return response.json();
-  }
-
-  async function changeReviewSort(nextSort) {
-    if (nextSort === reviewSort || isLoadingMoreReviews) return;
-    setReviewSort(nextSort);
-    setIsLoadingMoreReviews(true);
-    try {
-      const data = await requestReviewPage(nextSort);
-      setReviews(Array.isArray(data.reviews) ? data.reviews : []);
-      setNextReviewCursor(data.nextCursor || null);
-    } catch (reviewError) {
-      setError(reviewError.message || "Could not load reviews.");
-    } finally {
-      setIsLoadingMoreReviews(false);
-    }
-  }
-
-  async function loadMoreReviews() {
-    if (!nextReviewCursor || isLoadingMoreReviews) return;
-    setIsLoadingMoreReviews(true);
-    try {
-      const data = await requestReviewPage(reviewSort, nextReviewCursor);
-      setReviews((current) => {
-        const ids = new Set(current.map((review) => review.reviewId));
-        return [...current, ...(Array.isArray(data.reviews) ? data.reviews.filter((review) => !ids.has(review.reviewId)) : [])];
-      });
-      setNextReviewCursor(data.nextCursor || null);
-    } catch (reviewError) {
-      setError(reviewError.message || "Could not load more reviews.");
-    } finally {
-      setIsLoadingMoreReviews(false);
-    }
-  }
+  const {
+    reviews, setReviews, nextCursor: nextReviewCursor, isLoading: isLoadingReviews,
+    error: reviewError, loadMore: loadMoreReviews, retry: retryReviews,
+  } = useProfileReviews({
+    endpoint: reviewListEndpoint, viewerId: user?.id || "", getToken, isSignedIn,
+    enabled: activeTab === "reviews" && isLoaded && !isLoading && !error && (isPublicProfile || isSignedIn),
+    sort: reviewSort, query: reviewSearch,
+  });
 
   async function removeReview(reviewId) {
     if (deletingReviewId) return false;
@@ -899,8 +865,8 @@ export function Account() {
             review_comment: "commented on",
             comment_reply: "replied on",
           };
-          const actionLabel = actionLabelByType[activity.type] || "Activity";
-          const actionText = actionTextByType[activity.type] || "updated";
+          const actionLabel = suggestionActivityLabels(activity)?.label || actionLabelByType[activity.type] || "Activity";
+          const actionText = suggestionActivityLabels(activity)?.action || actionTextByType[activity.type] || "updated";
           const actorState = {
             profileUser: {
               username: actorName,
@@ -999,8 +965,8 @@ export function Account() {
     return renderActivityFeed(activityItems, {
       title: "No activity yet",
       body: canManageProfile
-        ? "Listens, reviews, and saved albums will show up here."
-        : "This listener has not logged a listen, saved an album, or written a review yet.",
+        ? "Listens, reviews, saved albums, and approved suggestions will show up here."
+        : "This listener has no public activity yet.",
     });
   }
 
@@ -1075,22 +1041,11 @@ export function Account() {
 
     return renderActivityFeed(networkItems, {
       title: "No network activity yet",
-      body: "Follow listeners to see their latest listens and reviews here.",
+      body: "Follow listeners to see their latest listens, reviews, and approved suggestions here.",
     });
   }
 
   function renderReviews() {
-    if (reviews.length === 0) {
-      return (
-        <ProfileEmptyState
-          title="No reviews yet"
-          body={canManageProfile
-            ? "Your album reviews will live here once you write them."
-            : "Reviews are not available on this profile yet."}
-        />
-      );
-    }
-
     const renderReviewCard = (review) => (
       <article className="profile-review-card" key={review.reviewId}>
         <Link className="profile-review-album" to={`/album/${review.albumId}`}>
@@ -1135,15 +1090,31 @@ export function Account() {
         <section className="profile-panel">
           <div className="profile-section-header">
             <h2>{REVIEW_SORTS[reviewSort].heading}</h2>
-            <select aria-label="Review order" value={reviewSort} onChange={(event) => changeReviewSort(event.target.value)} disabled={isLoadingMoreReviews}>
+            <select aria-label="Review order" value={reviewSort} onChange={(event) => setReviewSort(event.target.value)}>
               {REVIEW_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </div>
-          <div className="profile-review-list">
-            {reviews.map(renderReviewCard)}
+          <div className="profile-review-search">
+            <label htmlFor="profile-review-search">Search reviews by album or artist</label>
+            <div className="profile-review-search-controls">
+              <input ref={reviewSearchInput} id="profile-review-search" type="search" value={reviewSearch}
+                placeholder="Album title or artist name" maxLength={MAX_REVIEW_SEARCH_LENGTH}
+                aria-controls="profile-review-results" autoComplete="off"
+                onChange={(event) => setReviewSearch(event.target.value)} />
+              {reviewSearch && <button className="profile-secondary-button" type="button" onClick={() => { setReviewSearch(""); reviewSearchInput.current?.focus(); }}>Clear search</button>}
+            </div>
           </div>
-          {nextReviewCursor && <button className="profile-more-link" type="button" onClick={loadMoreReviews} disabled={isLoadingMoreReviews}>{isLoadingMoreReviews ? "Loading..." : "Load more reviews"}</button>}
-          {!nextReviewCursor && <p className="edit-profile-current-value">You’re all caught up.</p>}
+          <div id="profile-review-results" aria-busy={isLoadingReviews}>
+            <p className="profile-review-status" role="status">
+              {isLoadingReviews ? "Loading reviews…" : reviewError ? "" : reviews.length
+                ? `${reviews.length}${nextReviewCursor ? "+" : ""} ${normalizeReviewSearch(reviewSearch) ? "matching " : ""}review${reviews.length === 1 ? "" : "s"}`
+                : normalizeReviewSearch(reviewSearch) ? "No matching reviews. Try another album or artist." : "No reviews yet."}
+            </p>
+            {reviewError && <div role="alert" className="review-edit-error"><p>{reviewError}</p><button className="profile-secondary-button" type="button" onClick={retryReviews}>Retry reviews</button></div>}
+            <div className="profile-review-list">{reviews.map(renderReviewCard)}</div>
+            {nextReviewCursor && <button className="profile-more-link" type="button" onClick={loadMoreReviews} disabled={isLoadingReviews}>{isLoadingReviews ? "Loading..." : "Load more reviews"}</button>}
+            {!isLoadingReviews && !reviewError && reviews.length > 0 && !nextReviewCursor && <p className="edit-profile-current-value">You’re all caught up.</p>}
+          </div>
         </section>
       </div>
     );
@@ -1421,7 +1392,7 @@ export function Account() {
                           review_comment: "Commented",
                           comment_reply: "Replied",
                         };
-                        const actionLabel = actionLabelByType[activity.type] || "Activity";
+                        const actionLabel = suggestionActivityLabels(activity)?.label || actionLabelByType[activity.type] || "Activity";
                         const activityPath = activity.type === "follow" && targetUser.userId
                           ? `/profile/${encodeURIComponent(targetUser.userId)}`
                           : activity.type === "review_comment" || activity.type === "comment_reply"

@@ -1,0 +1,43 @@
+.album-review-composer {
+  border: 1px solid var(--app-line);
+  background: var(--app-bg);
+  padding: 1.1rem;
+  margin-bottom: 1.5rem;
+  scroll-margin-top: 7rem;
+  min-width: 0;
+}
+
+.album-review-composer[hidden] { display: none; }
+.album-review-composer:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 3px; }
+.album-review-composer .album-section-heading { flex-wrap: wrap; margin-bottom: 1rem; }
+.review-composer-form { min-width: 0; }
+.review-composer-rating { max-width: 18rem; }
+.review-composer-draft-label,
+.review-composer-preview-label,
+.review-composer-note,
+.review-composer-form small { color: var(--app-muted); font-size: 0.72rem; line-height: 1.6; }
+.review-composer-draft-label { margin-left: auto; }
+.review-composer-count { justify-self: end; font-variant-numeric: tabular-nums; }
+.review-composer-preview-label { margin: 0 0 0.5rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.review-composer-preview { margin: 0.25rem 0 1rem; min-width: 0; }
+.review-composer-preview .album-review-card { background: var(--app-surface); }
+.review-composer-preview .album-review-content { min-width: 0; }
+.review-composer-preview .album-review-copy { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; line-height: 1.6; }
+.review-composer-preview .review-composer-placeholder { color: var(--app-muted); font-style: italic; }
+.review-composer-actions { flex-wrap: wrap; }
+.review-composer-actions button { min-height: 44px; }
+.review-composer-note { margin: 0.75rem 0 0; }
+.album-review-composer .review-composer-form input,
+.album-review-composer .review-composer-form textarea { box-sizing: border-box; max-width: 100%; font-size: 1rem; }
+.review-composer-form textarea { min-height: 7rem; resize: vertical; }
+.review-composer-form input:disabled,
+.review-composer-form textarea:disabled { opacity: 0.7; }
+.review-composer-status { margin: 0 0 1rem; color: var(--app-text); }
+
+@media (max-width: 600px) {
+  .album-review-composer { padding: 0.85rem; scroll-margin-top: 6rem; }
+  .review-composer-draft-label { margin-left: 0; }
+  .review-composer-actions button { flex: 1 1 auto; }
+  .review-composer-preview .album-review-card { padding: 0.75rem; grid-template-columns: 36px minmax(0, 1fr); gap: 0.65rem; }
+  .review-composer-preview .album-review-avatar { width: 36px; height: 36px; }
+}

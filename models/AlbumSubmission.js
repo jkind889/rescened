@@ -419,6 +419,10 @@ const albumSubmissionSchema = new mongoose.Schema(
     proposedChanges: { type: correctionChangesSchema, default: null },
     genreBaseline: { type: genreBaselineSchema, default: null },
     genreChanges: { type: genreChangesSchema, default: null },
+    // Public, server-authored links between an album proposal and its later
+    // genre review. Both are private submission records, not catalog fields.
+    linkedGenreSubmissionId: { type: String, default: null, match: /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i },
+    sourceAlbumSubmissionId: { type: String, default: null, match: /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i },
     // "<submittedByUserId>:<target album _id>" while a genre suggestion is
     // pending or needs changes; unset when it closes. The unique sparse index
     // allows one open genre suggestion per user per album.
@@ -529,6 +533,7 @@ albumSubmissionSchema.pre(["findOneAndUpdate", "updateOne"], function validateSu
 });
 
 albumSubmissionSchema.index({ submittedByUserId: 1, createdAt: -1, _id: -1 });
+albumSubmissionSchema.index({ submittedByUserId: 1, status: 1, approvedAt: -1, submissionId: -1 });
 albumSubmissionSchema.index({ openGenreSuggestionKey: 1 }, { unique: true, sparse: true });
 albumSubmissionSchema.index({ status: 1, updatedAt: -1, _id: -1 });
 albumSubmissionSchema.index({ status: 1, approvedAt: -1, _id: -1 });

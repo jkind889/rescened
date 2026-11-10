@@ -1,5 +1,22 @@
 [
   {
+    "id": "profile-search-and-board-improvements",
+    "date": "2026-11-10",
+    "title": "Find reviews faster and make boards your own",
+    "summary": "Search profile reviews, preview reviews before posting, and add more context to your boards.",
+    "changes": [
+      "Search the Reviews tab on a profile by album title or artist name, including older reviews. Keep sorting results by latest, most liked, highest rated, or lowest rated.",
+      "Write reviews directly on an album page with a live preview. Closing the composer keeps your draft in the same browser tab so you can come back to it.",
+      "Board descriptions can now be up to 500 characters, with more room to write in the editor.",
+      "Add a short note of up to 100 characters to each album on a board. Notes appear in grid and list views and are included when you export the board.",
+      "The Add from diary picker now marks listens that are already in the board so you do not add the same entry again.",
+      "Approved album and genre suggestions now appear in profile and following activity, with credit to the contributor and the same profile privacy rules.",
+      "Album genres are visible in the album header instead of a separate tab, with a nearby link to suggest changes.",
+      "Include optional genres when suggesting a new album. Once the album is approved, those genres go to a separate moderator review.",
+      "Searching for LOONA or 이달의 소녀 now finds albums credited under either name."
+    ]
+  },
+  {
     "id": "album-mapping-rediscovery",
     "date": "2026-11-01",
     "title": "New albums reach the mapping queue",

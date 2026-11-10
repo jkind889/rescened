@@ -151,7 +151,9 @@
 }
 
 .board-album-row.is-arrangeable > a,
-.board-album-list.is-ranked .board-album-row > a {
+.board-album-list.is-ranked .board-album-row > a,
+.board-album-row.is-arrangeable > .board-album-info,
+.board-album-list.is-ranked .board-album-row > .board-album-info {
   flex: 1 1 200px;
   min-width: 0;
 }
@@ -225,3 +227,41 @@
   cursor: not-allowed;
   opacity: 0.55;
 }
+
+/* Per-album notes are board metadata, separate from the album's link/listens. */
+.board-item-note {
+  min-width: 0;
+  font-family: var(--app-font);
+  font-size: 0.8rem;
+  cursor: default;
+}
+.board-album-info { min-width: 0; }
+.board-album-info > .board-item-note { margin-top: 0.75rem; }
+.board-item-note .board-item-note-text {
+  margin: 0 0 0.5rem;
+  color: var(--app-text);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.board-item-note-form { display: grid; gap: 0.5rem; }
+.board-item-note-form label { color: var(--app-muted); }
+.board-item-note-form input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0.5rem;
+  border: 1px solid var(--app-line-strong);
+  border-radius: 0;
+  background: var(--app-bg);
+  color: var(--app-text);
+  font: inherit;
+}
+.board-item-note-form input:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
+.board-item-note-form small { color: var(--app-muted); }
+.board-item-note-form .is-over-limit,
+.board-item-note-form p[role="alert"] { color: var(--app-danger, #e68080); }
+.board-item-note-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.board-item-note-actions small { margin-right: auto; }
+.board-item-note button { min-height: 36px; }
+.board-item-note button:disabled { cursor: not-allowed; opacity: 0.55; }

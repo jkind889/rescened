@@ -3,16 +3,18 @@ import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, us
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@clerk/react";
 import BoardListens from "../Components/BoardListens";
+import BoardItemNote from "../Components/BoardItemNote";
+import { BOARD_NOTE_LIMIT, normalizeBoardNote, boardNoteLength } from "../features/boards/boardNoteText";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import AsyncState from "../Components/Loading/AsyncState";
 import PickAlbum from "../Components/PickAlbum";
 import ShareButton from "../Components/ShareButton";
 import { moveItem } from "../features/queue/queue";
-import { earlierOrderTarget, normalizeDraft, orderLimitOf, rankMap, sameOrder, saveBoardOrder, saveBoardSettings } from "../features/boards/boardOrder";
+import { earlierOrderTarget, normalizeDraft, orderLimitOf, rankMap, sameOrder, saveBoardOrder, saveBoardSettings, saveBoardNote } from "../features/boards/boardOrder";
 import "../features/boards/boards.css";
 import Cover from "../Components/Cover";
 
-const MAX_DESCRIPTION_LENGTH = 280;
+const MAX_DESCRIPTION_LENGTH = 500;
 const UNSAVED_ORDER_HINT = "Save or discard your new order first";
 
 function byText(first, second) {
@@ -84,6 +86,9 @@ export function BoardDetail() {
   const [needsRefresh, setNeedsRefresh] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [orderStatus, setOrderStatus] = useState("");
+  const [noteEditor, setNoteEditor] = useState(null);
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  const activeNote = noteEditor?.scope === scope ? noteEditor : null;
 
   const fetchBoard = useCallback(async function fetchBoard(refresh = false) {
     if (scopeRef.current !== scope) return;
@@ -104,6 +109,7 @@ export function BoardDetail() {
       if (!refresh) {
         setIsLoading(true);
         setSelectedAlbum(null);
+        setNoteEditor(null);
       }
       setLoadError("");
       const token = isSignedIn ? await getToken() : null;
@@ -172,7 +178,7 @@ export function BoardDetail() {
   // Hold the album snapshot and its revision steady while any write or refresh
   // is pending, including listen edits made in the modal.
   const isBoardBusy = Boolean(isSavingOrder || isSavingSettings || isSavingTitle || isSavingDescription
-    || isDeleting || removingAlbumId || savingAlbumId || isRefreshing || needsRefresh || selectedAlbum);
+    || isDeleting || removingAlbumId || savingAlbumId || isRefreshing || needsRefresh || selectedAlbum || activeNote || isSavingNote);
   const canArrange = !isPublicBoard && isManual && sortKey === CUSTOM_SORT && !isFiltered;
   const showRanks = isRanked && sortKey === CUSTOM_SORT;
   const showBlockEnd = isManual && sortKey === CUSTOM_SORT && !isFiltered && order.length > orderLimit;
@@ -436,6 +442,48 @@ export function BoardDetail() {
     }
   }
 
+  function editNote(album) {
+    if (isPublicBoard || isOrderDirty || isBoardBusy || mutationRef.current || requestRef.current) return;
+    setNoteEditor({ scope, album, draft: album.note || "", error: "" });
+    setOrderStatus("");
+  }
+
+  function changeNote(draft) {
+    setNoteEditor((current) => current?.scope === scope ? { ...current, draft, error: "" } : current);
+  }
+
+  async function saveNote(event) {
+    event.preventDefault();
+    if (!activeNote || !board || isPublicBoard || isSavingNote || isOrderDirty || needsRefresh
+      || mutationRef.current || requestRef.current || !albumsById.has(activeNote.album.albumId)) return;
+    const note = normalizeBoardNote(activeNote.draft);
+    if (boardNoteLength(note) > BOARD_NOTE_LIMIT) return;
+    mutationRef.current = true;
+    setIsSavingNote(true);
+    setNoteEditor((current) => ({ ...current, error: "" }));
+    try {
+      const updated = await saveBoardNote(getToken, board, activeNote.album.albumId, note);
+      if (scopeRef.current !== scope) return;
+      setBoard(updated);
+      setNoteEditor(null);
+      setOrderStatus(note ? "Note saved." : "Note cleared.");
+    } catch (error) {
+      if (scopeRef.current !== scope) return;
+      let message = error.message || "Could not save this note.";
+      if (error.code === "BOARD_CHANGED" || error.code === "BOARD_ITEM_NOT_FOUND") {
+        const refreshed = await fetchBoard(true);
+        if (scopeRef.current !== scope) return;
+        message = refreshed
+          ? "This board changed elsewhere. Your draft is kept. Review the latest note before saving again."
+          : "Your draft is kept. Refresh the board before saving again.";
+      }
+      setNoteEditor((current) => current?.scope === scope ? { ...current, error: message } : current);
+    } finally {
+      mutationRef.current = false;
+      setIsSavingNote(false);
+    }
+  }
+
   function renderListeningSummary(album) {
     const count = album.listenCount || 0;
     return (
@@ -446,6 +494,22 @@ export function BoardDetail() {
         {!isPublicBoard && !album.explicitlySaved && <button type="button" disabled={isBoardBusy || isOrderDirty} title={isOrderDirty ? UNSAVED_ORDER_HINT : undefined} onClick={() => keepAlbumSaved(album.albumId)}>{savingAlbumId === album.albumId ? "Saving…" : "Keep album saved"}</button>}
       </div>
     );
+  }
+
+  function renderNote(album, missing = false) {
+    const editing = activeNote?.album.albumId === album.albumId;
+    return <BoardItemNote
+      album={album}
+      readOnly={isPublicBoard}
+      editor={editing ? activeNote : null}
+      disabled={editing ? Boolean(isSavingNote || isRefreshing || needsRefresh) : isBoardBusy || isOrderDirty}
+      saving={editing && isSavingNote}
+      missing={missing}
+      onEdit={() => editNote(album)}
+      onChange={changeNote}
+      onCancel={() => { if (!isSavingNote) setNoteEditor(null); }}
+      onSave={saveNote}
+    />;
   }
 
   function renderRank(album) {
@@ -567,7 +631,7 @@ export function BoardDetail() {
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               maxLength={MAX_DESCRIPTION_LENGTH}
-              rows={2}
+              rows={5}
               placeholder="Add a description"
               aria-label="Board description"
             />
@@ -587,15 +651,16 @@ export function BoardDetail() {
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            disabled={Boolean(activeNote)}
             placeholder="Search this board"
             aria-label="Search this board"
           />
-          <select aria-label="Filter board albums" value={albumFilter} onChange={(event) => setAlbumFilter(event.target.value)}>
+          <select disabled={Boolean(activeNote)} aria-label="Filter board albums" value={albumFilter} onChange={(event) => setAlbumFilter(event.target.value)}>
             <option value="all">All albums</option>
             <option value="saved">Saved albums</option>
             <option value="listened">With listens</option>
           </select>
-          <select aria-label="Sort board albums" value={sortKey} onChange={(event) => setAlbumSort(event.target.value)}>
+          <select disabled={Boolean(activeNote)} aria-label="Sort board albums" value={sortKey} onChange={(event) => setAlbumSort(event.target.value)}>
             {isManual && <option value={CUSTOM_SORT}>Custom order</option>}
             {Object.entries(ALBUM_SORTS).map(([value, sort]) => <option key={value} value={value}>{sort.label}</option>)}
           </select>
@@ -603,6 +668,7 @@ export function BoardDetail() {
             <button
               className={effectiveViewMode === "grid" ? "profile-view-toggle-active" : ""}
               type="button"
+              disabled={Boolean(activeNote)}
               onClick={() => setViewMode("grid")}
             >
               Grid
@@ -610,6 +676,7 @@ export function BoardDetail() {
             <button
               className={effectiveViewMode === "list" ? "profile-view-toggle-active" : ""}
               type="button"
+              disabled={Boolean(activeNote)}
               onClick={() => setViewMode("list")}
             >
               List
@@ -659,12 +726,15 @@ export function BoardDetail() {
         </div>
       )}
       {!isPublicBoard && board.explicitSaveCount > 0 && <PickAlbum key={board.boardId} boardId={board.boardId} />}
-      {!isPublicBoard && <p className="board-listening-help">Removing an album clears its saves and listening dates from this board. Your diary entries stay intact.</p>}
+      {!isPublicBoard && <p className="board-listening-help">Removing an album clears its note, saves, and listening dates from this board. Your diary entries stay intact.</p>}
       {actionError && <p role="alert" className="boards-error">{actionError}</p>}
       {needsRefresh && <button type="button" disabled={isRefreshing || isSavingOrder} onClick={retryRefresh}>
         {isRefreshing ? "Refreshing…" : "Refresh board"}
       </button>}
 
+      {activeNote && !filteredAlbums.some((album) => album.albumId === activeNote.album.albumId) && renderNote(
+        albumsById.get(activeNote.album.albumId) || activeNote.album, !albumsById.has(activeNote.album.albumId),
+      )}
       {filteredAlbums.length === 0 ? (
         <div className="boards-empty">
           <h2>{board.albums?.length ? "No matching albums" : "No albums here yet"}</h2>
@@ -680,6 +750,7 @@ export function BoardDetail() {
                   <h2>{album.title || "Untitled album"}</h2>
                   <p>{getArtistName(album)}</p>
                 </Link>
+                {renderNote(album)}
                 {renderRank(album)}
                 {renderArrangeControls(album, index, true)}
                 {renderListeningSummary(album)}
@@ -695,11 +766,14 @@ export function BoardDetail() {
             <Fragment key={album.albumId}>
               <article className={itemClassName("board-album-row", index)} {...arrangeProps(index)}>
                 {renderRank(album)}
-                <Link to={`/album/${album.albumId}`} draggable={false}>
-                  {album.cover ? <Cover src={album.cover} alt={`${album.title} cover`} draggable={false} size={58} /> : <span>No cover</span>}
-                  <strong>{album.title || "Untitled album"}</strong>
-                  <em>{getArtistName(album)}</em>
-                </Link>
+                <div className="board-album-info">
+                  <Link to={`/album/${album.albumId}`} draggable={false}>
+                    {album.cover ? <Cover src={album.cover} alt={`${album.title} cover`} draggable={false} size={58} /> : <span>No cover</span>}
+                    <strong>{album.title || "Untitled album"}</strong>
+                    <em>{getArtistName(album)}</em>
+                  </Link>
+                  {renderNote(album)}
+                </div>
                 {renderArrangeControls(album, index, false)}
                 {renderListeningSummary(album)}
                 {renderRemoveButton(album)}

@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const Board = require("../models/Board");
 const BoardItem = require("../models/BoardItem");
+const BoardItemNote = require("../models/BoardItemNote");
 const BoardListen = require("../models/BoardListen");
 const Listen = require("../models/Listen");
 const Review = require("../models/Reviews");
@@ -165,8 +166,8 @@ test("board JSON nests albums in display order with 1-based positions", () => {
   assert.deepEqual(json.items[0], {
     boardId: "66666666-6666-4666-8666-666666666666", boardTitle: "Saved albums", boardDescription: "", isDefault: true, orderMode: "manual", displayStyle: "ranked",
     albums: [
-      { position: 1, albumId: ALBUM.albumId, albumTitle: ALBUM.title, albumArtist: "=Artist", savedAt: "2026-08-01T00:00:00.000Z", explicitlySaved: true },
-      { position: 2, albumId: OTHER_ALBUM.albumId, albumTitle: "Other", albumArtist: "Band", savedAt: "2026-07-01T00:00:00.000Z", explicitlySaved: false },
+      { position: 1, albumId: ALBUM.albumId, albumTitle: ALBUM.title, albumArtist: "=Artist", savedAt: "2026-08-01T00:00:00.000Z", explicitlySaved: true, note: "" },
+      { position: 2, albumId: OTHER_ALBUM.albumId, albumTitle: "Other", albumArtist: "Band", savedAt: "2026-07-01T00:00:00.000Z", explicitlySaved: false, note: "" },
     ],
   });
   assert.deepEqual(json.items[1].albums, []);
@@ -178,9 +179,9 @@ test("board CSV has one row per membership and one blank-album row for an empty 
   assertNoObjectIds(body, [ALBUM, OTHER_ALBUM]);
   const lines = body.slice(1).split("\r\n");
   assert.equal(lines.length, 5, "header, two memberships, the empty board, and the trailing CRLF");
-  assert.equal(lines[1], `"66666666-6666-4666-8666-666666666666","Saved albums","","true","manual","ranked","1","${ALBUM.albumId}","Album, ""Live""","'=Artist","2026-08-01T00:00:00.000Z","true"`);
+  assert.equal(lines[1], `"66666666-6666-4666-8666-666666666666","Saved albums","","true","manual","ranked","1","${ALBUM.albumId}","Album, ""Live""","'=Artist","2026-08-01T00:00:00.000Z","true",""`);
   assert.ok(lines[2].startsWith("\"66666666-6666-4666-8666-666666666666\"") && lines[2].includes("\"2\",\"33333333-"));
-  assert.equal(lines[3], "\"77777777-7777-4777-8777-777777777777\",\"'@Empty\",\"Nothing yet\",\"false\",\"added\",\"grid\",\"\",\"\",\"\",\"\",\"\",\"\"");
+  assert.equal(lines[3], "\"77777777-7777-4777-8777-777777777777\",\"'@Empty\",\"Nothing yet\",\"false\",\"added\",\"grid\",\"\",\"\",\"\",\"\",\"\",\"\",\"\"");
   assert.equal(lines[4], "");
 });
 
@@ -353,4 +354,10 @@ test("membership cursor failures still close the active cursor", async (t) => {
   await assert.rejects(collectExport("boards", "owner"), /read failed/);
   assert.equal(calls.savesClosed, 1);
   assert.equal(calls.linkedClosed, 1);
+});
+
+// Notes are empty in these pre-existing board fixtures.
+test.beforeEach((t) => {
+  t.mock.method(BoardItemNote, "find", () => ({ lean: async () => [] }));
+  t.mock.method(BoardItemNote, "deleteMany", async () => ({}));
 });

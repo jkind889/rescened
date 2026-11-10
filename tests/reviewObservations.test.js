@@ -79,6 +79,7 @@ test("capture failures are recorded with their own reason", async (t) => {
 });
 
 test("a timed-out episode write cannot be displaced by a failure marker", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   let finishWrite;
   const pending = new Promise((resolve) => { finishWrite = resolve; });
   const writes = []; let executions = 0;
@@ -90,7 +91,11 @@ test("a timed-out episode write cannot be displaced by a failure marker", async 
   });
   t.mock.method(console, "warn", () => {});
   const capture = { evidenceVersion: 1, kind: "mapping", targetKind: "cases", targetId: uuid(), action: "approved", evidence: { capturedAt: NOW, targetRevision: 2, expectedRevision: 2, candidates: [], coverage: null, recommendationRunId: "", recommended: null, selected: null, selectedRank: null, evidenceHash: "a".repeat(64) } };
-  assert.equal(await episodes.recordEpisode(capture, { auditId: uuid(), decidedRevision: 3, reviewer: "user_1", clock: () => NOW }), "timeout");
+  const recording = episodes.recordEpisode(capture, { auditId: uuid(), decidedRevision: 3, reviewer: "user_1", clock: () => NOW });
+  // The production timeout is unref'ed; advance it without relying on an
+  // unrelated open handle to keep this isolated test process alive.
+  t.mock.timers.runAll();
+  assert.equal(await recording, "timeout");
   assert.equal(writes.length, 1, "an unresolved write must not race a failure marker");
   finishWrite({ upsertedCount: 1 });
   await new Promise((resolve) => setImmediate(resolve));

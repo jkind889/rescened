@@ -122,7 +122,18 @@ export function AlbumDetail()
     const [isLoadingListens, setIsLoadingListens] = useState(false);
     const location = useLocation();
     // Links such as the home page review queue can ask to open the review form.
-    const [isReviewModalOpen, setIsReviewModalOpen] = useState(() => Boolean(location.state?.openReview));
+    const [reviewComposer, setReviewComposer] = useState(() => ({
+        albumId, isOpen: Boolean(location.state?.openReview), focusRequest: 0,
+        openRequestKey: location.state?.openReview ? location.key : null,
+    }));
+    const isReviewComposerOpen = reviewComposer.albumId === albumId && reviewComposer.isOpen;
+    const reviewTriggerRef = useRef(null);
+    const reviewStatusRef = useRef(null);
+    const [reviewPostedMessage, setReviewPostedMessage] = useState(null);
+    // Also handle a home shortcut to an album already mounted by the router.
+    if (location.state?.openReview && reviewComposer.openRequestKey !== location.key) {
+        setReviewComposer({ albumId, isOpen: true, focusRequest: reviewComposer.focusRequest + 1, openRequestKey: location.key });
+    }
     const [isBoardModalOpen, setIsBoardModalOpen] = useState(false);
     const [newBoardTitle, setNewBoardTitle] = useState("");
     const [boardSaveMessage, setBoardSaveMessage] = useState("");
@@ -143,6 +154,14 @@ export function AlbumDetail()
     const genresEnabled = Array.isArray(album?.genres);
     const [openGenreSuggestion, setOpenGenreSuggestion] = useState(null);
     const activeAlbumIdRef = useRef(albumId);
+    const activeViewerRef = useRef(userId);
+    const reviewPageGenerationRef = useRef(0);
+
+    useEffect(() => { activeViewerRef.current = userId; }, [userId]);
+    useEffect(() => {
+        reviewPageGenerationRef.current += 1;
+        return () => { reviewPageGenerationRef.current += 1; };
+    }, [albumId, userId]);
 
     // Consume the one-time open-review request so a refresh or back navigation
     // does not reopen the form.
@@ -405,30 +424,34 @@ export function AlbumDetail()
         }
 
         setReviewActionMessage("");
-        try {
-            const token = await getToken();
-            const res = await fetch(`${API_BASE_URL}/reviews/review`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}`, "Idempotency-Key": idempotencyKey },
-                body: JSON.stringify(review),
-            });
-            if (!res.ok) throw new Error(await getApiErrorMessage(res, "Failed to submit review"));
-            const newReview = await res.json();
-            if (activeAlbumIdRef.current !== review.albumId) return true;
-            setReviews((current) => current.some((item) => item.reviewId === newReview.reviewId) ? current : [newReview, ...current]);
-            setRecentReviewPreviews((current) => [newReview, ...current.filter((item) => item.reviewId !== newReview.reviewId)].slice(0, 3));
-            setPopularReviewPreviews((current) => current.some((item) => item.reviewId === newReview.reviewId) ? current : current);
-            if (res.status === 201) {
-                setAlbumSocial((currentSocial) => {
-                    const ratingDistribution = adjustRatingDistribution(currentSocial.ratingDistribution, newReview.rating, 1);
-                    return { ...currentSocial, reviewCount: (Number(currentSocial.reviewCount) || 0) + 1, averageRating: getAverageRatingFromDistribution(ratingDistribution), ratingDistribution, viewerRating: finiteOrNull(newReview.rating) };
-                });
-            }
-            return true;
-        } catch (error) {
-            setReviewActionMessage(error.message || "Could not submit your review.");
+        const pageGeneration = reviewPageGenerationRef.current;
+        const token = await getToken();
+        const res = await fetch(`${API_BASE_URL}/reviews/review`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}`, "Idempotency-Key": idempotencyKey },
+            body: JSON.stringify(review),
+        });
+        if (!res.ok) {
+            const error = new Error(await getApiErrorMessage(res, "Failed to submit review"));
+            error.status = res.status;
             throw error;
         }
+        const newReview = await res.json();
+        if (reviewPageGenerationRef.current !== pageGeneration || activeAlbumIdRef.current !== review.albumId || activeViewerRef.current !== userId) return true;
+        setReviews((current) => current.some((item) => item.reviewId === newReview.reviewId) ? current : [newReview, ...current]);
+        setRecentReviewPreviews((current) => [newReview, ...current.filter((item) => item.reviewId !== newReview.reviewId)].slice(0, 3));
+        setPopularReviewPreviews((current) => current.some((item) => item.reviewId === newReview.reviewId) ? current : current);
+        if (res.status === 201) {
+            setAlbumSocial((currentSocial) => {
+                const ratingDistribution = adjustRatingDistribution(currentSocial.ratingDistribution, newReview.rating, 1);
+                return { ...currentSocial, reviewCount: (Number(currentSocial.reviewCount) || 0) + 1, averageRating: getAverageRatingFromDistribution(ratingDistribution), ratingDistribution, viewerRating: finiteOrNull(newReview.rating) };
+            });
+        } else {
+            // A recovered response may describe a review the first request
+            // created without reaching this page. Reconcile the totals.
+            setSocialVersion((current) => current + 1);
+        }
+        return true;
 
     };
 
@@ -654,7 +677,7 @@ export function AlbumDetail()
 
         return firstDisc - secondDisc || firstTrack - secondTrack;
     });
-    const albumTabs = ["artist", "release", "format", "tracks", ...(sortedTracks.length > 0 ? ["ranking"] : []), ...(genresEnabled ? ["genres"] : [])];
+    const albumTabs = ["artist", "release", "format", "tracks", ...(sortedTracks.length > 0 ? ["ranking"] : [])];
     const selectedTab = albumTabs.includes(activeTab) ? activeTab : "artist";
     function handleTabKeyDown(event) {
         const index = albumTabs.indexOf(selectedTab);
@@ -949,6 +972,44 @@ export function AlbumDetail()
                             {album.label && <span>{album.label}</span>}
                             {sortedTracks.length > 0 && <span>{sortedTracks.length} track{sortedTracks.length === 1 ? "" : "s"}{runtimeLabel ? ` · ${runtimeLabel}` : ""}</span>}
                         </div>
+                        {genresEnabled && (
+                            <section className="album-genres" aria-labelledby="album-genres-heading">
+                                <div className="album-genres-header">
+                                    <h2 id="album-genres-heading">Genres</h2>
+                                    {!openGenreSuggestion && (canUseAuthenticatedActions ? (
+                                        <Link className="album-genre-suggest" to={`/suggestions/genres/${album.albumId}`}>
+                                            Suggest genres
+                                        </Link>
+                                    ) : (
+                                        <SignInButton mode="modal">
+                                            <button className="album-genre-suggest" type="button">Suggest genres</button>
+                                        </SignInButton>
+                                    ))}
+                                </div>
+                                {album.genres.length > 0 ? (
+                                    <ul className="album-genre-list" aria-label="Album genres">
+                                        {album.genres.map((genre, index) => (
+                                            <li key={genre.genreId}>
+                                                <Link
+                                                    className={`album-genre-badge ${index === 0 ? "album-genre-badge-primary" : "album-genre-badge-secondary"}`}
+                                                    to={`/genre/${genre.slug}`}
+                                                    aria-label={index === 0 ? `${genre.name} (primary genre)` : undefined}
+                                                >
+                                                    {genre.name}
+                                                </Link>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : <p className="album-genre-empty">No genres yet.</p>}
+                                {openGenreSuggestion && (
+                                    <p className="album-genre-pending">
+                                        {openGenreSuggestion.status === "needs_changes"
+                                            ? <>A moderator asked for changes to your genre suggestion. <Link to={`/suggestions/${openGenreSuggestion.submissionId}/revise`}>Revise it</Link></>
+                                            : <>Your genre suggestion is waiting for review. <Link to={`/suggestions/${openGenreSuggestion.submissionId}`}>View it</Link></>}
+                                    </p>
+                                )}
+                            </section>
+                        )}
                     </div>
 
                     <div className="album-tabs" role="tablist" aria-label="Album sections">
@@ -971,37 +1032,6 @@ export function AlbumDetail()
                     </div>
 
                     <section className="album-info-panel" id="album-section-panel" role="tabpanel" aria-labelledby={`album-tab-${selectedTab}`} tabIndex={0}>
-                        {selectedTab === "genres" && genresEnabled && (
-                            <div className="album-genres-panel">
-                                {album.genres.length > 0 ? (
-                                    <ul className="album-genre-list" aria-label="Genres">
-                                        {album.genres.map((genre, index) => (
-                                            <li key={genre.genreId}>
-                                                <Link className={`album-genre-badge ${index === 0 ? "album-genre-badge-primary" : "album-genre-badge-secondary"}`} to={`/genre/${genre.slug}`}>
-                                                    {genre.name}
-                                                </Link>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                ) : <p className="album-empty-copy">No genres yet.</p>}
-                                {openGenreSuggestion && (
-                                    <p className="album-genre-pending">
-                                        {openGenreSuggestion.status === "needs_changes"
-                                            ? <>A moderator asked for changes to your genre suggestion. <Link to={`/suggestions/${openGenreSuggestion.submissionId}/revise`}>Revise it</Link></>
-                                            : <>Your genre suggestion is waiting for review. <Link to={`/suggestions/${openGenreSuggestion.submissionId}`}>View it</Link></>}
-                                    </p>
-                                )}
-                                <div className="album-genre-actions">
-                                    {canUseAuthenticatedActions ? (
-                                        openGenreSuggestion ? null : (
-                                            <Link className="album-side-action" to={`/suggestions/genres/${album.albumId}`}>
-                                                Suggest genres
-                                            </Link>
-                                        )
-                                    ) : renderSignInAction("Suggest genres")}
-                                </div>
-                            </div>
-                        )}
                         {selectedTab === "artist" && (
                             <dl className="album-facts">
                                 <div>
@@ -1108,6 +1138,32 @@ export function AlbumDetail()
                         )}
                     </section>
 
+                    {canUseAuthenticatedActions && album.albumId === albumId && (
+                        <ReviewForm
+                            key={`${userId}:${albumId}`}
+                            album={album}
+                            userId={userId}
+                            isOpen={isReviewComposerOpen}
+                            focusRequest={reviewComposer.focusRequest}
+                            onAddReview={addReview}
+                            onClose={() => {
+                                setReviewComposer((current) => ({ ...current, isOpen: false }));
+                                reviewTriggerRef.current?.focus();
+                            }}
+                            onSubmitted={() => {
+                                if (activeAlbumIdRef.current !== albumId || activeViewerRef.current !== userId) return;
+                                setReviewComposer((current) => ({ ...current, isOpen: false }));
+                                setReviewPostedMessage({ albumId, text: "Your review has been posted." });
+                                requestAnimationFrame(() => reviewStatusRef.current?.focus());
+                            }}
+                        />
+                    )}
+                    <p ref={reviewStatusRef} className="review-composer-status" role="status" tabIndex={-1}
+                        hidden={reviewPostedMessage?.albumId !== albumId || isReviewComposerOpen}>
+                        {reviewPostedMessage?.albumId === albumId ? reviewPostedMessage.text : ""}
+                    </p>
+                    {reviewActionMessage && <p className="review-action-message" role="alert">{reviewActionMessage}</p>}
+
                     {isReviewsRoute ? (
                         <section className="album-reviews-section">
                             <div className="album-section-heading">
@@ -1176,9 +1232,10 @@ export function AlbumDetail()
                                 </button>
                             ) : renderSignInAction("Log listen", "＋")}
                             {canUseAuthenticatedActions ? (
-                                <button className="album-side-action" type="button" onClick={() => {
+                                <button ref={reviewTriggerRef} className="album-side-action" type="button"
+                                    aria-expanded={isReviewComposerOpen} aria-controls="album-review-composer" onClick={() => {
                                     setReviewActionMessage("");
-                                    setIsReviewModalOpen(true);
+                                    setReviewComposer((current) => ({ ...current, albumId, isOpen: true, focusRequest: current.focusRequest + 1 }));
                                 }}>
                                     <span aria-hidden="true">★</span>Write review
                                 </button>
@@ -1279,20 +1336,6 @@ export function AlbumDetail()
                             // Logging a listen removes the album from the queue server-side.
                             setQueueRefreshKey((key) => key + 1);
                             if (activeAlbumIdRef.current === listen.albumId) setListenMessage(`Listen logged for ${listen.listenedOn}.`);
-                        }} />
-                    </div>
-                </div>
-            )}
-            {isReviewModalOpen && (
-                <div className="review-modal-backdrop" role="presentation" onMouseDown={() => setIsReviewModalOpen(false)}>
-                    <div className="review-modal" role="dialog" aria-modal="true" aria-label={`Review ${album.title}`} onMouseDown={(event) => event.stopPropagation()}>
-                        <button className="review-modal-close" type="button" onClick={() => setIsReviewModalOpen(false)} aria-label="Close review form">
-                            ×
-                        </button>
-                        {reviewActionMessage && <p className="review-action-message">{reviewActionMessage}</p>}
-                        <ReviewForm album={album} onAddReview={addReview} onSubmitted={() => {
-                            setReviewActionMessage("");
-                            setIsReviewModalOpen(false);
                         }} />
                     </div>
                 </div>

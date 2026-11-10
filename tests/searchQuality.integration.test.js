@@ -68,6 +68,63 @@ test('reviewed artist aliases prioritize artists and preserve alternative matche
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
+test('LOONA aliases expand both search response formats without broadening unrelated matches', { skip: !enabled }, async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rescened-loona-alias-test-'));
+  try {
+    await withCatalog(corpus(), directory, async ({ url, connection }) => {
+      const records = [
+        { key: 'latin', title: 'Latin Display Album', artistDisplayName: 'LOONA' },
+        { key: 'korean', title: 'Korean Display Album', artistDisplayName: '이달의 소녀' },
+        { key: 'latin-credit', title: 'Latin Collaboration', artistDisplayName: 'A Project', artistCredits: [{ name: 'LOONA' }] },
+        { key: 'korean-credit', title: 'Korean Collaboration', artistDisplayName: 'B Project', artistCredits: [{ name: '이달의 소녀' }] },
+        { key: 'latin-title', title: 'LOONA', artistDisplayName: 'A Tribute Artist' },
+        { key: 'korean-title', title: '이달의 소녀', artistDisplayName: 'B Tribute Artist' },
+        { key: 'latin-label', title: 'Label Album', artistDisplayName: 'C Label Artist', label: 'LOONA' },
+        { key: 'korean-label', title: 'Label Album', artistDisplayName: 'D Label Artist', label: '이달의 소녀' },
+        { key: 'latin-tribute', title: 'Tribute Album', artistDisplayName: 'Loona Tribute' },
+        { key: 'korean-tribute', title: 'Tribute Album', artistDisplayName: '이달의 소녀 Tribute' },
+      ].map(({ key, ...album }) => ({ albumId: id(`loona-alias-${key}`), ...album }));
+      await connection.models.AlbumCatalog.insertMany(records);
+      const get = async (query, suffix) => {
+        const response = await fetch(`${url}/search/search?q=${encodeURIComponent(query)}&${suffix}`);
+        assert.equal(response.status, 200);
+        return response.json();
+      };
+      const expected = records.slice(0, 4).map(album => album.albumId).sort();
+      for (const [query, script, otherScript] of [
+        ['LOONA', 'latin', 'korean'], ['  lOoNa  ', 'latin', 'korean'],
+        ['이달의 소녀', 'korean', 'latin'], ['  이달의   소녀  ', 'korean', 'latin'],
+        ['이달의 소녀'.normalize('NFD'), 'korean', 'latin'],
+      ]) {
+        const auto = await get(query, 'limit=5');
+        const page = await get(query, 'page=1&limit=24');
+        assert.deepEqual(auto.map(album => album.albumId), page.results.slice(0, 5).map(album => album.albumId), query);
+        assert.deepEqual(auto.slice(0, 4).map(album => album.albumId).sort(), expected, query);
+        const resultIds = page.results.map(album => album.albumId);
+        for (const suffix of ['title', 'label', 'tribute']) {
+          assert.ok(resultIds.includes(id(`loona-alias-${script}-${suffix}`)), `${query} preserves ordinary ${suffix} matches`);
+          assert.ok(!resultIds.includes(id(`loona-alias-${otherScript}-${suffix}`)), `${query} does not expand ${suffix} matches`);
+        }
+        for (const album of page.results) {
+          assert.equal(album.artistDisplayName, records.find(record => record.albumId === album.albumId).artistDisplayName);
+          assert.ok(!('_id' in album) && !('searchRank' in album));
+        }
+      }
+      for (const [query, key] of [['Loona Tribute', 'latin-tribute'], ['이달의 소녀 Tribute', 'korean-tribute']]) {
+        // Ordinary token matching still finds the title on a tribute artist's
+        // album, but the longer query must not activate the artist alias.
+        assert.deepEqual((await get(query, 'limit=5')).map(album => album.albumId), [
+          id(`loona-alias-${key}`), id(`loona-alias-${key.replace('tribute', 'title')}`),
+        ]);
+      }
+      for (const query of ['loona Korean Display Album', '이달의 소녀 Latin Display Album', 'loona.*', 'LOONA|이달의 소녀']) {
+        assert.deepEqual(await get(query, 'limit=5'), [], query);
+        assert.deepEqual((await get(query, 'page=1')).results, [], query);
+      }
+    });
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('search quality executes real routes and indexes with stable independent judgments', { skip: !enabled }, async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rescened-quality-test-'));
   const data = corpus(); let resources;

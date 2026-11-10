@@ -177,3 +177,24 @@ export function communityGenreError(error) {
   const message = GENRE_ERROR_MESSAGES[error.code];
   return message ? { ...error, message } : error;
 }
+
+// Store the same public snapshots in an album's local draft as in its server
+// response, so restore, revision, and discard all use one normalization path.
+export function albumGenreChanges(form) {
+  const primaryIndex = form.additions.findIndex((entry) => entry.key === form.primaryKey);
+  return {
+    add: form.additions.map((entry) => (entry.genre ? { genre: entry.genre } : {
+      newGenre: { name: entry.newGenre.name, parent: entry.newGenre.parentGenreId ? { genreId: entry.newGenre.parentGenreId } : null },
+    })),
+    remove: [],
+    primary: primaryIndex >= 0 ? { addIndex: primaryIndex } : null,
+    note: form.note,
+  };
+}
+
+export function buildAlbumGenreProposal(changes) {
+  const form = initialGenreForm([], changes);
+  if (!form.additions.length) return null;
+  const { add, note } = buildGenreSuggestionPayload("", [], form);
+  return { add, ...(note ? { note } : {}) };
+}

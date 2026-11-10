@@ -3269,24 +3269,64 @@ html:has(.search-results-page) .search-submit {
   background: rgba(148, 163, 184, 0.7);
 }
 
-.album-genres-panel {
-  display: grid;
-  gap: 1rem;
+.album-genres {
+  margin-top: 1rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--app-line);
 }
 
-.album-genres-panel .album-genre-list,
-.album-genres-panel .album-genre-pending,
-.album-genres-panel .album-empty-copy {
-  margin: 0;
-}
-
-.album-genre-actions {
-  justify-self: start;
-}
-
-.album-genre-actions .album-side-action {
+.album-genres-header {
+  display: flex;
   min-height: 44px;
-  border: 1px solid var(--app-line);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+}
+
+.album-genres-header h2 {
+  margin: 0;
+  color: var(--app-muted);
+  font-size: 0.65rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.album-genre-suggest {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--app-muted);
+  font: inherit;
+  font-size: 0.7rem;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+.album-genre-suggest:hover {
+  color: var(--app-text);
+}
+
+.album-genre-suggest:focus-visible,
+.album-genre-badge:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 3px;
+}
+
+.album-genre-empty {
+  margin: 0;
+  color: var(--app-muted);
+  font-size: 0.75rem;
+}
+
+.album-genres .album-genre-pending {
+  margin: 0.65rem 0 0;
+  line-height: 1.5;
 }
 
 .album-tab:focus-visible,
@@ -3299,17 +3339,27 @@ html:has(.search-results-page) .search-submit {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
-  margin: 1rem 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
+.album-genre-list li {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .album-genre-badge {
   border: 1px solid var(--app-line-strong);
-  display: inline-block;
-  padding: 0.32rem 0.6rem;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 36px;
+  max-width: 100%;
+  padding: 0.45rem 0.7rem;
   font-size: 0.7rem;
-  line-height: 1;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
   letter-spacing: 0.04em;
   text-decoration: none;
 }
@@ -3324,6 +3374,12 @@ html:has(.search-results-page) .search-submit {
   background: var(--app-accent);
   /* The page background reads clearly on the accent in both themes. */
   color: var(--app-bg);
+}
+
+@media (max-width: 680px) {
+  .album-genre-badge {
+    min-height: 44px;
+  }
 }
 
 .album-genre-badge-secondary {
@@ -4562,6 +4618,7 @@ html:has(.search-results-page) .search-submit {
 
 .profile-main {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
   min-width: 0;
 }
@@ -4854,6 +4911,7 @@ html:has(.search-results-page) .search-submit {
 }
 
 .profile-tab-panel {
+  min-width: 0;
   min-height: 320px;
   margin-top: 1rem;
 }
@@ -4867,6 +4925,9 @@ html:has(.search-results-page) .search-submit {
 
 .profile-review-tab {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  overflow-wrap: anywhere;
   gap: 1rem;
 }
 
@@ -6063,11 +6124,14 @@ html:has(.search-results-page) .search-submit {
 
   .profile-tabs {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .profile-tab {
     width: 100%;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .profile-activity-item {
@@ -9823,6 +9887,20 @@ label.moderation-candidate-choice {
   cursor: not-allowed;
 }
 
+.board-listens-list li.is-in-board {
+  color: var(--app-muted);
+  opacity: 0.65;
+}
+
+.board-listens-list li.is-in-board button,
+.board-listens-list li.is-in-board .listen-source-label {
+  color: var(--app-muted);
+}
+
+.board-listens-list li.is-in-board button:disabled {
+  opacity: 1;
+}
+
 .board-listens-message {
   font-size: 0.85rem;
   color: var(--app-accent);
@@ -10815,14 +10893,15 @@ label.moderation-candidate-choice {
 
 .board-description-form textarea {
   width: 100%;
-  min-height: 3.2rem;
+  min-height: 9rem;
   padding: 0.55rem 0.7rem;
   border: 1px solid var(--app-line);
   border-radius: 0;
   background: var(--app-surface);
   color: var(--app-text);
   font: inherit;
-  font-size: 0.9rem;
+  font-size: 1rem;
+  line-height: 1.5;
   resize: vertical;
 }
 
@@ -11139,3 +11218,37 @@ label.moderation-candidate-choice {
   padding: 0;
   border: 0;
 }
+
+/* Keep profile review search usable alongside sorting on narrow screens. */
+.profile-review-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+}
+.profile-review-search label { font-size: 0.875rem; }
+.profile-review-search-controls { display: flex; gap: 0.5rem; flex-wrap: wrap; min-width: 0; }
+.profile-review-search input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--app-line-strong);
+  border-radius: 6px;
+  background: var(--app-surface);
+  color: inherit;
+  font: inherit;
+}
+.profile-review-search input:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.profile-review-search button { min-height: 44px; }
+.profile-review-status { font-size: 0.875rem; }
+
+.profile-review-tab > .profile-panel { min-width: 0; }
+.profile-review-tab .profile-section-header { flex-wrap: wrap; }
+.profile-review-tab .profile-section-header select { min-width: 0; max-width: 100%; }
+.profile-review-tab .profile-review-list,
+.profile-review-tab .profile-review-card { grid-template-columns: minmax(0, 1fr); min-width: 0; }

@@ -6,6 +6,7 @@ const Follow = require("../models/Follow");
 const UserProfile = require("../models/UserProfile");
 const Review = require("../models/Reviews");
 const AlbumCatalog = require("../models/AlbumCatalog");
+const AlbumSubmission = require("../models/AlbumSubmission");
 const Like = require("../models/Like");
 const Listen = require("../models/Listen");
 const TrackRanking = require("../models/TrackRanking");
@@ -75,6 +76,10 @@ function installNetworkRoute(t, options = {}) {
   });
 
   t.mock.method(ReviewComment, "aggregate", async () => options.commentCounts ?? []);
+  t.mock.method(AlbumSubmission, "aggregate", async (pipeline) => {
+    calls.suggestionAggregates = [...(calls.suggestionAggregates || []), pipeline];
+    return options.suggestions ?? [];
+  });
 
   t.mock.method(Listen, "aggregate", async () => {
     if (options.listenError) throw options.listenError;
@@ -244,6 +249,7 @@ test("network queries deduplicated followed accounts and excludes self and priva
   assert.equal(route.calls.aggregates.length, 1);
   assert.deepEqual(route.calls.aggregates[0][0], { $match: { userId: { $in: ["user_alex"] } } });
   assert.deepEqual(route.calls.rankingAggregates[0][0], { $match: { userId: { $in: ["user_alex"] } } }, "ranking activity must skip private profiles too");
+  assert.deepEqual(route.calls.suggestionAggregates[0][0].$match.submittedByUserId, { $in: ["user_alex"] }, "approval activity must skip private profiles too");
   assert.deepEqual(route.calls.authors, [], "empty review results must not cause an author request");
 });
 

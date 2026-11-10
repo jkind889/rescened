@@ -10,7 +10,7 @@ const UserProfile = require("../../models/UserProfile");
 const { DiaryAlbumFence } = require("../../models/AutomaticListen");
 const { normalizeCatalogAlbum } = require("./albumCatalog");
 const { fail, uuid, fields, calendarDate, listeningDate, creationInput, isCalendarDate } = require("./diaryValidation");
-const { transaction, claimBoard, touchBoard, syncOrder, claimListen } = require("./boardMutations");
+const { transaction, claimBoard, touchBoard, syncOrder, claimListen, pruneBoardNote } = require("./boardMutations");
 const { ownedBoard } = require("./boardLibrary");
 const { removeListenedAlbum } = require("./listenQueue");
 
@@ -135,12 +135,16 @@ async function deleteListen(userId, listenId) {
     const listen = await claimListen(userId, id, session);
     await BoardListen.deleteMany({ listenId: listen._id }, { session });
     await Listen.deleteOne({ _id: listen._id, userId }, { session });
-    for (const board of boards) await syncOrder(board, session);
+    for (const board of boards) {
+      await pruneBoardNote(board, listen.albumCatalogId, session);
+      await syncOrder(board, session);
+    }
   });
 }
 
-async function listListens(userId, query = {}, fixed = {}) {
-  fields(query, ["albumId", "boardId", "from", "to", "limit", "cursor"]);
+async function listListens(userId, query = {}, fixed = {}, { withBoardMembership = false } = {}) {
+  // Only the authenticated owner's diary can request membership annotations.
+  fields(query, ["albumId", "boardId", "from", "to", "limit", "cursor", ...(withBoardMembership ? ["membershipBoardId"] : [])]);
   const filters = { ...query };
   for (const [key, value] of Object.entries(fixed)) {
     if (filters[key] !== undefined && String(filters[key]).toLowerCase() !== String(value).toLowerCase()) {
@@ -163,7 +167,16 @@ async function listListens(userId, query = {}, fixed = {}) {
     board = await ownedBoard(userId, filters.boardId, false);
     if (!board) throw fail(404, "BOARD_NOT_FOUND", "Board not found");
   }
-  const scope = JSON.stringify({ userId, albumId, boardId: board?.boardId || "", from, to });
+  let membershipBoard;
+  if (filters.membershipBoardId !== undefined) {
+    const id = filters.membershipBoardId;
+    if (id !== "default") uuid(id, "board");
+    membershipBoard = await ownedBoard(userId, id, false);
+    if (!membershipBoard) throw fail(404, "BOARD_NOT_FOUND", "Board not found");
+  }
+  const scope = JSON.stringify({ userId, albumId, boardId: board?.boardId || "", from, to,
+    ...(membershipBoard ? { membershipBoardId: membershipBoard.boardId } : {}),
+  });
   const cursor = filters.cursor === undefined ? null : decodeCursor(filters.cursor, scope);
   const match = { userId };
   if (from || to) match.listenedOn = { ...(from ? { $gte: from } : {}), ...(to ? { $lte: to } : {}) };
@@ -190,10 +203,17 @@ async function listListens(userId, query = {}, fixed = {}) {
     { $unwind: "$album" },
     { $limit: limit + 1 },
   );
+  if (membershipBoard) pipeline.push({ $lookup: {
+    from: "boardlistens", localField: "_id", foreignField: "listenId",
+    pipeline: [{ $match: { boardId: membershipBoard._id, userId } }, { $limit: 1 }], as: "selectedBoardMembership",
+  } });
   const rows = await Listen.aggregate(pipeline);
   const page = rows.slice(0, limit);
   return {
-    listens: page.map((row) => serializeListen(row, row.album)),
+    listens: page.map((row) => ({
+      ...serializeListen(row, row.album),
+      ...(membershipBoard ? { inBoard: row.selectedBoardMembership.length > 0 } : {}),
+    })),
     nextCursor: rows.length > limit ? encodeCursor(page.at(-1), scope) : null,
   };
 }

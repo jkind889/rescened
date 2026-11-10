@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const mongoose = require("mongoose");
 const Like = require("../../models/Like");
 const Review = require("../../models/Reviews");
+const { normalizeReviewSearch, reviewSearchStages } = require("./reviewSearch");
 
 const DEFAULT_REVIEW_PAGE_SIZE = 20;
 const MAX_REVIEW_PAGE_SIZE = 50;
@@ -62,6 +63,7 @@ function decodeCursor(cursor, expected) {
       payload?.v !== cursorVersion(expected.sort)
       || payload.sort !== expected.sort
       || payload.scope !== expected.scope
+      || (payload.search || "") !== (expected.search || "")
       || !mongoose.isValidObjectId(payload.id)
       || !Number.isFinite(new Date(payload.date).getTime())
       || (payload.sort === "popular" && (
@@ -85,14 +87,15 @@ function parseLimit(value) {
   return Math.min(MAX_REVIEW_PAGE_SIZE, parsed);
 }
 
-function parseReviewFeedQuery(query, scope) {
+function parseReviewFeedQuery(query, scope, { searchable = false } = {}) {
+  const search = searchable ? normalizeReviewSearch(query?.q) : "";
   const sort = String(query?.sort || "recent").trim().toLowerCase();
   if (!VALID_SORTS.has(sort)) {
     throw new ReviewFeedValidationError("Review sort must be recent, popular, highest, or lowest", "INVALID_REVIEW_SORT");
   }
   const limit = parseLimit(query?.limit);
-  const cursor = query?.cursor ? decodeCursor(query.cursor, { sort, scope }) : null;
-  return { sort, limit, cursor, scope, snapshotTime: cursor?.snapshotTime || null };
+  const cursor = query?.cursor ? decodeCursor(query.cursor, { sort, scope, search }) : null;
+  return { sort, limit, cursor, scope, search, snapshotTime: cursor?.snapshotTime || null };
 }
 
 function recentCursorFilter(cursor) {
@@ -133,9 +136,10 @@ function popularCursorFilter(cursor) {
   };
 }
 
-function buildPopularReviewPagePipeline(match, { cursor, limit }) {
+function buildPopularReviewPagePipeline(match, { cursor, limit, search }) {
   const pipeline = [
     { $match: match },
+    ...reviewSearchStages(search),
     {
       $lookup: {
         from: Like.collection.name,
@@ -196,7 +200,7 @@ async function readPopularReviewPage(match, feed, db = Review.db.db) {
       const result = await db.command({
         aggregate: Review.collection.name,
         pipeline: [
-          ...buildPopularReviewPagePipeline(match, { cursor, limit: feed.limit }),
+          ...buildPopularReviewPagePipeline(match, { cursor, limit: feed.limit, search: feed.search }),
           // At most 51 tiny rank tuples become one document. Requesting two
           // documents exhausts the command cursor without retaining a session
           // or server cursor between HTTP requests.
@@ -219,8 +223,10 @@ async function readPopularReviewPage(match, feed, db = Review.db.db) {
 
       // Freeze only ranking. Never resurrect deleted reviews or return their
       // historical text; resolve each page against current review documents.
-      const current = await Review.find({ ...match, _id: { $in: ranked.map((row) => row._id) } })
-        .maxTimeMS(remainingTime()).lean();
+      const currentMatch = { ...match, _id: { $in: ranked.map((row) => row._id) } };
+      const current = feed.search
+        ? await Review.aggregate([{ $match: currentMatch }, ...reviewSearchStages(feed.search)]).option({ maxTimeMS: remainingTime() })
+        : await Review.find(currentMatch).maxTimeMS(remainingTime()).lean();
       const byId = new Map(current.map((row) => [String(row._id), row]));
       for (const rank of ranked) {
         const review = byId.get(String(rank._id));
@@ -244,12 +250,13 @@ async function readPopularReviewPage(match, feed, db = Review.db.db) {
   }
 }
 
-function nextCursorFor(review, { sort, scope, snapshotTime }) {
+function nextCursorFor(review, { sort, scope, search, snapshotTime }) {
   if (!review) return null;
   if (sort === "popular" && !validSnapshotTime(snapshotTime)) throw popularFeedUnavailable();
   return encodeCursor({
     sort,
     scope,
+    search: search || undefined,
     snapshotTime: sort === "popular" ? snapshotTime : undefined,
     likeCount: sort === "popular" ? Number(review.likeCount) || 0 : undefined,
     rating: RATING_SORTS.has(sort) ? Number(review.rating) : undefined,

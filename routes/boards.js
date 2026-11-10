@@ -5,7 +5,8 @@ const { findAlbumByPublicId } = require("./utils/albumCatalog");
 const { albumSaveRateLimit, boardMutationRateLimit, diaryMutationRateLimit } = require("./utils/rateLimit");
 const { fail, fields } = require("./utils/diaryValidation");
 const { getDefaultBoard, ownedBoard, formatBoard, formatBoards, albumBoards, publicBoardId } = require("./utils/boardLibrary");
-const { saveAlbum, removeAlbum, deleteBoard, setMembership, updateBoard, reorderBoard } = require("./utils/boardMutations");
+const { saveAlbum, removeAlbum, deleteBoard, setMembership, updateBoard, reorderBoard, updateBoardNote } = require("./utils/boardMutations");
+const { noteInput } = require("./utils/boardNoteInput");
 const { orderInput, settingsInput } = require("./utils/boardOrder");
 const { listListens } = require("./utils/listeningDiary");
 const { pickUnplayedAlbum } = require("./utils/boardPick");
@@ -18,14 +19,14 @@ function auth(req, res, next) {
   req.userId = userId;
   next();
 }
-const MAX_DESCRIPTION_LENGTH = 280;
+const MAX_DESCRIPTION_LENGTH = 500;
 function title(value) { return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : ""; }
 // Descriptions keep line breaks but drop trailing spaces and runs of blank lines.
 function description(value) {
   if (value === undefined) return undefined;
   if (typeof value !== "string") throw fail(400, "INVALID_BOARD_DESCRIPTION", "Board description must be text");
   const text = value.replace(/\r\n?/g, "\n").split("\n").map((line) => line.trimEnd()).join("\n").replace(/\n{3,}/g, "\n\n").trim();
-  if (text.length > MAX_DESCRIPTION_LENGTH) throw fail(400, "INVALID_BOARD_DESCRIPTION", "Board description must be 280 characters or fewer");
+  if (text.length > MAX_DESCRIPTION_LENGTH) throw fail(400, "INVALID_BOARD_DESCRIPTION", "Board description must be 500 characters or fewer");
   return text;
 }
 function body(req, allowed) {
@@ -134,6 +135,15 @@ router.post("/:boardId/albums", auth, albumSaveRateLimit, async (req, res) => {
     const { albums, ...summary } = formatted;
     res.status(201).json({ board: summary, album: albums.find((item) => item.albumId === album.albumId) || null });
   } catch (error) { sendError(res, error, "Failed to save album to board"); }
+});
+
+// A note belongs to this board/album membership, never to the catalog album.
+router.patch("/:boardId/albums/:albumId/note", auth, boardMutationRateLimit, async (req, res) => {
+  try {
+    const input = noteInput(req.body);
+    const album = await findAlbumByPublicId(req.params.albumId);
+    res.json(await updateBoardNote(req.userId, target(req), album._id, input));
+  } catch (error) { sendError(res, error, "Failed to save board note"); }
 });
 
 router.delete("/:boardId/albums/:albumId", auth, async (req, res) => {

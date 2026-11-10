@@ -97,8 +97,9 @@ Diary entries, newest date first. Last.fm scrobbles are not diary listens and ar
 | `albumArtist` | text | Current catalog `artistDisplayName`. |
 | `savedAt` | timestamp | When the album joined the board: the explicit save, or the earliest linked diary listen. |
 | `explicitlySaved` | boolean | False when the album is on the board only through linked diary listens. |
+| `note` | text | This board's optional album note, blank if none. Plain text, at most 100 Unicode grapheme clusters. |
 
-In JSON, `position` through `explicitlySaved` are the fields of each entry in a board's `albums`. A user's saved shelf is the deduplicated set of `albumId` values across all their boards.
+In JSON, `position` through `note` are the fields of each entry in a board's `albums`. A user's saved shelf is the deduplicated set of `albumId` values across all their boards.
 
 ## Not exported in v1
 
