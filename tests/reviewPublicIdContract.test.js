@@ -3,6 +3,7 @@ const test = require("node:test");
 const mongoose = require("mongoose");
 
 const AlbumCatalog = require("../models/AlbumCatalog");
+const AlbumSubmission = require("../models/AlbumSubmission");
 const BoardItem = require("../models/BoardItem");
 const Follow = require("../models/Follow");
 const Like = require("../models/Like");
@@ -342,6 +343,7 @@ test("profile review activity uses the public review ID for both activity identi
   t.mock.method(Review, "find", () => chainQuery([review]));
   t.mock.method(BoardItem, "aggregate", async () => []);
   t.mock.method(Listen, "aggregate", async () => []);
+  t.mock.method(AlbumSubmission, "aggregate", async () => []);
   t.mock.method(TrackRanking, "aggregate", async () => []);
   t.mock.method(ReviewComment, "aggregate", async () => [{ _id: internalReviewId, count: 6 }]);
   const router = loadRoute(t, profileRoutePath);

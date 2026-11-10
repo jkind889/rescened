@@ -27,6 +27,7 @@ const files = [
   "tests/notifications.integration.test.js",
   "tests/reviewComments.integration.test.js",
   "tests/profileNetwork.integration.test.js",
+  "tests/suggestionActivity.integration.test.js",
   "tests/trackRankings.integration.test.js",
   "tests/listeningStats.integration.test.js",
   "tests/genres.integration.test.js",

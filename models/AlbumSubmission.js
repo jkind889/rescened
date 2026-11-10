@@ -521,6 +521,7 @@ albumSubmissionSchema.pre(["findOneAndUpdate", "updateOne"], function validateSu
 });
 
 albumSubmissionSchema.index({ submittedByUserId: 1, createdAt: -1, _id: -1 });
+albumSubmissionSchema.index({ submittedByUserId: 1, status: 1, approvedAt: -1, submissionId: -1 });
 albumSubmissionSchema.index({ openGenreSuggestionKey: 1 }, { unique: true, sparse: true });
 albumSubmissionSchema.index({ status: 1, updatedAt: -1, _id: -1 });
 albumSubmissionSchema.index({ status: 1, approvedAt: -1, _id: -1 });

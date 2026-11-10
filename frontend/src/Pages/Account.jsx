@@ -23,6 +23,7 @@ import { getApiErrorMessage } from "../utils/apiErrors";
 import { REVIEW_SORTS, REVIEW_SORT_OPTIONS } from "../utils/reviewSorts";
 import Cover from "../Components/Cover";
 import EditedTag from "../features/reviews/EditedTag";
+import { suggestionActivityLabels } from "../utils/activityLabels";
 
 const tabs = [
   { id: "overview", label: "Overview" },
@@ -899,8 +900,8 @@ export function Account() {
             review_comment: "commented on",
             comment_reply: "replied on",
           };
-          const actionLabel = actionLabelByType[activity.type] || "Activity";
-          const actionText = actionTextByType[activity.type] || "updated";
+          const actionLabel = suggestionActivityLabels(activity)?.label || actionLabelByType[activity.type] || "Activity";
+          const actionText = suggestionActivityLabels(activity)?.action || actionTextByType[activity.type] || "updated";
           const actorState = {
             profileUser: {
               username: actorName,
@@ -999,8 +1000,8 @@ export function Account() {
     return renderActivityFeed(activityItems, {
       title: "No activity yet",
       body: canManageProfile
-        ? "Listens, reviews, and saved albums will show up here."
-        : "This listener has not logged a listen, saved an album, or written a review yet.",
+        ? "Listens, reviews, saved albums, and approved suggestions will show up here."
+        : "This listener has no public activity yet.",
     });
   }
 
@@ -1075,7 +1076,7 @@ export function Account() {
 
     return renderActivityFeed(networkItems, {
       title: "No network activity yet",
-      body: "Follow listeners to see their latest listens and reviews here.",
+      body: "Follow listeners to see their latest listens, reviews, and approved suggestions here.",
     });
   }
 
@@ -1421,7 +1422,7 @@ export function Account() {
                           review_comment: "Commented",
                           comment_reply: "Replied",
                         };
-                        const actionLabel = actionLabelByType[activity.type] || "Activity";
+                        const actionLabel = suggestionActivityLabels(activity)?.label || actionLabelByType[activity.type] || "Activity";
                         const activityPath = activity.type === "follow" && targetUser.userId
                           ? `/profile/${encodeURIComponent(targetUser.userId)}`
                           : activity.type === "review_comment" || activity.type === "comment_reply"
