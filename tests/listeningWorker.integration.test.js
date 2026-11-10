@@ -6,7 +6,7 @@ const { MongoMemoryReplSet } = require("mongodb-memory-server");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const Listen = require("../models/Listen");
 const { Connection, Scrobble, MappingCase, AlbumMapping, Job, CatalogScan, ProviderBudget } = require("../models/Listening");
-const { enqueueJob, persistPage, runWorkerOnce, scheduleCatalogRediscoveryJobs, scheduleDueSyncJobs, scheduleStaleMappingJobs, RETENTION_MS } = require("../lib/listening/worker");
+const { enqueueJob, persistPage, runWorkerOnce, scheduleCatalogRediscoveryJobs, scheduleDueSyncJobs, scheduleStaleMappingJobs, RETENTION_MS, MAX_SYNC_ROWS_PER_TRANSACTION, SYNC_RUN_BUDGET_MS } = require("../lib/listening/worker");
 const { mappingKey, normalize } = require("../lib/listening/common");
 const { createLastfmProvider } = require("../lib/listening/provider");
 
@@ -74,6 +74,223 @@ test("listening worker MongoDB integration", { skip: !enabled }, async (t) => {
     assert.equal((await MappingCase.findOne({ key: mappingKey("Album Artist", "Edition Label") })).encounterCount, 2);
     assert.equal((await MappingCase.findOne({ key: mappingKey("Album Artist", "Edition Label") })).listenerCount, 1);
     assert.equal(await Listen.countDocuments(), 0);
+  });
+
+  await t.test("known rows skip resolution and writes while new rows share one transaction-local resolution", async (t) => {
+    await reset();
+    const conn = await connection();
+    const tracks = Array.from({ length: 10 }, (_, index) => track(`Track ${index}`, "2026-09-25T12:10:00Z"));
+    const provider = { async recentTracks() { return { page: 1, totalPages: 1, tracks }; } };
+    const lookup = t.mock.method(AlbumMapping, "findOne");
+    await enqueueJob("sync", "sync:initial", { connectionId: String(conn._id), connectionRevision: 1 }, { runAt: DUE });
+    assert.equal((await runWorkerOnce(workerOptions(provider))).status, "done");
+    assert.equal(lookup.mock.callCount(), 1);
+    lookup.mock.restore();
+    const noResolution = t.mock.method(AlbumMapping, "findOne", () => { throw new Error("duplicate must not resolve mapping/baseline"); });
+    const noWrite = t.mock.method(Scrobble, "updateOne", () => { throw new Error("unchanged duplicate must not write"); });
+    await enqueueJob("sync", "sync:duplicate", { connectionId: String(conn._id), connectionRevision: 1 }, { runAt: DUE });
+    assert.equal((await runWorkerOnce(workerOptions(provider))).status, "done");
+    assert.equal(noResolution.mock.callCount(), 0);
+    assert.equal(noWrite.mock.callCount(), 0);
+    assert.equal((await MappingCase.findOne({ key: mappingKey("Album Artist", "Edition Label") })).encounterCount, 10);
+  });
+
+  await t.test("duplicate IDs inside one batch retain the first values and flag track conflicts", async () => {
+    await reset();
+    const conn = await connection();
+    const first = { ...track("One", "2026-09-25T12:10:00Z"), trackMbid: crypto.randomUUID(), albumMbid: crypto.randomUUID() };
+    const changed = { ...first, trackMbid: crypto.randomUUID(), albumMbid: crypto.randomUUID() };
+    const provider = { async recentTracks() { return { page: 1, totalPages: 1, tracks: [first, changed, changed] }; } };
+    await enqueueJob("sync", "sync:batch-conflicts", { connectionId: String(conn._id), connectionRevision: 1 }, { runAt: DUE });
+    assert.equal((await runWorkerOnce(workerOptions(provider))).status, "done");
+    const stored = await Scrobble.findOne().lean();
+    assert.equal(stored.trackMbid, first.trackMbid);
+    assert.equal(stored.identityConflict, true);
+    assert.deepEqual(stored.identityConflictFields.sort(), ["albumMbid", "trackMbid"]);
+    assert.equal(await Scrobble.countDocuments(), 1);
+    assert.equal((await MappingCase.findOne()).encounterCount, 1);
+  });
+
+  await t.test("a large page yields with atomic row progress and refetches only to validate its resume offset", async () => {
+    await reset();
+    const conn = await connection();
+    const tracks = Array.from({ length: 23 }, (_, index) => track(`Batch ${index}`, "2026-09-25T12:10:00Z"));
+    const pages = []; const metrics = [];
+    const provider = { async recentTracks({ page }) { pages.push(page); return { page, totalPages: 1, tracks }; } };
+    await enqueueJob("sync", "sync:row-progress", { connectionId: String(conn._id), connectionRevision: 1 }, { runAt: DUE });
+    let elapsed = 0;
+    const options = { ...workerOptions(provider), elapsedClock: () => elapsed, diagnostics(event) {
+      metrics.push(event);
+      if (event.stage === "persist") elapsed += SYNC_RUN_BUDGET_MS;
+    } };
+    assert.equal((await runWorkerOnce(options)).status, "pending");
+    let stored = await Job.findOne({ key: "sync:row-progress" }).lean();
+    assert.equal(stored.progress.nextPage, 1);
+    assert.equal(stored.progress.nextRow, MAX_SYNC_ROWS_PER_TRANSACTION);
+    assert.match(stored.progress.pageFingerprint, /^[a-f0-9]{64}$/);
+    assert.equal(await Scrobble.countDocuments(), MAX_SYNC_ROWS_PER_TRANSACTION);
+    assert.equal((await Connection.findById(conn._id)).completedThrough, null);
+    assert.equal(await Job.countDocuments({ type: "detect" }), 0);
+    await Job.updateOne({ _id: stored._id }, { $set: { runAt: DUE } });
+    assert.equal((await runWorkerOnce({ ...options, diagnostics: (event) => metrics.push(event) })).status, "done");
+    assert.deepEqual(pages, [1, 1]);
+    assert.equal(await Scrobble.countDocuments(), tracks.length);
+    assert.equal((await MappingCase.findOne()).encounterCount, tracks.length);
+    assert.deepEqual(metrics.filter((event) => event.stage === "persist").map((event) => event.rows), [10, 10, 3]);
+    assert.ok((await Connection.findById(conn._id)).completedThrough);
+  });
+
+  await t.test("changed page content with the same page count replays instead of skipping a new row", async () => {
+    await reset();
+    const conn = await connection();
+    let tracks = Array.from({ length: 11 }, (_, index) => track(`Old ${index}`, "2026-09-25T12:10:00Z"));
+    const provider = { async recentTracks() { return { page: 1, totalPages: 1, tracks }; } };
+    await enqueueJob("sync", "sync:changed-page", { connectionId: String(conn._id), connectionRevision: 1 }, { runAt: DUE });
+    let elapsed = 0;
+    const options = { ...workerOptions(provider), elapsedClock: () => elapsed, diagnostics(event) { if (event.stage === "persist") elapsed += SYNC_RUN_BUDGET_MS; } };
+    assert.equal((await runWorkerOnce(options)).status, "pending");
+    tracks = [track("Late inserted", "2026-09-25T12:20:00Z"), ...tracks];
+    await Job.updateOne({ key: "sync:changed-page" }, { $set: { runAt: DUE } });
+    const result = await runWorkerOnce(workerOptions(provider));
+    assert.equal(result.error, "lastfm_pagination_changed");
+    const progress = (await Job.findOne({ key: "sync:changed-page" })).progress;
+    assert.equal(progress.nextPage, 1);
+    assert.equal(progress.nextRow, undefined);
+    assert.equal((await Connection.findById(conn._id)).completedThrough, null);
+    await Job.updateOne({ key: "sync:changed-page" }, { $set: { runAt: DUE } });
+    assert.equal((await runWorkerOnce(workerOptions(provider))).status, "done");
+    assert.equal(await Scrobble.countDocuments(), tracks.length);
+    assert.equal((await MappingCase.findOne()).encounterCount, tracks.length);
+  });
+
+  await t.test("a resumed page with only changed MBID metadata replays already committed identities", async () => {
+    await reset();
+    const conn = await connection();
+    const tracks = Array.from({ length: 11 }, (_, index) => track(`Metadata ${index}`, "2026-09-25T12:10:00Z"));
+    const firstId = crypto.randomUUID();
+    tracks[0].trackMbid = firstId;
+    const provider = { async recentTracks() { return { page: 1, totalPages: 1, tracks }; } };
+    await enqueueJob("sync", "sync:changed-metadata", { connectionId: String(conn._id), connectionRevision: 1 }, { runAt: DUE });
+    let elapsed = 0;
+    const options = { ...workerOptions(provider), elapsedClock: () => elapsed,
+      diagnostics(event) { if (event.stage === "persist") elapsed += SYNC_RUN_BUDGET_MS; } };
+    assert.equal((await runWorkerOnce(options)).status, "pending");
+    tracks[0].trackMbid = crypto.randomUUID();
+    await Job.updateOne({ key: "sync:changed-metadata" }, { $set: { runAt: DUE } });
+    assert.equal((await runWorkerOnce(workerOptions(provider))).error, "lastfm_pagination_changed");
+    await Job.updateOne({ key: "sync:changed-metadata" }, { $set: { runAt: DUE } });
+    assert.equal((await runWorkerOnce(workerOptions(provider))).status, "done");
+    const stored = await Scrobble.findOne({ track: "Metadata 0" });
+    assert.equal(stored.trackMbid, firstId);
+    assert.equal(stored.identityConflict, true);
+    assert.equal((await MappingCase.findOne()).encounterCount, tracks.length);
+  });
+
+  await t.test("losing the lease on a later batch preserves only the earlier committed checkpoint", async () => {
+    await reset();
+    const conn = await connection();
+    const tracks = Array.from({ length: 21 }, (_, index) => track(`Lease ${index}`, "2026-09-25T12:10:00Z"));
+    const provider = { async recentTracks() { return { page: 1, totalPages: 1, tracks }; } };
+    await enqueueJob("sync", "sync:batch-failure", { connectionId: String(conn._id), connectionRevision: 1 }, { runAt: DUE });
+    let batches = 0;
+    let at = new Date("2026-09-25T14:00:00Z");
+    const options = { ...workerOptions(provider, () => at), elapsedClock: () => 0, sessionFactory: async () => {
+      const session = await mongoose.startSession();
+      const original = session.withTransaction.bind(session);
+      batches += 1;
+      if (batches === 2) session.withTransaction = (fn) => original(async () => {
+        // Inject lease loss after writes/checkpoint but before the transaction commits.
+        await fn();
+        at = new Date(at.getTime() + 120_001);
+        throw Object.assign(new Error("lost lease"), { code: "job_lease_lost" });
+      });
+      return session;
+    } };
+    assert.equal((await runWorkerOnce(options)).error, "job_lease_lost");
+    const stored = await Job.findOne({ key: "sync:batch-failure" }).lean();
+    assert.equal(stored.progress.nextRow, 10);
+    assert.equal(await Scrobble.countDocuments(), 10);
+    assert.equal((await MappingCase.findOne()).encounterCount, 10);
+    assert.equal((await Connection.findById(conn._id)).completedThrough, null);
+    assert.equal((await runWorkerOnce(workerOptions(provider, () => at))).status, "done");
+    assert.equal(await Scrobble.countDocuments(), 21);
+    assert.equal((await MappingCase.findOne()).encounterCount, 21);
+  });
+
+  await t.test("a crash after the final row checkpoint resumes finalization without fetching an extra page", async () => {
+    await reset();
+    const conn = await connection();
+    let fetches = 0; let sessions = 0;
+    let at = new Date("2026-09-25T14:00:00Z");
+    const provider = { async recentTracks() { fetches += 1; return { page: 1, totalPages: 1, tracks: [track("Final", "2026-09-25T12:10:00Z")] }; } };
+    await enqueueJob("sync", "sync:finalization", { connectionId: String(conn._id), connectionRevision: 1 }, { runAt: DUE });
+    const options = { ...workerOptions(provider, () => at), sessionFactory: async () => {
+      sessions += 1;
+      if (sessions === 2) {
+        at = new Date(at.getTime() + 120_001);
+        throw Object.assign(new Error("lost lease before finalization"), { code: "job_lease_lost" });
+      }
+      return mongoose.startSession();
+    } };
+    assert.equal((await runWorkerOnce(options)).error, "job_lease_lost");
+    assert.equal((await Job.findOne({ key: "sync:finalization" })).progress.nextPage, 2);
+    assert.equal((await Connection.findById(conn._id)).completedThrough, null);
+    assert.equal((await runWorkerOnce(workerOptions(provider, () => at))).status, "done");
+    assert.equal(fetches, 1);
+    assert.equal(await Scrobble.countDocuments(), 1);
+    assert.ok((await Connection.findById(conn._id)).completedThrough);
+  });
+
+  await t.test("a partial sweep does not mark completion or enqueue detection, and never moves the sync cursor", async () => {
+    await reset();
+    const conn = await connection();
+    const completedThrough = new Date("2026-09-25T13:00:00Z");
+    await Connection.updateOne({ _id: conn._id }, { $set: { completedThrough } });
+    const tracks = Array.from({ length: 12 }, (_, index) => track(`Sweep ${index}`, "2026-09-25T12:10:00Z"));
+    const provider = { async recentTracks() { return { page: 1, totalPages: 1, tracks }; } };
+    await enqueueJob("sweep", "sweep:row-progress", { connectionId: String(conn._id), connectionRevision: 1 }, { runAt: DUE });
+    let elapsed = 0;
+    const options = { ...workerOptions(provider), types: ["sweep"], env: { ...workerOptions(provider).env, LASTFM_DEEP_SWEEP_ENABLED: "true", LISTENING_DETECTION_ENABLED: "true" },
+      elapsedClock: () => elapsed, diagnostics(event) { if (event.stage === "persist") elapsed += SYNC_RUN_BUDGET_MS; } };
+    assert.equal((await runWorkerOnce(options)).status, "pending");
+    assert.equal((await Connection.findById(conn._id)).lastSweepAt, null);
+    assert.equal(await Job.countDocuments({ type: "detect" }), 0);
+    await Job.updateOne({ key: "sweep:row-progress" }, { $set: { runAt: DUE } });
+    assert.equal((await runWorkerOnce({ ...options, diagnostics: undefined })).status, "done");
+    const final = await Connection.findById(conn._id);
+    assert.equal(final.completedThrough.toISOString(), completedThrough.toISOString());
+    assert.ok(final.lastSweepAt);
+    assert.equal(await Job.countDocuments({ type: "detect" }), 1);
+    assert.equal(await Scrobble.countDocuments(), tracks.length);
+  });
+
+  await t.test("transaction callback replay resets case caches and only counts committed evidence", async () => {
+    await reset();
+    const conn = await connection();
+    const tracks = [track("Retry", "2026-09-25T12:10:00Z")];
+    const provider = { async recentTracks() { return { page: 1, totalPages: 1, tracks }; } };
+    await enqueueJob("sync", "sync:transaction-replay", { connectionId: String(conn._id), connectionRevision: 1 }, { runAt: DUE });
+    let retried = false;
+    const options = { ...workerOptions(provider), sessionFactory: async () => {
+      const session = await mongoose.startSession();
+      const original = session.withTransaction.bind(session);
+      session.withTransaction = (fn) => original(async () => {
+        const result = await fn();
+        if (!retried) {
+          retried = true;
+          const error = new mongoose.mongo.MongoServerError({ message: "injected transaction retry", code: 112 });
+          error.addErrorLabel("TransientTransactionError");
+          throw error;
+        }
+        return result;
+      });
+      return session;
+    } };
+    assert.equal((await runWorkerOnce(options)).status, "done");
+    assert.equal(retried, true);
+    assert.equal(await Scrobble.countDocuments(), 1);
+    assert.equal((await MappingCase.findOne()).encounterCount, 1);
+    assert.equal(await Job.countDocuments({ type: "discovery" }), 1);
   });
 
   await t.test("ranks mapping cases by distinct listeners, not one listener's repeat plays", async () => {
@@ -203,6 +420,55 @@ test("listening worker MongoDB integration", { skip: !enabled }, async (t) => {
     const updated = await Connection.findById(conn._id).lean();
     assert.equal(updated.retentionGap.from.toISOString(), oldFrom.toISOString());
     assert.equal(updated.retentionGap.to.toISOString(), request.from.toISOString());
+  });
+
+  await t.test("retention-bounded catch-up preserves row offsets while the horizon advances", async () => {
+    await reset();
+    const start = new Date("2099-09-01T00:00:00Z");
+    const priorCursor = new Date("2099-09-15T00:00:00Z");
+    let now = new Date("2099-11-01T14:00:00Z");
+    const conn = await Connection.create({ userId: "user-1", username: "listener", usernameKey: "listener", state: "active", revision: 1,
+      connectedAt: start, windows: [{ start, end: null }], completedThrough: priorCursor, nextSyncAt: start });
+    const tracks = Array.from({ length: 23 }, (_, index) => track(`Retained ${index}`, "2099-10-31T12:10:00Z"));
+    const windows = [];
+    const provider = { async recentTracks({ from, to }) { windows.push([from.toISOString(), to.toISOString()]); return { page: 1, totalPages: 1, tracks }; } };
+    await enqueueJob("sync", "sync:moving-horizon", { connectionId: String(conn._id), connectionRevision: 1 }, { runAt: DUE });
+    let elapsed = 0;
+    let clockTicks = 0;
+    const options = { ...workerOptions(provider, () => new Date(now.getTime() + clockTicks++)), elapsedClock: () => elapsed,
+      diagnostics(event) { if (event.stage === "persist") elapsed += SYNC_RUN_BUDGET_MS; } };
+    assert.equal((await runWorkerOnce(options)).status, "pending");
+    assert.equal((await Job.findOne({ key: "sync:moving-horizon" })).progress.nextRow, 10);
+    now = new Date(now.getTime() + 2_000);
+    assert.equal((await runWorkerOnce(options)).status, "pending");
+    assert.equal((await Job.findOne({ key: "sync:moving-horizon" })).progress.nextRow, 20);
+    now = new Date(now.getTime() + 2_000);
+    assert.equal((await runWorkerOnce(options)).status, "done");
+    assert.equal(windows.length, 3);
+    assert.deepEqual(windows[1], windows[0]);
+    assert.deepEqual(windows[2], windows[0]);
+    assert.equal(await Scrobble.countDocuments(), tracks.length);
+    assert.equal((await MappingCase.findOne()).encounterCount, tracks.length);
+    const final = await Connection.findById(conn._id);
+    assert.equal(final.completedThrough.toISOString(), windows[0][1]);
+    assert.equal(final.retentionGap.from.toISOString(), "2099-09-13T00:00:00.000Z");
+  });
+
+  await t.test("an entirely expired fixed window records its gap without fetching expired history", async () => {
+    await reset();
+    const conn = await connection();
+    const to = new Date("2026-09-25T14:00:00Z");
+    await enqueueJob("sync", "sync:expired-window", { connectionId: String(conn._id), connectionRevision: 1 }, { runAt: DUE });
+    await Job.updateOne({ key: "sync:expired-window" }, { $set: { progress: {
+      window: { from: DUE.toISOString(), to: to.toISOString(), retentionBounded: true }, nextPage: 1, nextRow: 10, totalPages: 1, pageFingerprint: "old",
+    } } });
+    const provider = { async recentTracks() { throw new Error("must not fetch expired history"); } };
+    assert.equal((await runWorkerOnce(workerOptions(provider, () => new Date("2099-11-01T14:00:00Z")))).status, "done");
+    const final = await Connection.findById(conn._id);
+    assert.equal(final.retentionGap.from.toISOString(), DUE.toISOString());
+    assert.equal(final.retentionGap.to.toISOString(), to.toISOString());
+    assert.equal(final.completedThrough.toISOString(), to.toISOString());
+    assert.equal(await Scrobble.countDocuments(), 0);
   });
 
   await t.test("revision fencing rejects an in-flight page after pause or disconnect", async () => {

@@ -16,6 +16,13 @@
 - Treat the root and `frontend/` as separate npm projects with separate lockfiles. Run commands from the correct package and preserve both lockfiles when dependencies change.
 - Root `.env` values are server-side; `frontend/.env` is separate and may contain only browser-safe `VITE_*` values. Never expose `MONGO_URI`, `CLERK_SECRET_KEY`, moderator IDs, or other server secrets through Vite configuration or client code.
 
+## Development worktrees
+
+- Use the [shared-development worktree workflow](docs/WORKTREES.md) for new Rescened worktrees unless the user requests another environment. Prefer the helper's `create`, or enroll an externally created linked tree with `setup`.
+- The helper's creation base is the repository-local `rescened.worktreeBase` setting when present, otherwise `origin/main`; an explicit `--base` wins. When creating through Git or an editor instead, inspect that setting and select the same base explicitly. Do not silently branch from an older checkout that lacks the setup.
+- Reuse the approved private development profile outside all checkouts. Do not copy `.env` files, credentials, or user allowlists into a tree. Start only the paired API/Vite preview; this workflow does not authorize workers, provider ingestion, or database copies/resets.
+- Creation and cleanup use different safeguards: removal still requires commits contained in `origin/main` unless the user deliberately chooses another cleanup base. Preserve dirty/ignored user files and follow the guide's explicit cleanup checks.
+
 ## Catalog and identity invariants
 
 - `AlbumCatalog` is the authoritative public catalog. Search, album detail, reviews, likes, profiles, activity, and boards use local catalog records.

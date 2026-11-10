@@ -441,3 +441,41 @@ integration("simultaneous first genre proposals both succeed when the quota has 
   assert.deepEqual(results.map((result) => result.status), [201, 201], JSON.stringify(results));
   assert.equal(await openGenreNameCount(user), 4);
 });
+
+integration("edition-backed album creates and revisions preserve optional genres and immutable edition evidence together", async (t) => {
+  const Preview = require("../models/ContributorEditionPreview");
+  const { hashCandidateTracklist } = require("../lib/baselines/musicBrainz");
+  const oldFlag = process.env.CONTRIBUTOR_EDITIONS_ENABLED;
+  process.env.CONTRIBUTOR_EDITIONS_ENABLED = "true";
+  t.after(() => { if (oldFlag === undefined) delete process.env.CONTRIBUTOR_EDITIONS_ENABLED; else process.env.CONTRIBUTOR_EDITIONS_ENABLED = oldFlag; });
+  const owner = "inline-edition-owner";
+  const releaseMbid = crypto.randomUUID();
+  const candidate = {
+    releaseMbid, releaseGroupMbid: crypto.randomUUID(), title: "Edition and genre fixture", artistDisplayName: "Fixture Artist",
+    date: "2026", country: "US", formats: ["CD"], status: "Official", disambiguation: "", retrievedAt: new Date(),
+    sourceUrl: `https://musicbrainz.org/release/${releaseMbid}`, license: "CC0",
+    tracks: [{ discNumber: 1, trackNumber: 1, title: "Immutable provider track", durationMs: 1000, artistDisplayName: "Fixture Artist", releaseTrackMbid: crypto.randomUUID(), recordingMbid: crypto.randomUUID() }],
+  };
+  candidate.tracklistHash = hashCandidateTracklist(candidate);
+  const preview = await Preview.create({ ownerUserId: owner, candidate, expiresAt: new Date(Date.now() + 60_000) });
+  const body = { ...albumProposal({ add: [{ genreId: genres.jazz.genreId }] }), editionPreviewId: preview.previewId };
+  const created = await call("POST", "/suggestions", owner, body);
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  assert.equal(created.body.proposedGenres.add[0].genre.genreId, genres.jazz.genreId);
+  assert.equal(created.body.editionProposal.candidate.tracklistHash, candidate.tracklistHash);
+  assert.equal(created.body.revisions[0].editionProposal.previewId, preview.previewId);
+  assert.equal(created.body.revisions[0].proposedGenres.add[0].genre.genreId, genres.jazz.genreId);
+  const id = created.body.submissionId;
+  assert.equal((await call("POST", `/moderation/album-suggestions/${id}/request-changes`, MODERATOR, { reason: "Revise the genre choices." })).status, 200);
+  await Preview.deleteOne({ _id: preview._id });
+  process.env.CONTRIBUTOR_EDITIONS_ENABLED = "false";
+  const revised = await call("POST", `/suggestions/${id}/revise`, owner, { ...body, proposedGenres: { add: [{ genreId: genres.soul.genreId }] } });
+  assert.equal(revised.status, 200, JSON.stringify(revised.body));
+  assert.equal(revised.body.editionProposal.candidate.tracklistHash, candidate.tracklistHash);
+  assert.equal(revised.body.proposedGenres.add[0].genre.genreId, genres.soul.genreId);
+  assert.equal(revised.body.revisions.length, 2);
+  assert.equal(revised.body.revisions[0].proposedGenres.add[0].genre.genreId, genres.jazz.genreId);
+  assert.equal(revised.body.revisions[1].proposedGenres.add[0].genre.genreId, genres.soul.genreId);
+  assert.equal(revised.body.revisions[1].editionProposal.candidate.tracklistHash, candidate.tracklistHash);
+  assert.equal(revised.body.proposedMetadata.tracks[0].title, "Immutable provider track");
+});

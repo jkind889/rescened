@@ -23,3 +23,25 @@ test("inline genres round-trip local drafts and server revisions without workflo
   assert.equal(buildAlbumGenreProposal(null), null);
   assert.equal(buildAlbumGenreProposal(albumGenreChanges({ ...form, additions: [] })), null);
 });
+
+test("album form drafts and payloads preserve genres together with an unedited provider edition", async () => {
+  const vm = require("node:vm");
+  const { buildAlbumGenreProposal } = await helpers;
+  const form = fs.readFileSync(path.join(__dirname, "../frontend/src/Components/Community/SuggestionForm.jsx"), "utf8");
+  const functions = form.slice(form.indexOf("const MAX_ARTISTS"), form.indexOf("function FormError"));
+  const context = vm.createContext({ RELEASE_TYPE_OPTIONS: [], SOURCE_TYPE_OPTIONS: [], buildAlbumGenreProposal });
+  const { createDraft, buildPayload } = vm.runInContext(`${functions}\n({ createDraft, buildPayload })`, context);
+  const initial = {
+    proposedMetadata: { title: "Fixture", artistCredits: [{ name: "Artist" }], releaseType: "album", releaseDate: "2026" },
+    supportingSources: [{ type: "musicbrainz", url: "https://musicbrainz.org/" }],
+    editionProposal: { previewId: "11111111-1111-4111-8111-111111111111", candidate: { tracks: [{ title: "One", discNumber: 1, trackNumber: 1 }] } },
+    proposedGenres: { add: [{ genre: { genreId: "jazz-id", name: "Jazz" } }], note: "Genre evidence" },
+  };
+  const draft = createDraft(initial);
+  assert.equal(draft.proposedMetadata.tracks[0].title, "One");
+  assert.equal(draft.proposedGenres.note, "Genre evidence");
+  const payload = JSON.parse(JSON.stringify(buildPayload(draft)));
+  assert.equal(payload.editionPreviewId, initial.editionProposal.previewId);
+  assert.equal(Object.hasOwn(payload.proposedMetadata, "tracks"), false, "provider tracks remain server-authored");
+  assert.deepEqual(payload.proposedGenres, { add: [{ genreId: "jazz-id" }], note: "Genre evidence" });
+});

@@ -129,6 +129,8 @@ function installRouteMocks({ userId = "user_a", documents = [], createCalls = []
     filename: rateLimitPath,
     loaded: true,
     exports: {
+      contributorEditionRateLimit: pass,
+      correctionCreateRateLimit: pass,
       submissionCreateRateLimit: pass,
       submissionMutationRateLimit: pass,
       genreSuggestionRateLimit: pass,
@@ -294,14 +296,16 @@ test("creation rate limiting stops the database write and preserves the shared 4
     id: rateLimitPath,
     filename: rateLimitPath,
     loaded: true,
-    exports: { submissionCreateRateLimit: block, submissionMutationRateLimit: (req, res, next) => next(), genreSuggestionRateLimit: (req, res, next) => next() },
+    exports: { contributorEditionRateLimit: (req, res, next) => next(), correctionCreateRateLimit: block, submissionCreateRateLimit: block, submissionMutationRateLimit: (req, res, next) => next(), genreSuggestionRateLimit: (req, res, next) => next() },
   };
   delete require.cache[suggestionsPath];
   const router = require("../routes/suggestions");
-  const result = await callRoute(router, "post", "/", { body: validBody() });
-  assert.equal(result.status, 429);
-  assert.equal(result.body.code, "RATE_LIMITED");
-  assert.equal(createCalls.length, 0);
+  for (const path of ["/", "/corrections"]) {
+    const result = await callRoute(router, "post", path, { body: validBody() });
+    assert.equal(result.status, 429);
+    assert.equal(result.body.code, "RATE_LIMITED");
+    assert.equal(createCalls.length, 0);
+  }
 });
 
 test("GET /suggestions/:submissionId protects owners and permits allowlisted moderators", async () => {

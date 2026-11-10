@@ -7,6 +7,7 @@ import { clearDraft, readDraft, useDraftAutosave } from "../../features/communit
 import GenreSuggestionForm from "./GenreSuggestionForm";
 import { albumGenreChanges, buildAlbumGenreProposal, initialGenreForm } from "../../features/community/genres.js";
 import DraftNotice from "./DraftNotice";
+import ContributorEditionPicker from "./ContributorEditionPicker";
 
 const MAX_ARTISTS = 20;
 const MAX_SOURCES = 10;
@@ -80,8 +81,9 @@ function createDraft(initialValue) {
   const references = Array.isArray(source.externalReferences)
     ? source.externalReferences.map(referenceRow)
     : [];
-  const tracks = Array.isArray(metadata.tracks)
-    ? metadata.tracks.map(trackRow)
+  const selectedTracks = source.editionProposal?.candidate?.tracks || metadata.tracks;
+  const tracks = Array.isArray(selectedTracks)
+    ? selectedTracks.map(trackRow)
     : [];
 
   return {
@@ -100,6 +102,7 @@ function createDraft(initialValue) {
       tracks,
     },
     proposedGenres: source.proposedGenres || null,
+    editionProposal: source.editionProposal || null,
     supportingSources: sources,
     externalReferences: references,
   };
@@ -262,9 +265,12 @@ function buildPayload(draft) {
   }
 
   const proposedGenres = buildAlbumGenreProposal(draft.proposedGenres);
+  if (draft.editionProposal?.previewId) delete proposedMetadata.tracks;
+
   return {
     ...(proposedGenres ? { proposedGenres } : {}),
     proposedMetadata,
+    ...(draft.editionProposal?.previewId ? { editionPreviewId: draft.editionProposal.previewId } : {}),
     supportingSources: draft.supportingSources.map((source) => ({
       type: source.type,
       url: source.url.trim(),
@@ -328,6 +334,7 @@ export function SuggestionForm({
   disabled = false,
   formId = "community-suggestion-form",
   draftKey = "",
+  getToken,
 }) {
   const generatedId = useId();
   const [storedDraft] = useState(() => readDraft(draftKey));
@@ -338,9 +345,10 @@ export function SuggestionForm({
   const initialFingerprint = useMemo(() => draftFingerprint(createDraft(initialValue)), [initialValue]);
   useDraftAutosave(draftKey, draft, draftFingerprint(draft) === initialFingerprint);
   const [validationErrors, setValidationErrors] = useState([]);
+  const [editionBusy, setEditionBusy] = useState(false);
   const validationSummaryRef = useRef(null);
   const serverErrorRef = useRef(null);
-  const controlsDisabled = disabled || isSubmitting;
+  const controlsDisabled = disabled || isSubmitting || editionBusy;
   const idPrefix = `${formId}-${generatedId.replace(/:/g, "")}`;
 
   useEffect(() => {
@@ -379,18 +387,6 @@ export function SuggestionForm({
     }));
   }
 
-  function updateTrack(key, field, value) {
-    setDraft((current) => ({
-      ...current,
-      proposedMetadata: {
-        ...current.proposedMetadata,
-        tracks: current.proposedMetadata.tracks.map((track) => (
-          track.key === key ? { ...track, [field]: value } : track
-        )),
-      },
-    }));
-  }
-
   function addArtist() {
     setDraft((current) => ({
       ...current,
@@ -419,17 +415,8 @@ export function SuggestionForm({
     setDraft((current) => ({ ...current, externalReferences: [...current.externalReferences, referenceRow()] }));
   }
 
-  function addTrack() {
-    setDraft((current) => {
-      const tracks = current.proposedMetadata.tracks;
-      return {
-        ...current,
-        proposedMetadata: {
-          ...current.proposedMetadata,
-          tracks: [...tracks, trackRow({}, tracks.length)],
-        },
-      };
-    });
+  function isSelectedEditionReference(reference) {
+    return Boolean(draft.editionProposal) && reference.provider.trim().toLowerCase() === "musicbrainz" && ["release", "release-group"].includes(reference.entityType.trim().toLowerCase());
   }
 
   function removeRow(collection, key) {
@@ -439,14 +426,23 @@ export function SuggestionForm({
     }));
   }
 
-  function removeTrack(key) {
-    setDraft((current) => ({
-      ...current,
-      proposedMetadata: {
-        ...current.proposedMetadata,
-        tracks: current.proposedMetadata.tracks.filter((track) => track.key !== key),
-      },
-    }));
+  function selectEdition(value) {
+    const { candidate, previewId } = value;
+    if (!previewId || !candidate?.releaseMbid || !candidate?.releaseGroupMbid || !Array.isArray(candidate.tracks)) throw new Error("Invalid edition preview.");
+    const references = draft.externalReferences.filter((reference) => !(reference.provider.trim().toLowerCase() === "musicbrainz" && ["release", "release-group"].includes(reference.entityType.trim().toLowerCase())));
+    if (references.length + 2 > MAX_REFERENCES) throw new Error("Remove an external reference before choosing an edition.");
+    for (const [entityType, externalId] of [["release-group", candidate.releaseGroupMbid], ["release", candidate.releaseMbid]]) {
+      references.push(referenceRow({ provider: "musicbrainz", entityType, externalId, url: `https://musicbrainz.org/${entityType}/${externalId}` }));
+    }
+    const sources = draft.supportingSources.map((source) => ({ ...source }));
+    const blank = sources.find((source) => !source.url.trim());
+    if (blank) Object.assign(blank, { type: "musicbrainz", url: candidate.sourceUrl, description: "" });
+    else if (sources.length < MAX_SOURCES && !sources.some((source) => source.url === candidate.sourceUrl)) sources.push(sourceRow({ type: "musicbrainz", url: candidate.sourceUrl }));
+    setDraft({ ...draft, editionProposal: { previewId, candidate }, externalReferences: references, supportingSources: sources, proposedMetadata: { ...draft.proposedMetadata, tracks: candidate.tracks.map(trackRow) } });
+  }
+
+  function clearEdition() {
+    setDraft((current) => ({ ...current, editionProposal: null, proposedMetadata: { ...current.proposedMetadata, tracks: [] }, externalReferences: current.externalReferences.filter((reference) => !(reference.provider.trim().toLowerCase() === "musicbrainz" && reference.entityType.trim().toLowerCase() === "release")) }));
   }
 
   function discardDraft() {
@@ -785,6 +781,7 @@ export function SuggestionForm({
                       className="suggestion-form-input"
                       type="text"
                       value={reference.provider}
+                      readOnly={isSelectedEditionReference(reference)}
                       maxLength={50}
                       placeholder="musicbrainz"
                       onChange={(event) => updateRow("externalReferences", reference.key, "provider", event.target.value)}
@@ -797,6 +794,7 @@ export function SuggestionForm({
                       className="suggestion-form-input"
                       type="text"
                       value={reference.entityType}
+                      readOnly={isSelectedEditionReference(reference)}
                       maxLength={50}
                       placeholder="release-group"
                       onChange={(event) => updateRow("externalReferences", reference.key, "entityType", event.target.value)}
@@ -809,6 +807,7 @@ export function SuggestionForm({
                       className="suggestion-form-input"
                       type="text"
                       value={reference.externalId}
+                      readOnly={isSelectedEditionReference(reference)}
                       maxLength={200}
                       onChange={(event) => updateRow("externalReferences", reference.key, "externalId", event.target.value)}
                     />
@@ -820,6 +819,7 @@ export function SuggestionForm({
                       className="suggestion-form-input"
                       type="url"
                       value={reference.url}
+                      readOnly={isSelectedEditionReference(reference)}
                       maxLength={2048}
                       placeholder="https://"
                       onChange={(event) => updateRow("externalReferences", reference.key, "url", event.target.value)}
@@ -828,6 +828,7 @@ export function SuggestionForm({
                   <button
                     className="suggestion-form-remove"
                     type="button"
+                    disabled={isSelectedEditionReference(reference)}
                     onClick={() => removeRow("externalReferences", reference.key)}
                   >
                     Remove
@@ -852,97 +853,23 @@ export function SuggestionForm({
           <SectionHeading
             eyebrow="05 / Tracklist"
             title="Tracks"
-            description="Optional. Add a tracklist when a reliable source confirms it. Duration is entered in milliseconds."
             count={`${metadata.tracks.length}/${MAX_TRACKS}`}
             headingId={`${idPrefix}-tracks-heading`}
           />
+          <ContributorEditionPicker
+            getToken={getToken}
+            knownGroup={draft.externalReferences.find((reference) => reference.provider.trim().toLowerCase() === "musicbrainz" && reference.entityType.trim().toLowerCase() === "release-group")?.externalId.trim() || ""}
+            selection={draft.editionProposal}
+            onSelect={selectEdition}
+            onClear={clearEdition}
+            disabled={disabled || isSubmitting}
+            onBusyChange={setEditionBusy}
+          />
           {metadata.tracks.length ? (
-            <div className="suggestion-form-repeater">
-              {metadata.tracks.map((track, index) => (
-                <div className="suggestion-form-repeater-row suggestion-form-repeater-row-track" key={track.key}>
-                  <p className="suggestion-form-row-number">Track {String(index + 1).padStart(2, "0")}</p>
-                  <label className="suggestion-form-field suggestion-form-field-compact" htmlFor={`${idPrefix}-${track.key}-disc`}>
-                    <span className="suggestion-form-label">Disc *</span>
-                    <input
-                      id={`${idPrefix}-${track.key}-disc`}
-                      className="suggestion-form-input"
-                      type="number"
-                      value={track.discNumber}
-                      min="1"
-                      max="999"
-                      step="1"
-                      onChange={(event) => updateTrack(track.key, "discNumber", event.target.value)}
-                    />
-                  </label>
-                  <label className="suggestion-form-field suggestion-form-field-compact" htmlFor={`${idPrefix}-${track.key}-number`}>
-                    <span className="suggestion-form-label">Number *</span>
-                    <input
-                      id={`${idPrefix}-${track.key}-number`}
-                      className="suggestion-form-input"
-                      type="number"
-                      value={track.trackNumber}
-                      min="1"
-                      max="999"
-                      step="1"
-                      onChange={(event) => updateTrack(track.key, "trackNumber", event.target.value)}
-                    />
-                  </label>
-                  <label className="suggestion-form-field suggestion-form-field-wide" htmlFor={`${idPrefix}-${track.key}-title`}>
-                    <span className="suggestion-form-label">Title *</span>
-                    <input
-                      id={`${idPrefix}-${track.key}-title`}
-                      className="suggestion-form-input"
-                      type="text"
-                      value={track.title}
-                      maxLength={200}
-                      onChange={(event) => updateTrack(track.key, "title", event.target.value)}
-                    />
-                  </label>
-                  <label className="suggestion-form-field" htmlFor={`${idPrefix}-${track.key}-duration`}>
-                    <span className="suggestion-form-label">Duration (ms)</span>
-                    <input
-                      id={`${idPrefix}-${track.key}-duration`}
-                      className="suggestion-form-input"
-                      type="number"
-                      value={track.durationMs}
-                      min="0"
-                      max="86400000"
-                      step="1"
-                      onChange={(event) => updateTrack(track.key, "durationMs", event.target.value)}
-                    />
-                  </label>
-                  <label className="suggestion-form-field suggestion-form-field-wide" htmlFor={`${idPrefix}-${track.key}-artist`}>
-                    <span className="suggestion-form-label">Track artist</span>
-                    <input
-                      id={`${idPrefix}-${track.key}-artist`}
-                      className="suggestion-form-input"
-                      type="text"
-                      value={track.artistDisplayName}
-                      maxLength={300}
-                      onChange={(event) => updateTrack(track.key, "artistDisplayName", event.target.value)}
-                    />
-                  </label>
-                  <button
-                    className="suggestion-form-remove"
-                    type="button"
-                    onClick={() => removeTrack(track.key)}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="suggestion-form-empty-copy">No tracks added.</p>
-          )}
-          <button
-            className="suggestion-form-add"
-            type="button"
-            disabled={metadata.tracks.length >= MAX_TRACKS}
-            onClick={addTrack}
-          >
-            + Add track
-          </button>
+            <ol className="contributor-edition-tracks" aria-label="Proposed tracks">
+              {metadata.tracks.map((track) => <li key={track.key}><span>{track.discNumber}.{track.trackNumber} · {track.title}</span><span>{track.artistDisplayName}</span><span>{Math.floor(Number(track.durationMs) / 60000)}:{String(Math.floor(Number(track.durationMs) / 1000) % 60).padStart(2, "0")}</span></li>)}
+            </ol>
+          ) : <p className="suggestion-form-empty-copy">No edition proposed.</p>}
         </section>
         <section className="suggestion-form-section" id={`${idPrefix}-genres`} aria-labelledby={`${idPrefix}-genres-heading`}>
           <SectionHeading

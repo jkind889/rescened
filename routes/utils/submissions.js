@@ -1,4 +1,5 @@
 const crypto = require("node:crypto");
+const { serializeCandidate } = require("../../lib/baselines/candidate");
 const mongoose = require("mongoose");
 const AlbumCatalog = require("../../models/AlbumCatalog");
 const { normalizeCatalogAlbum } = require("./albumCatalog");
@@ -632,6 +633,7 @@ function snapshotForSubmission(payload, duplicate, submittedAt, revision) {
     submissionType: "new_album",
     proposedMetadata: payload.proposedMetadata,
     genreChanges: payload.genreChanges || null,
+    editionProposal: payload.editionProposal || null,
     supportingSources: payload.supportingSources,
     externalReferences: payload.externalReferences,
     normalizedFingerprint: duplicate.fingerprint,
@@ -678,6 +680,7 @@ function publicSnapshot(value) {
     submittedAt: source.submittedAt,
     submissionType: source.submissionType || "new_album",
     proposedMetadata: source.proposedMetadata,
+    ...(source.editionProposal ? { editionProposal: { previewId: source.editionProposal.previewId, candidate: serializeCandidate(source.editionProposal.candidate) } } : {}),
     supportingSources: source.supportingSources || [],
     externalReferences: source.externalReferences || [],
     candidateAlbumId: publicAlbumId(source.candidateAlbumCatalogId) || undefined,
@@ -710,6 +713,7 @@ function serializeSubmission(value, { detail = false, moderator = false } = {}) 
     submissionType,
     status: source.status,
     proposedMetadata: source.proposedMetadata,
+    ...(source.editionProposal ? { editionProposal: { previewId: source.editionProposal.previewId, candidate: serializeCandidate(source.editionProposal.candidate) } } : {}),
     supportingSources: source.supportingSources || [],
     externalReferences: source.externalReferences || [],
     currentRevision: source.currentRevision,

@@ -21,6 +21,18 @@ function failureDelay(consecutiveFailures) {
   return Math.min(FAILURE_BACKOFF_MS * (2 ** Math.max(0, consecutiveFailures - 1)), MAX_FAILURE_BACKOFF_MS);
 }
 
+// Explicit allowlist: no job keys, user IDs, scrobble text, provider payloads,
+// exception messages, or credentials can enter these operational counters.
+function logDiagnostic(event, log) {
+  if (!["fetch", "persist", "finalize", "job"].includes(event.stage) || !["sync", "sweep"].includes(event.type)) return;
+  const safe = { type: event.type, stage: event.stage };
+  for (const field of ["page", "rows", "inserted", "existing", "conflicts", "skipped", "durationMs"]) {
+    if (Number.isFinite(event[field]) && event[field] >= 0) safe[field] = Math.round(event[field]);
+  }
+  if (event.status === "error") { safe.status = "error"; safe.leaseLost = event.leaseLost === true; }
+  log(`Listening worker progress: ${JSON.stringify(safe)}`);
+}
+
 async function main(options = {}) {
   const env = options.env || process.env;
   const clock = options.clock || Date.now;
@@ -60,12 +72,17 @@ async function main(options = {}) {
       // worker: log it, back off, and try again. Unfinished jobs keep their
       // lease and are retaken when it expires.
       try {
-        if (clock() - lastScheduledAt >= SCHEDULE_INTERVAL_MS) {
-          for (const schedule of schedulers) await schedule({ env });
-          lastScheduledAt = clock();
-        }
         for (; processed < JOBS_PER_PASS && !stopping; processed += 1) {
-          const result = await runOnce({ env });
+          // Check between jobs, not only after 100 jobs. A continuous backlog
+          // must not stop newly due regular syncs from entering the queue.
+          if (clock() - lastScheduledAt >= SCHEDULE_INTERVAL_MS) {
+            for (const schedule of schedulers) await schedule({ env });
+            lastScheduledAt = clock();
+          }
+          const result = await runOnce({ env, diagnostics: (event) => logDiagnostic(event, log) });
+          if (result.status === "error") {
+            log(`Listening worker job failed: ${result.error === "job_lease_lost" ? "job_lease_lost" : "listening_job_failed"}`);
+          }
           if (!result.processed) break;
         }
         consecutiveFailures = 0;
@@ -92,4 +109,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main, failureDelay, FAILURE_BACKOFF_MS, MAX_FAILURE_BACKOFF_MS, SCHEDULE_INTERVAL_MS };
+module.exports = { main, failureDelay, logDiagnostic, FAILURE_BACKOFF_MS, MAX_FAILURE_BACKOFF_MS, SCHEDULE_INTERVAL_MS };
