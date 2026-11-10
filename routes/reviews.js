@@ -24,6 +24,7 @@ const {
   ratingSortStage,
   recentCursorFilter,
 } = require("./utils/reviewPagination");
+const { reviewSearchStages, REVIEW_SEARCH_TIMEOUT_MS } = require("./utils/reviewSearch");
 const { deleteOwnedReview, assertReviewId, persistedReviewId } = require("./utils/reviewInteractions");
 const { fanOutFollowedReview } = require("./utils/notifications");
 const { commentCounts } = require("../lib/reviewComments/read");
@@ -190,13 +191,21 @@ router.post("/review", auth, reviewCreateRateLimit, async (req, res) => {
   }
 });
 
-async function sendReviewPage(req, res, { match, scope, viewerId }) {
-  const feed = parseReviewFeedQuery(req.query, scope);
+async function sendReviewPage(req, res, { match, scope, viewerId, searchable = false }) {
+  const feed = parseReviewFeedQuery(req.query, scope, { searchable });
   let rows;
   if (feed.sort === "popular") {
     const page = await readPopularReviewPage(match, feed);
     rows = page.rows;
     feed.snapshotTime = page.snapshotTime;
+  } else if (feed.search) {
+    const isRatingSort = RATING_SORTS.has(feed.sort);
+    rows = await Review.aggregate([
+      { $match: { ...match, ...(isRatingSort ? ratingCursorFilter(feed.cursor, feed.sort) : recentCursorFilter(feed.cursor)) } },
+      { $sort: isRatingSort ? ratingSortStage(feed.sort) : { date: -1, _id: -1 } },
+      ...reviewSearchStages(feed.search),
+      { $limit: feed.limit + 1 },
+    ]).option({ maxTimeMS: REVIEW_SEARCH_TIMEOUT_MS });
   } else if (RATING_SORTS.has(feed.sort)) {
     rows = await Review.find({ ...match, ...ratingCursorFilter(feed.cursor, feed.sort) })
       .sort(ratingSortStage(feed.sort))
@@ -215,7 +224,7 @@ async function sendReviewPage(req, res, { match, scope, viewerId }) {
 }
 
 router.get("/review/user/", auth, async (req, res) => {
-  try { await sendReviewPage(req, res, { match: { userId: req.userId }, scope: `user:${req.userId}`, viewerId: req.userId }); }
+  try { await sendReviewPage(req, res, { match: { userId: req.userId }, scope: `user:${req.userId}`, viewerId: req.userId, searchable: true }); }
   catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch reviews", ...(error.code ? { code: error.code } : {}) }); }
 });
 
@@ -224,7 +233,7 @@ router.get("/review/user/:userId", async (req, res) => {
     const target = String(req.params.userId || "").trim();
     // Anonymized reviews do not form a listable author.
     if (Review.isDeletedAuthor(target)) return res.json({ reviews: [], nextCursor: null });
-    await sendReviewPage(req, res, { match: { userId: target }, scope: `user:${target}`, viewerId: viewer(req) });
+    await sendReviewPage(req, res, { match: { userId: target }, scope: `user:${target}`, viewerId: viewer(req), searchable: true });
   } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch reviews", ...(error.code ? { code: error.code } : {}) }); }
 });
 
