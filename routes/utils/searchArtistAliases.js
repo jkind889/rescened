@@ -2,6 +2,7 @@
 // and expand only to exact artist names; never rewrite titles or public IDs.
 const ARTIST_SEARCH_ALIASES = [
   { queries: ["ye", "kanye west"], artists: ["Kanye West", "Ye"] },
+  { queries: ["loona", "이달의 소녀"], artists: ["LOONA", "이달의 소녀"] },
   { queries: ["travis"], artists: ["Travis Scott"] },
   {
     queries: ["pierre", "pierre bourne", "pi'erre", "pi'erre bourne"],

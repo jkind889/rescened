@@ -115,6 +115,15 @@ test("artist aliases normalize whole queries without expanding unrelated words",
   }
 });
 
+test("LOONA search aliases connect English and Korean whole queries only", () => {
+  for (const query of ["LOONA", "  lOoNa  ", "이달의 소녀", "  이달의   소녀  ", "이달의 소녀".normalize("NFD")]) {
+    assert.deepEqual(preferredArtistsForQuery(query), ["LOONA", "이달의 소녀"], query);
+  }
+  for (const query of ["loon", "Loona Tribute", "LOONA 1/3", "loona [#]", "이달의 소녀 Tribute", "이달의 소녀 [#]", "loona.*"]) {
+    assert.deepEqual(preferredArtistsForQuery(query), [], query);
+  }
+});
+
 test("ASCII apostrophe queries match typographic apostrophes on both catalog endpoints", async () => {
   installCatalogMock([albumWithArtist("Guns N’ Roses")]);
 
