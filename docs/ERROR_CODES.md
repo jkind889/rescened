@@ -204,6 +204,7 @@ See [the notifications guide](NOTIFICATIONS.md).
 | `CATALOG_CHANGED` | `409` | A correction target changed after submission or during its guarded update. |
 | `CATALOG_BASELINE_INVALID` | `409` | A correction does not retain a usable positive catalog-revision baseline. |
 | `CATALOG_REFERENCE_CONFLICT` | `409` | A proposed external reference is already owned by another catalog album. |
+| `ARTIST_IDENTITY_CONFLICT` | `409` | A proposed credit names an unknown `artistId`, an `artistId` whose registered MusicBrainz MBID differs from the credit's, or a MusicBrainz artist that another change registered concurrently. Nothing is published; `details[]` lists `index` and `code` (`ARTIST_NOT_FOUND`, `ARTIST_MBID_MISMATCH`, or the retryable `ARTIST_REGISTRATION_RACE`). See [ARTIST_IDENTITY.md](ARTIST_IDENTITY.md). |
 | `APPROVAL_CONFLICT` | `409` | Approval produced no consistent result, or an already-approved suggestion conflicts with the requested album. |
 | `APPROVAL_INCONSISTENT` | `409` | A submission says it is approved, but its linked catalog album is missing or unusable. |
 | `BULK_LIMIT_EXCEEDED` | `400` | A bulk approval lists more than 20 suggestions. |
@@ -417,6 +418,8 @@ Source: [`lib/catalogImport/listenBrainz.js`](../lib/catalogImport/listenBrainz.
 | `ARTIFACT_FINALIZATION_FAILED` | One or more staged artifacts could not be finalized before a database commit. |
 | `IMPORT_COMMITTED_ARTIFACT_FINALIZATION_FAILED` | Database writes committed, but final report publication failed. Do not treat this as a rollback. |
 | `IMPORT_COMMITTED_SESSION_CLEANUP_FAILED` | Database writes committed, but Mongo session cleanup failed. Do not treat this as a rollback. |
+| `ARTIST_REGISTRY_UNAVAILABLE` | Preflight or apply was called without the Artist registry model. |
+| `ARTIST_IDENTITY_UNRESOLVED` | A dataset credit MBID had no planned registry artist when building a catalog row. This indicates an importer defect. |
 
 Source: [`lib/catalogImport/persistence.js`](../lib/catalogImport/persistence.js), [`scripts/validateCatalogDataset.js`](../scripts/validateCatalogDataset.js), and [`scripts/importCatalogDataset.js`](../scripts/importCatalogDataset.js).
 
@@ -433,6 +436,24 @@ Source: [`lib/catalogImport/persistence.js`](../lib/catalogImport/persistence.js
 Row statuses are `resolved` in dry-run mode, `updated` after a successful apply, `unresolved` when no safe cover is available, `conflict` when identity or optimistic-concurrency checks fail, and `failed` for a row-scoped provider failure. The report schema also counts `skipped`, although the current implementation does not produce that status.
 
 Source: [`scripts/backfillMissingAlbumCovers.js`](../scripts/backfillMissingAlbumCovers.js).
+
+## Artist identity backfill command codes
+
+| Code | Meaning |
+| --- | --- |
+| `ARTIST_BACKFILL_FAILED` | Generic fatal backfill failure. |
+| `INVALID_ARGUMENTS` | CLI flags are missing, duplicated, unknown, or mix plan-only and apply-only options. |
+| `INVALID_PLAN` | The `--plan` file is not an artist identity backfill plan of a supported version. |
+| `PLAN_CHECKSUM_MISMATCH` | The plan was edited after sealing, or `--plan-sha256` is not the reviewed checksum. |
+| `TARGET_MISMATCH` | The connected database, the plan target, and `--confirm-target` do not all match. Nothing was written. |
+| `ARTIST_REGISTRY_CHANGED` | The registry maps a planned MBID to a different artist, or a reused artist is gone. No album changes were made; create a new plan. |
+| `ARTIFACT_EXISTS` | The plan or report path already exists; artifacts are never overwritten. |
+| `TRANSACTION_UNAVAILABLE` | Transaction-capable MongoDB is unavailable. |
+| `MISSING_MONGO_URI` | `MONGO_URI` was not supplied. |
+
+Plan buckets use `USER_OWNED_CREDITS` (review), and `MULTIPLE_RELEASE_GROUPS`, `SOURCE_CONFLICT`, `INVALID_SOURCE_CREDIT`, `CREDIT_COUNT_MISMATCH`, `CREDIT_NAME_MISMATCH`, or `EXISTING_IDENTITY_CONFLICT` (flagged). Apply album outcomes are `applied`, `already_applied`, or `conflict`. A failed apply report records `databaseCommitted` and `completed`, because registry and album transactions commit independently.
+
+Source: [`lib/artists/backfill.js`](../lib/artists/backfill.js) and [`scripts/backfillArtistIdentity.js`](../scripts/backfillArtistIdentity.js). Runbook: [ARTIST_IDENTITY.md](ARTIST_IDENTITY.md).
 
 ## Genre seed command codes
 
@@ -645,6 +666,7 @@ These are not error codes, but they frequently appear beside them in API respons
 | Catalog-fetch report | `running`, `complete`, `incomplete`, `failed` |
 | Cover resolver | `resolved`, `unresolved` |
 | Cover backfill row | `resolved`, `updated`, `unresolved`, `conflict`, `failed` |
+| Artist identity backfill album | `applied`, `already_applied`, `conflict` |
 | Import action | `inserted`, `refreshed`, `unchanged` |
 | Genre seed plan | `create`, `unchanged`, `drift`, `conflicts` |
 | Migration catalog action | `created`, `reused`, `quarantined`, `archived` |

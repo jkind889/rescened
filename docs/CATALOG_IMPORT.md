@@ -69,6 +69,8 @@ MusicBrainz secondary types take precedence in this order: soundtrack, mixtape/s
 
 An album is matched by its `musicbrainz` / `release-group` external reference. New rows receive a UUID v4 and `catalogSource: "import"`. Reruns may refresh existing imported rows while preserving their public UUID, tracks, label, non-MusicBrainz references, and fields explicitly owned by manual or community provenance. A missing incoming cover never clears an existing cover. Manual or community catalog collisions are reported and left unchanged. Albums absent from a later file are never deleted.
 
+Each dataset credit's MusicBrainz artist MBID is resolved through the Artist registry. Known artists keep their Rescened `artistId`. New ones are registered in the same transaction as the catalog writes. Imported credits therefore carry both `artistId` and `artistMbid`, and the import report adds `artistRegistry: { registered, reused }`. See [ARTIST_IDENTITY.md](ARTIST_IDENTITY.md).
+
 Accepted writes run in one MongoDB transaction, so a persistence error rolls the accepted batch back. This requires a replica-set or sharded MongoDB deployment, matching the transaction requirement already used by community approval.
 
 Report destinations are checked and both reports are fully staged before `--apply` can mutate MongoDB. If an exceptional filesystem failure prevents the final atomic report rename after MongoDB has committed, the CLI explicitly reports that committed state instead of describing it as a rollback; the import remains safe to preflight and rerun idempotently.

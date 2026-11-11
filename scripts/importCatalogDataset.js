@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const mongoose = require("mongoose");
 const AlbumCatalog = require("../models/AlbumCatalog");
+const Artist = require("../models/Artist");
 const { readDatasetFile } = require("../lib/catalogImport/dataset");
 const {
   CatalogImportError,
@@ -250,6 +251,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     const validation = await (dependencies.readDatasetFile || readDatasetFile)(options.input);
     const db = dependencies.mongoose || mongoose;
     const Model = dependencies.AlbumCatalog || AlbumCatalog;
+    const ArtistModel = dependencies.Artist || Artist;
     if (db.connection?.readyState !== 1) {
       const mongoUri = dependencies.mongoUri || process.env.MONGO_URI;
       if (!mongoUri) throw new CatalogImportError("MONGO_URI is required", "MISSING_MONGO_URI");
@@ -257,7 +259,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
       connectedHere = true;
     }
 
-    plan = await preflightImport({ validation, AlbumCatalog: Model });
+    plan = await preflightImport({ validation, AlbumCatalog: Model, Artist: ArtistModel });
     const report = createImportReport(plan, { apply: options.apply, now: dependencies.now });
     const quarantine = quarantinePayload(plan, report.generatedAt);
 
@@ -267,7 +269,9 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     staged.push(await artifactIO.stage(targets.quarantine, quarantine));
 
     if (options.apply) {
-      await applyImport({ plan, AlbumCatalog: Model, mongoose: db });
+      // Build the registry's unique MusicBrainz index before inserting artists.
+      if (typeof ArtistModel.createIndexes === "function") await ArtistModel.createIndexes();
+      await applyImport({ plan, AlbumCatalog: Model, Artist: ArtistModel, mongoose: db });
       databaseApplyCompleted = true;
     }
 
@@ -291,6 +295,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     output.log(JSON.stringify({
       mode: report.mode,
       counts: report.counts,
+      artistRegistry: report.artistRegistry,
       report: targets.report,
       quarantineReport: targets.quarantine,
     }, null, 2));

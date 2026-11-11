@@ -24,6 +24,7 @@ const files = [
   "tests/moderation.integration.test.js",
   "tests/coverBackfill.integration.test.js",
   "tests/catalogImport.integration.test.js",
+  "tests/artistIdentity.integration.test.js",
   "tests/legacyMigration.integration.test.js",
   "tests/reviews.integration.test.js",
   "tests/notifications.integration.test.js",

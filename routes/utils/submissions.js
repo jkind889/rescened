@@ -4,6 +4,13 @@ const mongoose = require("mongoose");
 const AlbumCatalog = require("../../models/AlbumCatalog");
 const { normalizeCatalogAlbum } = require("./albumCatalog");
 const AlbumSubmission = require("../../models/AlbumSubmission");
+const {
+  creditWithIdentity,
+  creditsHaveIdentity,
+  findCreditIdentityProblems,
+  normalizeArtistId,
+  normalizeArtistMbid,
+} = require("../../lib/artists/identity");
 
 const RELEASE_TYPES = new Set([
   "album",
@@ -91,18 +98,47 @@ function httpsUrl(value, path, { required = false } = {}) {
   }
 }
 
+function optionalIdentity(value, path, normalize, description) {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") fail(`${path} must be ${description}`);
+  if (!value.trim()) return "";
+  const normalized = normalize(value);
+  if (!normalized) fail(`${path} must be ${description}`);
+  return normalized;
+}
+
+// Credits may propose an identity: an existing Rescened artistId, a
+// MusicBrainz artist MBID, or both. Approval resolves them against the Artist
+// registry; a name alone never links a credit to an artist.
 function normalizeArtistCredits(value, path = "proposedMetadata.artistCredits") {
   if (!Array.isArray(value) || value.length < 1) fail(`${path} must contain at least one artist`);
   if (value.length > 20) fail(`${path} may contain at most twenty artists`);
   return value.map((credit, index) => {
     const creditPath = `${path}[${index}]`;
     assertRecord(credit, creditPath);
-    assertKeys(credit, new Set(["name", "role"]), creditPath);
-    return {
+    assertKeys(credit, new Set(["name", "role", "artistId", "artistMbid"]), creditPath);
+    return creditWithIdentity({
       name: requiredString(credit.name, `${creditPath}.name`, 200),
       role: optionalString(credit.role, `${creditPath}.role`, 80) || "main",
-    };
+    }, {
+      artistId: optionalIdentity(credit.artistId, `${creditPath}.artistId`, normalizeArtistId, "a Rescened artist ID (UUID v4)"),
+      artistMbid: optionalIdentity(credit.artistMbid, `${creditPath}.artistMbid`, normalizeArtistMbid, "a MusicBrainz artist MBID"),
+    });
   });
+}
+
+// Rejects proposed identities that cannot be approved as submitted: an unknown
+// artistId, or an artistId whose registered MBID differs from the credit's.
+async function assertCreditIdentities(credits, path = "proposedMetadata.artistCredits") {
+  if (!creditsHaveIdentity(credits)) return;
+  const Artist = require("../../models/Artist");
+  const problems = await findCreditIdentityProblems(credits, { Artist });
+  if (!problems.length) return;
+  throw new SubmissionValidationError("An artist credit does not match the artist registry", problems.map((problem) => (
+    problem.code === "ARTIST_NOT_FOUND"
+      ? `${path}[${problem.index}].artistId does not identify a known artist`
+      : `${path}[${problem.index}].artistMbid does not match the artist's MusicBrainz identity`
+  )));
 }
 
 function normalizeReleaseDate(metadata, path = "proposedMetadata") {
@@ -879,6 +915,7 @@ module.exports = {
   SUBMISSION_TYPES,
   SubmissionValidationError,
   approvedCursorFilter,
+  assertCreditIdentities,
   cursorFilter,
   decodeApprovedCursor,
   decodeCursor,

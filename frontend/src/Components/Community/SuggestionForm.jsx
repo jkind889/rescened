@@ -7,6 +7,7 @@ import { clearDraft, readDraft, useDraftAutosave } from "../../features/communit
 import GenreSuggestionForm from "./GenreSuggestionForm";
 import { albumGenreChanges, buildAlbumGenreProposal, initialGenreForm } from "../../features/community/genres.js";
 import DraftNotice from "./DraftNotice";
+import { creditIdentity, creditPayload, musicBrainzArtistUrl } from "../../features/community/artistCredits.js";
 import ContributorEditionPicker from "./ContributorEditionPicker";
 
 const MAX_ARTISTS = 20;
@@ -36,6 +37,10 @@ function artistRow(value = {}) {
     key: rowKey("artist"),
     name: stringValue(value.name),
     role: stringValue(value.role, "main") || "main",
+    // Identity from a MusicBrainz prefill, an earlier revision, or a restored
+    // local draft (which stores the row's `identity`). It is sent only while
+    // the name is unchanged.
+    identity: value.identity ? creditIdentity(value.identity) : creditIdentity(value),
   };
 }
 
@@ -239,10 +244,11 @@ function buildPayload(draft) {
   const proposedMetadata = {
     title: metadata.title.trim(),
     artistDisplayName: metadata.artistDisplayName.trim(),
-    artistCredits: metadata.artistCredits.map((artist) => ({
-      name: artist.name.trim(),
-      role: artist.role.trim() || "main",
-    })),
+    artistCredits: metadata.artistCredits.map((artist) => creditPayload(
+      artist.name.trim(),
+      artist.role.trim() || "main",
+      artist.identity,
+    )),
     releaseType: metadata.releaseType,
     releaseDate,
     releaseYear,
@@ -659,6 +665,13 @@ export function SuggestionForm({
                     maxLength={200}
                     onChange={(event) => updateArtist(artist.key, "name", event.target.value)}
                   />
+                  {artist.identity && artist.identity.name === artist.name.trim() && musicBrainzArtistUrl(artist.identity) ? (
+                    <span className="suggestion-form-hint">
+                      Linked to a{" "}
+                      <a href={musicBrainzArtistUrl(artist.identity)} target="_blank" rel="noreferrer">MusicBrainz artist</a>.
+                      {" "}Changing the name removes the link.
+                    </span>
+                  ) : null}
                 </label>
                 <label className="suggestion-form-field" htmlFor={`${idPrefix}-${artist.key}-role`}>
                   <span className="suggestion-form-label">Role</span>

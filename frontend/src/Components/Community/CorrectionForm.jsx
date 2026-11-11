@@ -6,6 +6,7 @@ import {
 } from "../../features/community/community.js";
 import { clearDraft, readDraft, useDraftAutosave } from "../../features/community/drafts.js";
 import DraftNotice from "./DraftNotice";
+import { creditsFromNames } from "../../features/community/artistCredits.js";
 
 const FIELD_ORDER = ["title", "artists", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"];
 const FIELD_VALUE_KEYS = {
@@ -153,7 +154,11 @@ export function CorrectionForm({
     if (enabledFields.has("artists")) {
       proposedChanges.artists = {
         artistDisplayName: values.artistDisplayName,
-        artistCredits: values.artistCredits.split(",").map((name) => ({ name: name.trim(), role: "main" })).filter((credit) => credit.name),
+        // Unchanged names keep their role and artist identity.
+        artistCredits: creditsFromNames(values.artistCredits, [
+          ...(initialValue?.proposedChanges?.artists?.artistCredits || []),
+          ...(targetAlbumFrom(initialValue).artistCredits || []),
+        ]),
       };
     }
     if (enabledFields.has("releaseType")) proposedChanges.releaseType = values.releaseType;

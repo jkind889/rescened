@@ -1,5 +1,6 @@
 const crypto = require("node:crypto");
 const AlbumCatalog = require("../../models/AlbumCatalog");
+const { creditWithIdentity } = require("../../lib/artists/identity");
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const RELEASE_TYPES = new Set(["album", "ep", "single", "mixtape", "soundtrack", "compilation", "live", "remix", "other"]);
@@ -56,7 +57,10 @@ function normalizeAlbumInput(input = {}, options = {}) {
   const releaseDate = String(input.releaseDate || "").trim();
   const releaseType = RELEASE_TYPES.has(input.releaseType) ? input.releaseType : "album";
   const artistCredits = (Array.isArray(input.artistCredits) ? input.artistCredits : [])
-    .map((credit) => ({ name: String(credit?.name || credit || "").trim(), role: String(credit?.role || "main").trim() }))
+    .map((credit) => creditWithIdentity(
+      { name: String(credit?.name || credit || "").trim(), role: String(credit?.role || "main").trim() },
+      credit && typeof credit === "object" ? credit : {},
+    ))
     .filter((credit) => credit.name);
   if (artistCredits.length === 0) artistCredits.push({ name: artistDisplayName, role: "main" });
 

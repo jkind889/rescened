@@ -7,21 +7,29 @@ const test = require("node:test");
 const mongoose = require("mongoose");
 
 const RealAlbumCatalog = require("../models/AlbumCatalog");
+const persistence = require("../lib/catalogImport/persistence");
 const {
   CatalogImportError,
   parseImportArgs,
   buildCatalogInput,
   mergeImportedCatalog,
-  preflightImport,
-  applyImport,
   assertFinalDocumentSemantics,
-  runImport,
-} = require("../lib/catalogImport/persistence");
-const {
-  main: importMain,
-  resolveArtifactTargets,
-  stageJsonAtomic,
-} = require("../scripts/importCatalogDataset");
+} = persistence;
+const importScript = require("../scripts/importCatalogDataset");
+const { resolveArtifactTargets, stageJsonAtomic } = importScript;
+
+// The importer resolves dataset artist MBIDs through the Artist registry.
+// Unit tests use an in-memory registry unless a test supplies its own.
+function fakeArtistModel(rows = [], hooks = {}) {
+  return {
+    find: hooks.find || (() => Promise.resolve(JSON.parse(JSON.stringify(rows)))),
+    bulkWrite: hooks.bulkWrite || (async (operations) => ({ insertedCount: operations.length })),
+  };
+}
+const preflightImport = (options) => persistence.preflightImport({ Artist: fakeArtistModel(), ...options });
+const applyImport = (options) => persistence.applyImport({ Artist: fakeArtistModel(), ...options });
+const runImport = (options) => persistence.runImport({ Artist: fakeArtistModel(), ...options });
+const importMain = (argv, dependencies = {}) => importScript.main(argv, { Artist: fakeArtistModel(), ...dependencies });
 const {
   main: validateMain,
   parseValidateArgs,
@@ -449,7 +457,13 @@ test("a repeated import of the same dataset is idempotent", async () => {
     ...clone(first.accepted[0].document),
     _id: new mongoose.Types.ObjectId(),
   };
-  const second = await preflightImport({ validation: validation(), AlbumCatalog: fakeModel([persisted]) });
+  const registered = first.artistOperations.map((operation) => operation.insertOne.document);
+  assert.equal(registered.length, 1);
+  const second = await preflightImport({
+    validation: validation(),
+    AlbumCatalog: fakeModel([persisted]),
+    Artist: fakeArtistModel(registered),
+  });
   assert.deepEqual(second.counts, {
     inserted: 0,
     refreshed: 0,

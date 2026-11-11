@@ -1,13 +1,25 @@
 const mongoose = require("mongoose");
 const { MAX_ALBUM_GENRES } = require("../lib/genres/vocabulary");
+const { ARTIST_ID_PATTERN, MBID_PATTERN } = require("../lib/artists/identity");
 
+// Credits keep their own display name and order. artistId (a public Rescened
+// artist ID from the Artist registry) and artistMbid (the MusicBrainz artist)
+// are optional and absent, not blank, until an identity is established.
 const artistCreditSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     role: { type: String, default: "main", trim: true },
+    artistId: { type: String, trim: true, lowercase: true, match: ARTIST_ID_PATTERN },
+    artistMbid: { type: String, trim: true, lowercase: true, match: MBID_PATTERN },
   },
   { _id: false },
 );
+
+// A MusicBrainz identity on a catalog credit must be resolved through the
+// registry, so it always travels with the matching Rescened artistId.
+function creditsHaveRegistryIdentity(credits) {
+  return (credits || []).every((credit) => !credit?.artistMbid || Boolean(credit?.artistId));
+}
 
 const trackSchema = new mongoose.Schema(
   {
@@ -51,7 +63,14 @@ const albumCatalogSchema = new mongoose.Schema(
     },
     title: { type: String, required: true, trim: true },
     artistDisplayName: { type: String, required: true, trim: true },
-    artistCredits: { type: [artistCreditSchema], default: [] },
+    artistCredits: {
+      type: [artistCreditSchema],
+      default: [],
+      validate: {
+        validator: creditsHaveRegistryIdentity,
+        message: "A credited MusicBrainz artist must also carry its Rescened artistId",
+      },
+    },
     releaseType: {
       type: String,
       enum: ["album", "ep", "single", "mixtape", "soundtrack", "compilation", "live", "remix", "other"],

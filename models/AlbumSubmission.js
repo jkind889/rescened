@@ -1,5 +1,6 @@
 const crypto = require("node:crypto");
 const mongoose = require("mongoose");
+const { ARTIST_ID_PATTERN, MBID_PATTERN } = require("../lib/artists/identity");
 
 const candidateSchema = require("./schemas/providerEdition");
 const editionProposalSchema = new mongoose.Schema({
@@ -52,6 +53,10 @@ const artistCreditSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true, maxlength: 200 },
     role: { type: String, default: "main", trim: true, maxlength: 80 },
+    // Optional proposed identity. Approval resolves both against the Artist
+    // registry; neither is trusted as-is.
+    artistId: { type: String, trim: true, lowercase: true, match: ARTIST_ID_PATTERN },
+    artistMbid: { type: String, trim: true, lowercase: true, match: MBID_PATTERN },
   },
   { _id: false, strict: "throw" },
 );
@@ -153,6 +158,10 @@ const correctionArtistSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true, maxlength: 200 },
     role: { type: String, default: "main", trim: true, maxlength: 80 },
+    // Optional proposed identity. Approval resolves both against the Artist
+    // registry; neither is trusted as-is.
+    artistId: { type: String, trim: true, lowercase: true, match: ARTIST_ID_PATTERN },
+    artistMbid: { type: String, trim: true, lowercase: true, match: MBID_PATTERN },
   },
   { _id: false, strict: "throw" },
 );

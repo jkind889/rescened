@@ -1,6 +1,8 @@
 const mongoose = require("mongoose");
 const AlbumCatalog = require("../../models/AlbumCatalog");
 const AlbumSubmission = require("../../models/AlbumSubmission");
+const Artist = require("../../models/Artist");
+const { ArtistIdentityError, resolveCreditIdentities } = require("../../lib/artists/identity");
 const {
   createCatalogAlbum,
   normalizeCatalogAlbum,
@@ -169,7 +171,7 @@ function buildCoverProvenance({ source, submission, actorUserId, approvedAt, res
   return provenance;
 }
 
-function buildCatalogInput(submission, actorUserId, approvedAt, coverResolution = null) {
+function buildCatalogInput(submission, actorUserId, approvedAt, coverResolution = null, resolvedArtistCredits = null) {
   const source = plain(submission);
   const metadata = source.proposedMetadata || {};
   const references = (source.externalReferences || []).map((reference) => ({
@@ -236,7 +238,7 @@ function buildCatalogInput(submission, actorUserId, approvedAt, coverResolution 
   return {
     title: metadata.title,
     artistDisplayName: metadata.artistDisplayName,
-    artistCredits: metadata.artistCredits,
+    artistCredits: resolvedArtistCredits || metadata.artistCredits,
     releaseType: metadata.releaseType,
     releaseDate: metadata.releaseDate,
     releaseDatePrecision: metadata.releaseDatePrecision,
@@ -340,7 +342,7 @@ function correctionProvenance(submission, actorUserId, approvedAt) {
   };
 }
 
-function correctionPatch(submission, target, applyFields, actorUserId, approvedAt) {
+function correctionPatch(submission, target, applyFields, actorUserId, approvedAt, resolvedArtistCredits = null) {
   const source = plain(submission);
   const album = plain(target);
   const changes = source.proposedChanges || {};
@@ -354,7 +356,7 @@ function correctionPatch(submission, target, applyFields, actorUserId, approvedA
       provenance.title = provenanceValue;
     } else if (field === "artists") {
       patch.artistDisplayName = value.artistDisplayName;
-      patch.artistCredits = clone(value.artistCredits);
+      patch.artistCredits = clone(resolvedArtistCredits || value.artistCredits);
       provenance.artistDisplayName = provenanceValue;
       provenance.artistCredits = provenanceValue;
     } else if (field === "releaseType") {
@@ -508,7 +510,10 @@ async function approveCatalogCorrection({ preliminary, submissionId, actorUserId
       }
 
       const approvedAt = new Date();
-      const patch = correctionPatch(current, target, applied.appliedFields, actorUserId, approvedAt);
+      const resolvedArtistCredits = applied.appliedFields.includes("artists")
+        ? await resolveApprovalCredits(changes.artists?.artistCredits, current, actorUserId, approvedAt, session)
+        : null;
+      const patch = correctionPatch(current, target, applied.appliedFields, actorUserId, approvedAt, resolvedArtistCredits);
       const candidate = {
         ...plain(target),
         ...patch,
@@ -582,6 +587,33 @@ async function approveCatalogCorrection({ preliminary, submissionId, actorUserId
     throw error;
   } finally {
     if (session && typeof session.endSession === "function") await session.endSession();
+  }
+}
+
+// Resolves proposed credit identities against the Artist registry inside the
+// approval transaction, registering MusicBrainz artists the registry has not
+// seen. Unknown or contradictory identities block approval instead of being
+// dropped or guessed.
+async function resolveApprovalCredits(credits, submission, actorUserId, approvedAt, session) {
+  try {
+    const { credits: resolved } = await resolveCreditIdentities(credits, {
+      Artist,
+      session,
+      source: "community",
+      provenance: {
+        source: "community",
+        submissionId: submission.submissionId,
+        revision: submission.currentRevision,
+        approvedByUserId: actorUserId,
+        approvedAt,
+      },
+    });
+    return resolved;
+  } catch (error) {
+    if (error instanceof ArtistIdentityError) {
+      throw new ModerationConflictError(error.message, "ARTIST_IDENTITY_CONFLICT", error.details);
+    }
+    throw error;
   }
 }
 
@@ -735,7 +767,17 @@ async function approveAlbumSubmission({
         album = await findCatalogByPublicId(albumId, session);
         if (!album) throw new ModerationConflictError("Catalog album not found", "CATALOG_ALBUM_NOT_FOUND");
       } else {
-        album = await createCatalogAlbum(buildCatalogInput(current, actorUserId, approvedAt, coverResolution), { session });
+        const resolvedArtistCredits = await resolveApprovalCredits(
+          current.proposedMetadata?.artistCredits,
+          current,
+          actorUserId,
+          approvedAt,
+          session,
+        );
+        album = await createCatalogAlbum(
+          buildCatalogInput(current, actorUserId, approvedAt, coverResolution, resolvedArtistCredits),
+          { session },
+        );
         await baselineService().publishSubmissionBaseline({
           submission: current,
           album,

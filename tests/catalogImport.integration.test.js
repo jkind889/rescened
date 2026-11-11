@@ -5,10 +5,12 @@ const mongoose = require("mongoose");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
 
 const AlbumCatalog = require("../models/AlbumCatalog");
-const {
-  preflightImport,
-  applyImport,
-} = require("../lib/catalogImport/persistence");
+const Artist = require("../models/Artist");
+const persistence = require("../lib/catalogImport/persistence");
+
+// Imports resolve credit MBIDs through the real Artist registry here.
+const preflightImport = (options) => persistence.preflightImport({ Artist, ...options });
+const applyImport = (options) => persistence.applyImport({ Artist, ...options });
 
 const integrationEnabled = String(process.env.RUN_MONGO_INTEGRATION || "").toLowerCase() === "true";
 let replSet;
@@ -57,7 +59,7 @@ function validation(rows) {
 async function setup() {
   replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(replSet.getUri(), { dbName: "rescened_catalog_import" });
-  await AlbumCatalog.syncIndexes();
+  await Promise.all([AlbumCatalog.syncIndexes(), Artist.syncIndexes()]);
 }
 
 async function teardown() {

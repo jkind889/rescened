@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { describeGenreApplication } from "../../features/community/genres.js";
+import { musicBrainzArtistUrl } from "../../features/community/artistCredits.js";
 import "./GenreSuggestion.css";
 import {
   formatCommunityAction,
@@ -113,6 +114,14 @@ function MetadataBlock({ metadata = {}, compact = false, headingLevel = 4 }) {
               <li className="suggestion-credit-item" key={`${credit.name || "artist"}-${credit.role || "main"}-${index}`}>
                 <span className="suggestion-credit-name">{credit.name || "Unnamed artist"}</span>
                 <span className="suggestion-credit-role">{credit.role || "main"}</span>
+                {credit.artistId ? (
+                  <span className="suggestion-credit-role">Rescened artist <code>{credit.artistId}</code></span>
+                ) : null}
+                {musicBrainzArtistUrl(credit) ? (
+                  <a className="suggestion-external-link" href={musicBrainzArtistUrl(credit)} target="_blank" rel="noreferrer">
+                    MusicBrainz artist
+                  </a>
+                ) : null}
               </li>
             ))}
           </ul>
