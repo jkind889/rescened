@@ -442,6 +442,15 @@ Source: [`scripts/backfillMissingAlbumCovers.js`](../scripts/backfillMissingAlbu
 | Code | Meaning |
 | --- | --- |
 | `ARTIST_BACKFILL_FAILED` | Generic fatal backfill failure. |
+| `ARTIST_NAME_LOOKUP_FAILED` | Artist lookup failed after bounded network or timeout retries; no final plan is written. |
+| `ARTIST_NAME_HTTP_ERROR` | Artist lookup returned a non-retryable HTTP response or exhausted its retries. |
+| `ARTIST_NAME_ID_MISMATCH` | Returned artist ID differs from the requested MBID; review merges manually. |
+| `ARTIST_NAME_INVALID_RESPONSE` | Invalid, oversized, malformed, or incomplete artist-name response. |
+| `ARTIST_NAME_RETRY_AFTER` | MusicBrainz requested more than thirty seconds of cooldown; stop and resume later. |
+| `ARTIST_NAME_BUDGET_EXHAUSTED` | The fifteen-minute lookup budget was exhausted; verified cache entries can be reused. |
+| `ARTIST_NAME_LIMIT` | More than 1,000 new artists were requested in one name-resolution plan. |
+| `ARTIST_NAME_CACHE_LOCKED` | Another resolver holds the cache lock; inspect before removing a stale lock. |
+| `ARTIST_NAME_CONFLICT` | Import inputs give different canonical names for the same artist MBID. |
 | `INVALID_ARGUMENTS` | CLI flags are missing, duplicated, unknown, or mix plan-only and apply-only options. |
 | `INVALID_PLAN` | The `--plan` file is not an artist identity backfill plan of a supported version. |
 | `PLAN_CHECKSUM_MISMATCH` | The plan was edited after sealing, or `--plan-sha256` is not the reviewed checksum. |

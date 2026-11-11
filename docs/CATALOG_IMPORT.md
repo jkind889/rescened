@@ -4,7 +4,7 @@ Rescened's catalog bootstrap is an offline, two-stage process. It selects ranked
 
 See the [central error and status code reference](./ERROR_CODES.md) for validation, fetch, import, report, and exit-code meanings.
 
-The importer writes `AlbumCatalog` records only. It never creates community submissions, moderation history, reviews, likes, boards, profiles, or approved-feed entries.
+The importer writes `AlbumCatalog` and `Artist` registry records only. It never creates community submissions, moderation history, reviews, likes, boards, profiles, or approved-feed entries.
 
 ## Checked-in artifacts
 
@@ -104,3 +104,7 @@ npm run test:catalog-live
 Normal test runs use the checked-in, CC0 ListenBrainz and MusicBrainz response fixtures under `tests/fixtures/catalogImport`; they never contact either provider.
 
 The provider-neutral guard covers the catalog model, application surfaces, and all importer/fetcher modules so catalog identity cannot silently regress to a Spotify dependency.
+
+### Artist names versus credited display names
+
+Fetched dataset credits retain MusicBrainz's underlying `artist.name` as optional `artistName`; `name` and `joinPhrase` remain the original credit display text. The optional field is backward-compatible with version 1.0.0 datasets. Import uses `artistName` only for new artist registry names and records its provider provenance. It never copies the canonical name over album credit wording or silently renames an existing registry artist. Older datasets without the field produce provisional credit-derived names unless a verified-name backfill is run first. See [Artist identity](ARTIST_IDENTITY.md#verified-registry-names) for the reviewed operator workflow.

@@ -9,7 +9,7 @@ const AlbumSubmission = require("../models/AlbumSubmission");
 const Artist = require("../models/Artist");
 const { AlbumMapping, Job } = require("../models/Listening");
 const { artistMbidOf, newArtistDocument } = require("../lib/artists/identity");
-const { applyPlan, createPlan } = require("../lib/artists/backfill");
+const { applyPlan, buildPlan, createPlan } = require("../lib/artists/backfill");
 const { applyImport, buildCatalogInput, preflightImport } = require("../lib/catalogImport/persistence");
 const { approveAlbumSubmission } = require("../routes/utils/approval");
 const {
@@ -334,7 +334,72 @@ async function reimportAfterBackfillTest() {
   assert.equal(reimport.artistOperations.length, 0);
 }
 
+async function cliReadOnlyGuardsTest(context) {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const { spawnSync } = require("node:child_process");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "artist-cli-guards-"));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const root = path.resolve(__dirname, "..");
+  const planDatabase = `${DB_NAME}_cli_plan`;
+  const refusedDatabase = `${DB_NAME}_cli_refused`;
+  const client = mongoose.connection.getClient();
+  context.after(async () => {
+    await client.db(planDatabase).dropDatabase();
+    await client.db(refusedDatabase).dropDatabase();
+  });
+  const run = (database, args) => spawnSync(process.execPath, ["scripts/backfillArtistIdentity.js", ...args], {
+    cwd: root,
+    env: { ...process.env, MONGO_URI: replSet.getUri(database) },
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+  const collections = async (database) => (await client.db(database).listCollections({}, { nameOnly: true }).toArray()).map((row) => row.name);
+
+  const planPath = path.join(directory, "dry-run.plan.json");
+  const dryRun = run(planDatabase, [
+    "--dry-run", "--input", "data/catalog-import/seeds/listenbrainz-2026-08-14.json", "--out", planPath,
+  ]);
+  assert.equal(dryRun.error, undefined);
+  assert.equal(dryRun.status, 0, dryRun.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(planPath, "utf8")).target.databaseName, planDatabase);
+  assert.deepEqual(await collections(planDatabase), [], "dry-run must not create collections or indexes on a fresh database");
+
+  const plan = buildPlan({ albums: [], validations: [], artistsByMbid: new Map(), artistsById: new Map(), databaseName: planDatabase });
+  const applyPath = path.join(directory, "apply.plan.json");
+  const reportPath = path.join(directory, "refused.report.json");
+  fs.writeFileSync(applyPath, JSON.stringify(plan));
+  const refused = run(refusedDatabase, [
+    "--apply", "--plan", applyPath, "--plan-sha256", plan.planSha256,
+    "--confirm-target", planDatabase, "--report", reportPath,
+  ]);
+  assert.equal(refused.error, undefined);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /TARGET_MISMATCH/);
+  assert.deepEqual(await collections(refusedDatabase), [], "a mismatched target must not receive an artist collection or indexes");
+  assert.equal(JSON.parse(fs.readFileSync(reportPath, "utf8")).databaseCommitted, false);
+}
+
+async function canonicalImportNameTest() {
+  const artistMbid = crypto.randomUUID();
+  const creditName = "Jorge Rivera-Herrans, Luke Holt, Anna Lea, Armando Julián, Cast of EPIC";
+  const rows = [datasetRow(crypto.randomUUID(), "Canonical artist name", [{ artistMbid, name: creditName, artistName: "Jorge Rivera-Herrans", joinPhrase: "" }])];
+  const imported = await preflightImport({ validation: validation(rows, "canonical-names"), AlbumCatalog, Artist });
+  await applyImport({ plan: imported, AlbumCatalog, Artist, mongoose });
+  const artist = await Artist.findOne({ "externalReferences.externalId": artistMbid }).lean();
+  const album = await AlbumCatalog.findOne({ title: "Canonical artist name" }).lean();
+  assert.equal(artist.name, "Jorge Rivera-Herrans");
+  assert.equal(artist.fieldProvenance.name.nameSource, "musicbrainz-artist");
+  assert.equal(album.artistCredits[0].name, creditName);
+  assert.equal(album.artistDisplayName, creditName);
+  assert.equal(album.artistCredits[0].artistId, artist.artistId);
+  assert.equal(album.artistCredits[0].artistName, undefined, "canonical metadata is not copied into album credits");
+}
+
 const TESTS = [
+  ["imported canonical names stay separate from album credited display", canonicalImportNameTest],
+  ["artist backfill CLI dry-run and refused apply never initialize database collections", cliReadOnlyGuardsTest],
   ["catalog import registers artists once and links imported credits", importRegistersAndLinksTest],
   ["approval resolves proposed artist identities inside the publication transaction", approvalResolvesIdentityTest],
   ["artist backfill plans without writing and applies only guarded, exact links", backfillPlanApplyTest],

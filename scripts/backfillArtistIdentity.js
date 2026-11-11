@@ -13,6 +13,7 @@ const {
   applyPlan,
   createPlan,
   parseBackfillArgs,
+  verifySealedPlan,
 } = require("../lib/artists/backfill");
 
 const USAGE = `Usage:
@@ -27,6 +28,8 @@ each album in its own guarded transaction.
 Options:
   --input <path>            Validated catalog import dataset (repeatable; plan mode)
   --out <path>              New plan file (plan mode; never overwritten)
+  --resolve-artist-names     Verify every new registry name by MusicBrainz MBID
+  --artist-name-cache <dir>  Private resumable cache (required with name lookup)
   --apply                   Apply a reviewed, sealed plan
   --plan <path>             Sealed plan to apply
   --plan-sha256 <sha>       planSha256 printed when the plan was created
@@ -66,7 +69,9 @@ async function connect(db, dependencies) {
   if (db.connection?.readyState === 1) return false;
   const mongoUri = dependencies.mongoUri || process.env.MONGO_URI;
   if (!mongoUri) throw new ArtistBackfillError("MONGO_URI is required", "MISSING_MONGO_URI");
-  await db.connect(mongoUri);
+  // Connecting must not create collections or indexes, even in apply mode:
+  // the sealed plan and connected target are checked before explicit writes.
+  await db.connect(mongoUri, { autoCreate: false, autoIndex: false });
   return true;
 }
 
@@ -93,15 +98,24 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
       // Validate every dataset completely before opening a database connection.
       const validations = options.inputs.map((input) => (dependencies.readDatasetFile || readDatasetFile)(input));
       connectedHere = await connect(db, dependencies);
-      const plan = await createPlan({
+      let plan = await createPlan({
         validations,
         AlbumCatalog: AlbumModel,
         Artist: ArtistModel,
         databaseName: db.connection.name,
         now: dependencies.now,
       });
+      if (options.resolveArtistNames) {
+        const resolveNames = dependencies.resolvePlanArtistNames || require("../lib/artists/names").resolvePlanArtistNames;
+        plan = await resolveNames(plan, {
+          cacheDir: options.artistNameCache,
+          onProgress: ({ completed, total, cached }) => {
+            if (completed % 25 === 0 || completed === total) output.log(`Verified artist names: ${completed}/${total} (${cached} cached)`);
+          },
+        });
+      }
       const written = writeNewJson(outPath, plan);
-      output.log(JSON.stringify({ mode: "plan", target: plan.target, counts: plan.counts, plan: written, planSha256: plan.planSha256 }, null, 2));
+      output.log(JSON.stringify({ mode: "plan", target: plan.target, counts: plan.counts, artistNameResolution: plan.artistNameResolution || null, plan: written, planSha256: plan.planSha256 }, null, 2));
       output.log(`Review ${written} before any apply. Apply command:\n  npm run catalog:backfill-artists -- --apply --plan ${written} --plan-sha256 ${plan.planSha256} --confirm-target ${plan.target.databaseName} --report <new-report.json>`);
       return exitCodeForPlan(plan);
     }
@@ -111,12 +125,24 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     const plan = JSON.parse(fs.readFileSync(path.resolve(options.plan), "utf8"));
     // Reserve the report path before any database write.
     writeNewJson(reportPath, { status: "running", planSha256: plan.planSha256 || null, startedAt: new Date().toISOString() });
-    connectedHere = await connect(db, dependencies);
-    // The unique MusicBrainz index is the registry's duplicate guard; build it
-    // before writing rather than relying on background auto-indexing.
-    if (typeof ArtistModel.createIndexes === "function") await ArtistModel.createIndexes();
     let report;
     try {
+      // Reject an edited plan or unconfirmed target before connecting. The
+      // connected database must also match before even an index is created.
+      verifySealedPlan(plan, options.planSha256);
+      if (!plan.target?.databaseName || plan.target.databaseName !== options.confirmTarget) {
+        throw new ArtistBackfillError("--confirm-target does not match the sealed plan target", "TARGET_MISMATCH");
+      }
+      connectedHere = await connect(db, dependencies);
+      if (db.connection.name !== plan.target.databaseName) {
+        throw new ArtistBackfillError(
+          `Target mismatch: plan targets ${plan.target.databaseName}, connected to ${db.connection.name || "(none)"}`,
+          "TARGET_MISMATCH",
+        );
+      }
+      // The unique MusicBrainz index is the registry's duplicate guard. Build
+      // it explicitly only after all plan and target checks have passed.
+      if (typeof ArtistModel.createIndexes === "function") await ArtistModel.createIndexes();
       report = await applyPlan({
         plan,
         expectedSha256: options.planSha256,

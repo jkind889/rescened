@@ -1,6 +1,6 @@
 # Artist identity (phase 1)
 
-Last reviewed: 2026-11-10
+Last reviewed: 2026-11-11
 
 Phase 1 gives artists stable public Rescened IDs and keeps MusicBrainz artist IDs on album credits. It covers identity only. There are no artist pages, artist routes, biographies, aliases, or merges yet. Listening stats still group top artists by display name.
 
@@ -13,7 +13,7 @@ Phase 1 gives artists stable public Rescened IDs and keeps MusicBrainz artist ID
 | Field | Meaning |
 | --- | --- |
 | `artistId` | Public, immutable, random UUID v4. It is never derived from a provider ID. |
-| `name` | The credited name seen when the artist was registered. Album credits keep their own names and stay the display source. |
+| `name` | The verified MusicBrainz artist name when available, otherwise a provisional credited name. Album credits always keep their own wording. |
 | `externalReferences` | At most one `musicbrainz` / `artist` reference. A unique partial index allows only one registry artist per MusicBrainz MBID. |
 | `fieldProvenance` | Where the registration came from: a dataset and release group, an approved submission, or the backfill plan. |
 | `artistSource` | `import`, `community`, or `manual`. |
@@ -35,7 +35,7 @@ Catalog responses pass these keys through on `artistCredits`, so album-bearing r
 
 ### Catalog import
 
-`npm run catalog:import` resolves every dataset credit's `artistMbid` through the registry during preflight. A known MBID reuses its `artistId`. An unknown MBID gets one planned registration (`artistSource: "import"`), shared by every row that credits it. Registrations are inserted first, in the same transaction as the catalog writes, so a concurrent registration of the same MBID rolls the whole import back. Only artists credited by inserted or refreshed rows are registered. Quarantined rows and preserved credits do not register artists.
+`npm run catalog:import` resolves every dataset credit's `artistMbid` through the registry during preflight. Newly fetched datasets retain the underlying MusicBrainz `artist.name` as optional `artistName`, separately from the credited `name`. New registrations use that verified name with `nameSource: "musicbrainz-artist"`; old datasets without it retain provisional `nameSource: "artist-credit"`. Conflicting canonical names for one MBID stop import preflight. A known MBID reuses its `artistId` without silently renaming it. An unknown MBID gets one planned registration (`artistSource: "import"`), shared by every row that credits it. Registrations are inserted first, in the same transaction as the catalog writes, so a concurrent registration of the same MBID rolls the whole import back. Only artists credited by inserted or refreshed rows are registered. Quarantined rows and preserved credits do not register artists.
 
 The import report includes `artistRegistry: { registered, reused }`. Re-importing the same dataset is idempotent. Before `--apply`, the CLI builds the registry's unique MusicBrainz index.
 
@@ -51,11 +51,21 @@ The frontend keeps a credit's identity only while its name is unchanged. If a co
 
 ### Approval
 
-Inside the approval transaction, new-album publication and approved artist corrections resolve every proposed identity against the registry. A known MBID reuses its artist. An unknown MBID registers a `community` artist whose provenance names the submission, its revision, and the approving moderator. An `artistId`-only credit gains the artist's registered MBID. An unknown `artistId`, or an `artistId` whose registered MBID differs from the credit's, blocks approval with `409 ARTIST_IDENTITY_CONFLICT`. Nothing is published and the suggestion stays pending. Linking a suggestion to an existing album does not change that album's credits.
+Inside the approval transaction, new-album publication and approved artist corrections resolve every proposed identity against the registry. A known MBID reuses its artist. An unknown MBID registers a `community` artist whose provenance names the submission, its revision, and the approving moderator. Its name is provisional (`nameSource: "artist-credit"`), because a contributor's display wording is not trusted canonical metadata. Client-supplied `artistName` is rejected, and approval never performs a live lookup inside its transaction. An `artistId`-only credit gains the artist's registered MBID. An unknown `artistId`, or an `artistId` whose registered MBID differs from the credit's, blocks approval with `409 ARTIST_IDENTITY_CONFLICT`. Nothing is published and the suggestion stays pending. Linking a suggestion to an existing album does not change that album's credits.
 
 ## Backfill
 
-`npm run catalog:backfill-artists` links existing catalog credits using the artist MBIDs recorded in reviewed catalog import datasets, such as `data/catalog-import/seeds/listenbrainz-2026-08-14.json`. Planning is the default. It writes a sealed plan and never writes to MongoDB. Apply reads only that plan.
+`npm run catalog:backfill-artists` links existing catalog credits using the artist MBIDs recorded in reviewed catalog import datasets, such as `data/catalog-import/seeds/listenbrainz-2026-08-14.json`. Planning is the default. It writes a sealed plan and never writes to MongoDB. The CLI disables automatic Mongoose collection and index creation on connection. Apply reads only that plan.
+
+### Verified registry names
+
+Album credit names and artist names are different MusicBrainz fields. A release can credit one person as a longer alias or a combined cast string. Never split those strings or use punctuation to infer identities.
+
+For old datasets, add `--resolve-artist-names --artist-name-cache <private-directory>` during planning. This explicitly enables an operator-only lookup of every **new** registry artist by exact MusicBrainz MBID. It does not alter album credit wording or rename existing registry records. Each resolved name records the artist MBID, source URL, and observation time in `fieldProvenance.name`; the sealed plan includes all names and an `artistNameResolution` summary listing changes.
+
+The resolver uses an identifying user agent, at least 1.1 seconds between request starts, eight-second request timeouts, at most three attempts, a 256 KiB response limit, and a fifteen-minute run budget. It honors `Retry-After` up to thirty seconds and stops on longer throttles. Redirects and returned-ID mismatches are not followed as artist merges. Invalid, unavailable, or unresolved names stop planning before the final plan is written. Successfully verified names remain in a seven-day private disk cache so a later run can resume. A lock prevents concurrent resolvers using that cache; inspect a crashed operator before removing a stale lock.
+
+Only planning performs these lookups. Apply uses the exact sealed names without network access. Ordinary planning without this option remains offline with respect to providers; old datasets may then produce provisional credit-derived names. Use verified-name planning before publishing artist-page headings. Existing provisional registry names require a separately reviewed name correction; they are not overwritten automatically by import or backfill.
 
 ### Matching rules
 
@@ -91,6 +101,8 @@ Keep plans and reports outside the repository, for example in `~/rescened-ops/ar
    ```sh
    npm run catalog:backfill-artists -- \
      --input data/catalog-import/seeds/listenbrainz-2026-08-14.json \
+     --resolve-artist-names \
+     --artist-name-cache ~/rescened-ops/artist-identity/musicbrainz-name-cache \
      --out ~/rescened-ops/artist-identity/<database>-<date>.plan.json
    ```
 
@@ -109,7 +121,7 @@ Keep plans and reports outside the repository, for example in `~/rescened-ops/ar
 ### Apply semantics
 
 - **Report first.** Before connecting, apply reserves the report path. If it cannot write the final report after commits, it prints the report and `databaseCommitted` to the console.
-- **Registry first.** It builds the registry's unique index. One transaction then inserts the planned artists and confirms that each reused artist still exists. If the registry now maps a planned MBID to a different `artistId`, the apply stops with `ARTIST_REGISTRY_CHANGED` before any album changes. In that case, create a new plan.
+- **Registry first.** It validates the sealed plan and confirmed target before connecting, then verifies the connected database before building the registry's unique index. One transaction then inserts the planned artists and confirms that each reused artist still exists. If the registry now maps a planned MBID to a different `artistId`, the apply stops with `ARTIST_REGISTRY_CHANGED` before any album changes. In that case, create a new plan.
 - **One transaction per album.** Inside its transaction, each album is read through the raw collection and compared with its planned stored revision and exact `beforeCredits`. This avoids Mongoose casting, which would trim legacy names such as `Alpha & ` or add default roles. It sets the new credits, advances `catalogRevision` by one, and carries the album's reviewed baseline and active Last.fm mappings to the new revision, as the cover backfill does.
 - **Album outcomes.** A changed album is reported as `conflict` and left untouched. An album that already has the planned credits at the planned revision is `already_applied`. Rerunning the same plan is therefore safe.
 - **Pending corrections.** Pending corrections created before an album was linked become stale (`CATALOG_CHANGED`), because its revision advances.
@@ -118,12 +130,13 @@ Keep plans and reports outside the repository, for example in `~/rescened-ops/ar
 
 ## Verification
 
+- `tests/artistNames.test.js` covers exact-ID lookup, rate limits, bounded retries/timeouts, response validation, private-cache reuse/resume, and credited-name preservation. All provider responses are fixtures.
 - `tests/artistIdentity.test.js` covers the identity helpers, model invariants, submission validation, importer planning, backfill classification and sealing, the checked-in seed dataset as a source, and the frontend credit helpers.
 - `tests/artistIdentity.integration.test.js` covers the transactional paths on a replica set: import registration and idempotency, approval resolution and conflicts, and backfill planning without writes, target refusal, guarded apply, mapping carry-forward, rerun, and registry drift.
 
 ## Known limitations
 
-- The registry `name` is the first credited name seen, not a canonical MusicBrainz artist name. Phase 1 does not fetch artist records.
+- Older datasets and community-only registrations may still have provisional credit-derived names. Provenance distinguishes those from verified MusicBrainz artist names. Existing registry names are not renamed automatically.
 - Credits without an MBID stay unlinked. There is no name matching, artist search, or picker UI. Contributors can propose identity only through a MusicBrainz prefill or by keeping an existing credit's name.
 - The correction form's comma-separated credit field still splits names that contain commas, such as "Tyler, The Creator". This is a pre-existing problem. Those pieces no longer match the current credit, so the correction submits them without identity.
 - Moderator details show a credit's `artistId` and MusicBrainz link. They do not show the registry artist's own name.

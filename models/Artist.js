@@ -13,9 +13,10 @@ const externalReferenceSchema = new mongoose.Schema(
 
 // Artist identity registry. Phase 1 is identity only: it maps stable public
 // Rescened artist IDs to MusicBrainz artist MBIDs so album credits can carry
-// both. It has no public route, page, or biography yet. `name` records the
-// credited name seen when the artist was registered; album credits keep their
-// own names and remain the display source.
+// both. It has no public route, page, or biography yet. `name` is a verified
+// MusicBrainz artist name when available, otherwise a provisional credited
+// name; fieldProvenance.name.nameSource distinguishes them. Album credits
+// keep their own wording regardless of the registry name.
 const artistSchema = new mongoose.Schema(
   {
     artistId: {

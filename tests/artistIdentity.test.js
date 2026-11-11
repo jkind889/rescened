@@ -561,7 +561,7 @@ test("the backfill CLI writes a sealed plan once and refuses an unconfirmed appl
     readDatasetFile: () => backfillValidation([datasetRow()]),
     mongoose: { connection: { readyState: 1, name: "rescened_dev" }, startSession: () => assert.fail("planning must not open a transaction") },
     AlbumCatalog: { find: () => ({ select: () => Promise.resolve([catalogAlbum()]) }), updateOne: () => writes.push("album") },
-    Artist: { find: () => Promise.resolve([]), create: () => writes.push("artist") },
+    Artist: { find: () => Promise.resolve([]), create: () => writes.push("artist"), createIndexes: () => writes.push("indexes") },
     now: new Date("2026-11-10T00:00:00.000Z"),
   };
   assert.equal(await main(["--input", "seed.json", "--out", planPath], dependencies), 0);
@@ -580,4 +580,146 @@ test("the backfill CLI writes a sealed plan once and refuses an unconfirmed appl
   assert.equal(failure.databaseCommitted, false, "the reserved report records that nothing was committed");
   assert.equal(await main(apply, dependencies), 1, "an existing report is never overwritten");
   assert.deepEqual(writes, []);
+});
+
+test("the backfill CLI disables automatic collection and index creation on connection", async (context) => {
+  const os = require("node:os");
+  const { main } = require("../scripts/backfillArtistIdentity");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "artist-backfill-connect-"));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const events = [];
+  const db = {
+    connection: { readyState: 0, name: "" },
+    async connect(uri, options) {
+      assert.equal(uri, "mongodb://development.example/rescened_dev");
+      assert.deepEqual(options, { autoCreate: false, autoIndex: false });
+      events.push("connect");
+      this.connection = { readyState: 1, name: "rescened_dev" };
+    },
+    async disconnect() { events.push("disconnect"); },
+    startSession() { assert.fail("planning must not open a transaction"); },
+  };
+  const code = await main(["--dry-run", "--input", "seed.json", "--out", path.join(directory, "plan.json")], {
+    mongoose: db,
+    mongoUri: "mongodb://development.example/rescened_dev",
+    output: { log() {}, error: (message) => assert.fail(message) },
+    readDatasetFile() { events.push("validate-input"); return backfillValidation([datasetRow()]); },
+    AlbumCatalog: { find: () => ({ select: () => Promise.resolve([catalogAlbum()]) }) },
+    Artist: { find: () => Promise.resolve([]), createIndexes: () => assert.fail("planning must not create indexes") },
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(events, ["validate-input", "connect", "disconnect"]);
+});
+
+test("the backfill CLI checks the seal and every target before creating indexes", async (context) => {
+  const os = require("node:os");
+  const { main } = require("../scripts/backfillArtistIdentity");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "artist-backfill-guards-"));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const plan = buildPlan({ albums: [], validations: [], artistsByMbid: new Map(), artistsById: new Map(), databaseName: "rescened_dev" });
+  const cases = [
+    { name: "edited-plan", document: { ...plan, generatedAt: "changed" }, expected: "PLAN_CHECKSUM_MISMATCH", connects: 0 },
+    { name: "wrong-checksum", checksum: "0".repeat(64), expected: "PLAN_CHECKSUM_MISMATCH", connects: 0 },
+    { name: "unconfirmed-target", confirmTarget: "rescened_other", expected: "TARGET_MISMATCH", connects: 0 },
+    { name: "wrong-connection", connectedTarget: "rescened_other", expected: "TARGET_MISMATCH", connects: 1 },
+    { name: "valid-plan", connects: 1 },
+  ];
+  for (const scenario of cases) {
+    const planPath = path.join(directory, `${scenario.name}.plan.json`);
+    const reportPath = path.join(directory, `${scenario.name}.report.json`);
+    fs.writeFileSync(planPath, JSON.stringify(scenario.document || plan));
+    const events = [];
+    const errors = [];
+    const db = {
+      connection: { readyState: 0, name: "" },
+      async connect(_uri, options) {
+        assert.deepEqual(options, { autoCreate: false, autoIndex: false });
+        events.push("connect");
+        this.connection = { readyState: 1, name: scenario.connectedTarget || "rescened_dev" };
+      },
+      async disconnect() { events.push("disconnect"); },
+      async startSession() {
+        events.push("transaction");
+        return { async withTransaction(work) { await work(); }, async endSession() {} };
+      },
+    };
+    const code = await main([
+      "--apply", "--plan", planPath, "--plan-sha256", scenario.checksum || plan.planSha256,
+      "--confirm-target", scenario.confirmTarget || "rescened_dev", "--report", reportPath,
+    ], {
+      mongoose: db,
+      mongoUri: "mongodb://development.example/rescened_dev",
+      AlbumCatalog: {},
+      Artist: { createIndexes: async () => { events.push("indexes"); }, find: () => assert.fail("empty registry must not be queried") },
+      output: { log() {}, error: (message) => errors.push(message) },
+    });
+    assert.equal(code, scenario.expected ? 1 : 0, scenario.name);
+    assert.equal(events.filter((event) => event === "connect").length, scenario.connects, scenario.name);
+    if (scenario.expected) {
+      assert.ok(errors.some((message) => message.startsWith(scenario.expected)), scenario.name);
+      assert.equal(events.includes("indexes"), false, `${scenario.name} must not create indexes`);
+      assert.equal(events.includes("transaction"), false, `${scenario.name} must not start a transaction`);
+    } else {
+      assert.deepEqual(events, ["connect", "indexes", "transaction", "disconnect"]);
+    }
+    const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+    assert.equal(report.databaseCommitted, false, scenario.name);
+  }
+});
+
+test("verified-name planning is explicit and never enabled during apply", () => {
+  const options = parseBackfillArgs(["--input", "seed.json", "--out", "plan.json", "--resolve-artist-names", "--artist-name-cache", "/ops/artist-names"]);
+  assert.equal(options.resolveArtistNames, true);
+  assert.equal(options.artistNameCache, "/ops/artist-names");
+  for (const args of [
+    ["--input", "seed.json", "--out", "plan.json", "--resolve-artist-names"],
+    ["--input", "seed.json", "--out", "plan.json", "--artist-name-cache", "/ops/cache"],
+    ["--apply", "--resolve-artist-names", "--artist-name-cache", "/ops/cache"],
+  ]) assert.throws(() => parseBackfillArgs(args), { code: "INVALID_ARGUMENTS" });
+});
+
+test("canonical metadata initializes registry names without changing import or backfill credits", async () => {
+  const row = datasetRow({ artistCredits: [{ artistMbid: MBID_A, name: "Alpha, Beta and the cast", artistName: "Alpha", joinPhrase: "" }], artistDisplayName: "Alpha, Beta and the cast" });
+  const source = backfillValidation([row]);
+  const imported = await preflightImport({ validation: importValidation([row]), AlbumCatalog: fakeCatalog(), Artist: fakeRegistry() });
+  assert.equal(imported.artistOperations[0].insertOne.document.name, "Alpha");
+  assert.equal(imported.artistOperations[0].insertOne.document.fieldProvenance.name.nameSource, "musicbrainz-artist");
+  assert.equal(imported.accepted[0].document.artistCredits[0].name, row.artistCredits[0].name);
+  const album = catalogAlbum({ artistCredits: [{ name: row.artistCredits[0].name, role: "main" }] });
+  const planned = buildPlan({ albums: [album], validations: [source], artistsByMbid: new Map(), artistsById: new Map(), databaseName: "rescened_dev" });
+  assert.equal(planned.artistRegistrations[0].name, "Alpha");
+  assert.equal(planned.albumUpdates[0].afterCredits[0].name, row.artistCredits[0].name);
+  const conflicting = datasetRow({ ...row, releaseGroupMbid: GROUP_2, artistCredits: [{ ...row.artistCredits[0], artistName: "Different artist name" }] });
+  await assert.rejects(preflightImport({ validation: importValidation([row, conflicting]), AlbumCatalog: fakeCatalog(), Artist: fakeRegistry() }), { code: "ARTIST_NAME_CONFLICT" });
+  const conflictPlan = buildPlan({ albums: [album], validations: [backfillValidation([row, conflicting])], artistsByMbid: new Map(), artistsById: new Map(), databaseName: "rescened_dev" });
+  assert.equal(conflictPlan.counts.link, 0);
+  assert.equal(conflictPlan.flagged[0].code, "SOURCE_CONFLICT");
+});
+
+test("contributors cannot claim a trusted canonical artist name", () => {
+  assert.throws(() => normalizeSubmissionPayload({
+    proposedMetadata: { title: "Album", artistCredits: [{ name: "Credit", role: "main", artistMbid: MBID_A, artistName: "Spoofed canonical name" }], releaseType: "album", releaseDate: "2026" },
+    supportingSources: [{ type: "other", url: "https://example.com/source" }],
+    externalReferences: [],
+  }), /artistName/);
+});
+
+test("a failed artist-name lookup leaves no final plan artifact", async (context) => {
+  const os = require("node:os");
+  const { main } = require("../scripts/backfillArtistIdentity");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "artist-name-cli-"));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const outputPath = path.join(directory, "plan.json");
+  const errors = [];
+  const code = await main(["--input", "seed.json", "--out", outputPath, "--resolve-artist-names", "--artist-name-cache", path.join(directory, "cache")], {
+    mongoose: { connection: { readyState: 1, name: "rescened_dev" } },
+    AlbumCatalog: { find: () => ({ select: () => Promise.resolve([catalogAlbum()]) }) },
+    Artist: { find: () => Promise.resolve([]) },
+    readDatasetFile: () => backfillValidation([datasetRow()]),
+    resolvePlanArtistNames: async () => { throw Object.assign(new Error("Name unavailable"), { code: "ARTIST_NAME_HTTP_ERROR" }); },
+    output: { log() {}, error: (message) => errors.push(message) },
+  });
+  assert.equal(code, 1);
+  assert.equal(fs.existsSync(outputPath), false);
+  assert.ok(errors.some((message) => message.startsWith("ARTIST_NAME_HTTP_ERROR")));
 });
