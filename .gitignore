@@ -5,7 +5,23 @@ dist/
 .migration/
 .env
 .DS_Store
-.agents/
+# Track reviewed project skills, not local agent state or run artifacts.
+.agents/**
+!.agents/skills/
+!.agents/skills/rescened-catalog-rollout/
+!.agents/skills/rescened-catalog-rollout/SKILL.md
+!.agents/skills/rescened-commit-review/
+!.agents/skills/rescened-commit-review/SKILL.md
+!.agents/skills/rescened-cover-backfill/
+!.agents/skills/rescened-cover-backfill/SKILL.md
+!.agents/skills/rescened-migration-operator/
+!.agents/skills/rescened-migration-operator/SKILL.md
+!.agents/skills/rescened-moderation-change-review/
+!.agents/skills/rescened-moderation-change-review/SKILL.md
+!.agents/skills/rescened-provider-integration/
+!.agents/skills/rescened-provider-integration/SKILL.md
+!.agents/skills/rescened-verify/
+!.agents/skills/rescened-verify/SKILL.md
 data/
 
 # Local dotenv variants may contain credentials. Commit examples only.

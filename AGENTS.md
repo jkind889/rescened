@@ -1,13 +1,44 @@
 # Rescened repository guidance
 
+## The project
+
+ReScened is a place to keep track of the music you listen to, share reviews, organize albums into boards, and discover music through other people. It's built around a community-curated catalog.
+
+- Explain changes through the experience of using the app. Use plain, direct language and concrete examples when they help.
+- Keep shipped behavior, local prototypes, feature-flagged work, and future plans distinct. Avoid inflated claims and long inventories of changed files.
+
+## Questions before changes
+
+- Questions such as "how could we do this?" or "is this possible?" are requests for discussion, not permission to edit. Explain the options, tradeoffs, and proposed approach first. Do not change files, configuration, or behavior in response to a question; wait for explicit permission to implement the change.
+- Keep any investigation needed to answer the question read-only. Do not delegate implementation or make preparatory edits before that permission is given.
+
+## Use the relevant skills
+
+- Check the project skills under `.agents/skills/` before planning the relevant work, and read and apply the ones that fit. If they are absent from the runtime's skill catalog, open their `SKILL.md` files directly. Do not load every skill for every task or assume a skill was used merely because it exists.
+- Use [rescened-verify](.agents/skills/rescened-verify/SKILL.md) during implementation and before handing work to an independent reviewer. Use [rescened-moderation-change-review](.agents/skills/rescened-moderation-change-review/SKILL.md) for submission/moderation changes and [rescened-provider-integration](.agents/skills/rescened-provider-integration/SKILL.md) for provider adapter changes.
+- Use [rescened-commit-review](.agents/skills/rescened-commit-review/SKILL.md) for an explicitly requested commit or branch review. For operator tasks, choose [rescened-catalog-rollout](.agents/skills/rescened-catalog-rollout/SKILL.md), [rescened-cover-backfill](.agents/skills/rescened-cover-backfill/SKILL.md), or [rescened-migration-operator](.agents/skills/rescened-migration-operator/SKILL.md) according to the operation. Loading a skill does not authorize its write or apply steps.
+
+## Check lifecycle behavior while implementing
+
+- For changes involving asynchronous work or mutable state, the implementer must identify the applicable failure cases while designing and testing the change: delayed responses, navigation or unmounting, list resets, duplicate requests, concurrent writes, deletion/privacy changes, and failed reloads.
+- Exercise applicable cases with focused tests or safe reproductions before independent review. Follow the [verification checklist](.agents/skills/rescened-verify/SKILL.md#check-async-and-lifecycle-cases-before-review), record meaningful coverage gaps, and fix in-scope defects. Independent review is a second check, not the first time these cases are considered. Unrelated documentation-only changes do not require async tests.
+
 ## Delegation hierarchy
 
 - The main agent is the coordinator: it owns requirements, architectural decisions, task boundaries, integration, final verification, and the user-facing result.
 - Delegate bounded, independent work to subagents when it materially improves progress or review quality. Keep small changes and tightly dependent steps local. Follow [the delegation guide](docs/AGENT_DELEGATION.md) for roles, task briefs, and handoffs.
-- Use `explorer` for read-only investigation, `executor_luna` for scoped implementation, `executor_sol` for unusually difficult work that cannot be narrowed effectively, and `doc-writer` for documentation based on verified facts. Use `tester` when exposed by the current runtime; otherwise assign its bounded verification responsibilities to `worker` or perform them in the main agent. Do not assume a role exists merely because its configuration file is on disk.
-- The coordinator assigns exact file ownership and acceptance criteria before spawning. Subagents report directly to the coordinator and must not delegate further. Use at most three simultaneous subagents, or fewer if the runtime limit requires it.
-- Subagents share the working tree. Tell every editing subagent that it is not alone, must preserve others' edits, and must report overlapping ownership before writing. Keep Git mutations and ownership transfers with the coordinator.
+- Assign responsibilities such as investigation, implementation, review, testing, or documentation rather than depending on a particular model or old role name. Use the delegation tools, roles, and models actually available in the current T3, Codex, or Claude session. Preserve the user's model choices; a configuration file on disk does not prove a role is available.
+- The coordinator assigns the checkout, branch and base, exact file ownership, acceptance criteria, and relevant checks before spawning. Subagents report directly to the coordinator and must not delegate further. Use at most three simultaneous subagents, or fewer if the runtime limit requires it.
+- Establish whether each agent shares the checkout or has an isolated worktree. Tell every editing subagent to preserve others' edits and report overlapping ownership before writing. Isolated worktrees do not isolate a shared database, ports, or external services. Keep Git mutations, integration, and ownership transfers with the coordinator.
+- Give reviewers the actual current diff and relevant code, not just an implementation summary. Keep review read-only unless tests or fixes are explicitly assigned, and rerun affected checks after integrating changes.
 - Delegation does not expand authorization. All agents must preserve the catalog, security, provider, and data-operation rules below. Database apply steps still require explicit user authorization for the named target.
+
+## Pull request writing
+
+- Keep titles short and specific. Open the description with what was wrong or missing and what changes for the person using the app. Use plain language, short paragraphs, or a few bullets; do not lead with a file-by-file summary.
+- Include implementation details only when they explain a decision, risk, or review requirement. Add the checks actually run and any relevant gaps, feature flags, or rollout steps. Keep model review separate from executed tests. Omit filler and empty sections; never invent impact, measurements, or verification.
+- Before filing, verify the intended branch and base, inspect the complete scoped diff, and check for an existing PR. For stacked work, identify the actual parent branch rather than assuming `main` or choosing a base from commit titles alone.
+- Keep existing publication and approval requirements in force. Writing a PR description does not authorize pushing, filing, changing draft status, merging, or deploying. Shared workflow permission conflicts need to be resolved explicitly, not by choosing the more permissive version.
 
 ## Project shape
 
@@ -21,6 +52,10 @@
 - Use the [shared-development worktree workflow](docs/WORKTREES.md) for new Rescened worktrees unless the user requests another environment. Prefer the helper's `create`, or enroll an externally created linked tree with `setup`.
 - The helper's creation base is the repository-local `rescened.worktreeBase` setting when present, otherwise `origin/main`; an explicit `--base` wins. When creating through Git or an editor instead, inspect that setting and select the same base explicitly. Do not silently branch from an older checkout that lacks the setup.
 - Reuse the approved private development profile outside all checkouts. Do not copy `.env` files, credentials, or user allowlists into a tree. Start only the paired API/Vite preview; this workflow does not authorize workers, provider ingestion, or database copies/resets.
+- Before starting or restarting a preview, verify its checkout, branch, paired ports, and owning process. Reuse a healthy preview only when it matches the task's code and configuration. Never kill an unrelated process, use a broad `pkill`, or let the frontend silently move to another port.
+- Use the helper's printed URL and verify the paired API's `/health` reports `status: "ok"`, then check the relevant page. Keep requested feature flags explicit and follow the current checkout's [worktree guide](docs/WORKTREES.md) rather than copying commands from another branch.
+- The development database is shared and writable. Startup can initialize indexes, and ordinary app actions can change data. A preview request does not authorize a worker, ingestion, migration, reset, or unrelated data operation.
+- Hand off the preview URL, relevant flags, checks performed, and whether it is still running. Leave a requested user preview available; stop disposable test processes through their owning session without stopping unrelated previews.
 - Creation and cleanup use different safeguards: removal still requires commits contained in `origin/main` unless the user deliberately chooses another cleanup base. Preserve dirty/ignored user files and follow the guide's explicit cleanup checks.
 
 ## Catalog and identity invariants
