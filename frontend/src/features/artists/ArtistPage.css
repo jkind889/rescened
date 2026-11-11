@@ -1,0 +1,147 @@
+.artist-page-header {
+  display: grid;
+  gap: .5rem;
+}
+
+.artist-page-names {
+  overflow-wrap: anywhere;
+}
+
+.artist-page-credited {
+  color: var(--app-muted);
+  font-size: .85rem;
+  margin: 0;
+}
+
+.artist-page-meta {
+  align-items: center;
+  color: var(--app-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: .85rem;
+  gap: .4rem .8rem;
+  margin: 0;
+}
+
+.artist-page-meta a {
+  border: 1px solid var(--app-line-strong);
+  color: var(--app-text);
+  padding: .2rem .5rem;
+  text-decoration: none;
+}
+
+.artist-page-meta a:hover,
+.artist-page-meta a:focus-visible {
+  border-color: var(--app-accent);
+}
+
+.artist-releases {
+  margin-top: 1.5rem;
+}
+
+.artist-releases-heading {
+  display: grid;
+  gap: .25rem;
+  margin-bottom: .8rem;
+}
+
+.artist-releases-heading h2 {
+  font-size: 1.2rem;
+  margin: 0;
+}
+
+.artist-releases-heading p {
+  margin: 0;
+}
+
+.artist-release-filters {
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.artist-release-filter-count {
+  color: var(--app-muted);
+  font-size: .75rem;
+  margin-left: .25rem;
+}
+
+/* The shared card's implicit grid track sizes to its nowrap metadata, which
+   can push a narrow two-column grid past the viewport. Let artist cards
+   shrink to their column and wrap long "year · type · note" lines. */
+.artist-page .artist-release-card {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.artist-page .artist-release-card .result-year {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.artist-release-with {
+  overflow-wrap: anywhere;
+}
+
+.artist-release-note {
+  color: var(--app-muted);
+}
+
+.artist-credit-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--app-line-strong);
+  text-underline-offset: .2em;
+}
+
+.artist-credit-link:hover,
+.artist-credit-link:focus-visible {
+  text-decoration-color: var(--app-accent);
+}
+
+/* Matching artists above album search results. */
+.search-artist-matches {
+  margin: 0 0 1.25rem;
+}
+
+.search-artist-matches h3 {
+  font-size: .8rem;
+  letter-spacing: .08em;
+  margin: 0 0 .5rem;
+  text-transform: uppercase;
+  color: var(--app-muted);
+}
+
+.search-artist-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.search-artist-list a {
+  border: 1px solid var(--app-line-strong);
+  color: var(--app-text);
+  display: grid;
+  gap: .1rem;
+  max-width: 100%;
+  padding: .45rem .7rem;
+  text-decoration: none;
+}
+
+.search-artist-list a:hover,
+.search-artist-list a:focus-visible {
+  border-color: var(--app-accent);
+}
+
+.search-artist-list strong {
+  overflow-wrap: anywhere;
+}
+
+.search-artist-list small {
+  color: var(--app-muted);
+  font-size: .75rem;
+  overflow-wrap: anywhere;
+}

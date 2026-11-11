@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-11-11
 
-Phase 1 gives artists stable public Rescened IDs and keeps MusicBrainz artist IDs on album credits. It covers identity only. There are no artist pages, artist routes, biographies, aliases, or merges yet. Listening stats still group top artists by display name.
+Phase 1 gives artists stable public Rescened IDs and keeps MusicBrainz artist IDs on album credits. A flagged [artist pages prototype](#artist-pages-prototype) builds on it with local artist pages, credit links, and multilingual search aliases. There are still no biographies, artist images, external discographies, or merges. Listening stats still group top artists by display name.
 
 ## Data contract
 
@@ -18,7 +18,7 @@ Phase 1 gives artists stable public Rescened IDs and keeps MusicBrainz artist ID
 | `fieldProvenance` | Where the registration came from: a dataset and release group, an approved submission, or the backfill plan. |
 | `artistSource` | `import`, `community`, or `manual`. |
 
-Mongo `_id` stays internal. The registry has no public endpoint in phase 1.
+Mongo `_id` stays internal. The only public registry endpoints are the flagged [artist pages](#artist-pages-prototype).
 
 ### Album credits
 
@@ -128,18 +128,63 @@ Keep plans and reports outside the repository, for example in `~/rescened-ops/ar
 - **Unused registrations.** Planned artists are registered before album updates. An album that then conflicts can leave its new artists unused in the registry. This is harmless, and a new plan reuses them.
 - **Partial commits.** Registry and album transactions commit independently. A failed run writes its report with `databaseCommitted` and `completed`, so a partial commit is never mistaken for a rollback. Apply exits `2` if any album conflicted.
 
+## Artist pages (prototype)
+
+`ARTIST_PAGES_ENABLED=true` (server-side, default off) enables everything in this section. While it is off, `/artists` returns `503 ARTIST_PAGES_DISABLED`, album responses omit `artistPages`, and catalog search behaves as before. Every read uses the local `Artist` registry and `AlbumCatalog`; no request contacts a provider. Error codes are in [ERROR_CODES.md](ERROR_CODES.md#artist-pages).
+
+Before enabling it in production, run verified-name backfill planning (see [Verified registry names](#verified-registry-names)). Otherwise headings show provisional credit-derived names.
+
+### Routes
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `GET` | `/artists/:artistId` | Header: `artist { artistId, name, aliases, creditedAs, musicBrainzUrl }` and `releaseCounts { all, album, ep, single, mixtape, other }`. `other` covers soundtrack, compilation, live, remix, and other. |
+| `GET` | `/artists/:artistId/releases?type=&limit=&cursor=` | Linked catalog releases, newest first (year, then release date, then title and `albumId`). Keyset-paged with an opaque cursor that holds no Mongo IDs; `limit` 1–48, default 24. Local search rate limit. |
+| `GET` | `/artists/search?q=&limit=` | Artists whose registry name, reviewed alias, or credited spelling contains the query. `limit` 1–12, default 6. Local search rate limit. |
+
+`GET /albums/album/:albumId` adds `artistPages: { artistIds }`: the credited `artistId` values that resolve to a registry artist. The frontend links only those credits to `/artist/:artistId`. Name-only and unresolved credits stay plain text.
+
+### Linked releases
+
+A release is on an artist's page only when one of its credits carries that artist's `artistId`. A release with no stored `releaseType` counts and filters as an album. A release credited to several identified artists appears on each of their pages. Cards keep the album's own credits, in order, and mark a featured role or a collaboration. A card is a collaboration only when the release credits another party: a credit with a different `artistId`, or an unresolved credit, which stays plain text. Several credits that share the page's `artistId`, such as two spellings of one performer, are not a collaboration. Names are never compared, so an unresolved credit spelled like the artist still counts as another party. Display names are never split, and homonyms remain separate artists. The page lists catalog releases only. It is not a complete discography.
+
+`creditedAs` lists up to 20 credited spellings on linked releases that differ from the registry name, most used first. The header lists them; album credits keep their own wording, and the registry name is not changed.
+
+### Search aliases
+
+Aliases attach to one stable `artistId` and never merge artists. They come from two sources:
+
+- **Credited names.** Every spelling under which an `artistId` is credited, such as a Hangul credit on one release and a Latin one on another.
+- **Reviewed aliases.** `lib/artists/reviewedAliases.js` is a small reviewed table of native-script and alternative names with optional BCP 47 `locale` tags. It is keyed by MusicBrainz artist MBID, because each database assigns its own random `artistId`. At read time an entry attaches to the registry artist with that MBID; an MBID absent from the registry is unused. Entries are validated at load: lowercase MBIDs, NFC names, no duplicates. Add an entry only with a reviewed source and tests.
+
+Matching uses the catalog search normalization: case-insensitive, canonical Latin accents and apostrophes folded, and other scripts compared exactly, with no transliteration. Artist search ranks an exact registry name first, then an exact alias or credited name, then prefix and substring matches, then by linked release count. Same-named artists stay separate results and show release counts and up to two release titles.
+
+While the flag is on, `GET /search/search` also includes releases linked to any registry artist whose name or reviewed alias equals the whole query. For example, `방탄소년단` finds releases credited to `BTS`. These releases rank with exact artist matches, after the curated preferences in `routes/utils/searchArtistAliases.js`, which are unchanged. Partial queries never expand.
+
+The full results page shows matching artists above album results on page one, without a genre filter. Any artist search failure, including the disabled flag, omits that section.
+
+### Indexes and cost
+
+`AlbumCatalog` gains a sparse index on `artistCredits.artistId`, which serves the header, release, and album-detail reads. Artist search scans registry names, and the catalog's credit names, with regular expressions, as catalog search already does. It orders the capped candidate lists by exact, prefix, then substring match, so a common short query cannot crowd out an exactly named artist. With the flag on, every catalog search page also runs a case-insensitive anchored regex over registry names; `Artist.name` has no index, so this scans the registry. Measure both before relying on them for a large catalog.
+
+On page one, the results page calls both `/search/search` and `/artists/search`, so it spends two points of the shared local-search rate limit. While the flag is off, it still sends the artist search request and ignores the `503`. The header route `GET /artists/:artistId` has only the global rate limit, like `GET /genres/:slug`.
+
 ## Verification
 
 - `tests/artistNames.test.js` covers exact-ID lookup, rate limits, bounded retries/timeouts, response validation, private-cache reuse/resume, and credited-name preservation. All provider responses are fixtures.
 - `tests/artistIdentity.test.js` covers the identity helpers, model invariants, submission validation, importer planning, backfill classification and sealing, the checked-in seed dataset as a source, and the frontend credit helpers.
+- `tests/artistPages.test.js` covers the collaboration badge (duplicate same-ID credits, distinct and homonymous artists, unresolved credits), reviewed-alias validation, search-key folding, query parsing, the search pipeline expansion, the feature flag, and the frontend credit and release helpers.
+- `tests/artistPages.integration.test.js` covers artist headers, keyset release paging and type filters (including untyped rows and equal-title ties), multi-credited releases, homonyms, the search candidate cap, alias and credited-name search, identity search expansion with the flag on and off, and album-detail link resolution. It fails if any request leaves the test server.
 - `tests/artistIdentity.integration.test.js` covers the transactional paths on a replica set: import registration and idempotency, approval resolution and conflicts, and backfill planning without writes, target refusal, guarded apply, mapping carry-forward, rerun, and registry drift.
 
 ## Known limitations
 
 - Older datasets and community-only registrations may still have provisional credit-derived names. Provenance distinguishes those from verified MusicBrainz artist names. Existing registry names are not renamed automatically.
-- Credits without an MBID stay unlinked. There is no name matching, artist search, or picker UI. Contributors can propose identity only through a MusicBrainz prefill or by keeping an existing credit's name.
+- Credits without an MBID stay unlinked. There is no name matching, and the suggestion and correction forms have no artist search or picker. Contributors can propose identity only through a MusicBrainz prefill or by keeping an existing credit's name.
 - The correction form's comma-separated credit field still splits names that contain commas, such as "Tyler, The Creator". This is a pre-existing problem. Those pieces no longer match the current credit, so the correction submits them without identity.
 - Moderator details show a credit's `artistId` and MusicBrainz link. They do not show the registry artist's own name.
 - User-owned credits are not backfilled. Link them through reviewed corrections.
 - Legacy migration and the importer's provider adapters still drop join phrases from credits.
-- Listening stats, search, and activity still use credit names.
+- Listening stats and activity still use credit names. Catalog search expands by identity only for exact registry names and reviewed aliases, and only while artist pages are enabled.
+- Reviewed aliases are a checked-in table, not stored registry data. There is no alias editor or MusicBrainz alias import yet.
+- Artist pages have no biography, image, or external discography.

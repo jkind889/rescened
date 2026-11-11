@@ -5,6 +5,8 @@ import AsyncState from "../Components/Loading/AsyncState";
 import ExternalAlbumCard from "../Components/ExternalAlbumCard";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import Cover from "../Components/Cover";
+import { artistMatchSummary } from "../features/artists/artists";
+import "../features/artists/ArtistPage.css";
 
 const EXTERNAL_SEARCH_LIMIT = 12;
 
@@ -19,6 +21,7 @@ export function SearchResults() {
   const [catalogMatches, setCatalogMatches] = useState([]);
   const [externalCandidates, setExternalCandidates] = useState([]);
   const [externalRetry, setExternalRetry] = useState(0);
+  const [artistMatches, setArtistMatches] = useState({ key: "", results: [] });
 
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get("q") || "";
@@ -144,6 +147,21 @@ export function SearchResults() {
       controller.abort();
     };
   }, [query, page, genre, externalRetry]);
+
+  // Matching artist pages on page one. Optional: any failure, including
+  // artist pages being disabled, just leaves the section out.
+  useEffect(() => {
+    const controller = new AbortController();
+    if (!query || page !== 1 || genre) return undefined;
+    const key = query;
+    fetch(`${API_BASE_URL}/artists/search?${new URLSearchParams({ q: query, limit: "6" })}`, { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : { results: [] }))
+      .then((data) => setArtistMatches({ key, results: Array.isArray(data?.results) ? data.results : [] }))
+      .catch((fetchError) => {
+        if (fetchError.name !== "AbortError") setArtistMatches({ key, results: [] });
+      });
+    return () => controller.abort();
+  }, [query, page, genre]);
 
   function updatePage(nextPage) {
     const nextParams = new URLSearchParams(searchParams);
@@ -337,6 +355,22 @@ export function SearchResults() {
             </div>
           </div>
         </div>
+
+        {query && page === 1 && !genre && artistMatches.key === query && artistMatches.results.length > 0 ? (
+          <section className="search-artist-matches" aria-labelledby="search-artists-heading">
+            <h3 id="search-artists-heading">Artists</h3>
+            <ul className="search-artist-list">
+              {artistMatches.results.map((artist) => (
+                <li key={artist.artistId}>
+                  <Link to={`/artist/${artist.artistId}`}>
+                    <strong>{artist.name}</strong>
+                    <small>{artistMatchSummary(artist)}</small>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
         <AsyncState
           isLoading={loading && Boolean(query)}

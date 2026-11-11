@@ -17,6 +17,7 @@ import { SignInButton, useAuth } from "@clerk/react";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import { REVIEW_SORTS, REVIEW_SORT_OPTIONS } from "../utils/reviewSorts";
 import { albumPageMeta } from "../utils/pageMeta";
+import ArtistCredits from "../features/artists/ArtistCredits";
 
 const RATING_BUCKETS = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
 function getReviewSort(search) {
@@ -646,7 +647,6 @@ export function AlbumDetail()
         );
      }
 
-    const artistNames = album.artistCredits?.length ? album.artistCredits.map((credit) => credit.name) : [album.artistDisplayName];
     const userReviews = reviews.filter((review) => review.reviewId);
     const socialReviewCount = Number(albumSocial.reviewCount) || userReviews.length;
     const socialSavedCount = Number(albumSocial.savedCount) || 0;
@@ -968,7 +968,7 @@ export function AlbumDetail()
                         <h1>{album.title}</h1>
                         <div className="album-meta-line">
                             <span>{album.releaseYear || "Unknown year"}</span>
-                            <span>{artistNames.join(", ")}</span>
+                            <span><ArtistCredits album={album} /></span>
                             {album.label && <span>{album.label}</span>}
                             {sortedTracks.length > 0 && <span>{sortedTracks.length} track{sortedTracks.length === 1 ? "" : "s"}{runtimeLabel ? ` · ${runtimeLabel}` : ""}</span>}
                         </div>
@@ -1036,7 +1036,7 @@ export function AlbumDetail()
                             <dl className="album-facts">
                                 <div>
                                     <dt>Artist</dt>
-                                    <dd>{artistNames.join(", ")}</dd>
+                                    <dd><ArtistCredits album={album} /></dd>
                                 </div>
                                 {album.label && (
                                     <div>

@@ -14,8 +14,9 @@ const {
   externalSearchRateLimit,
   searchRateLimit,
 } = require("./utils/rateLimit");
-const { isExternalAlbumSearchEnabled, isGenresEnabled } = require("./utils/serverConfig");
+const { isArtistPagesEnabled, isExternalAlbumSearchEnabled, isGenresEnabled } = require("./utils/serverConfig");
 const { genreFilterIds } = require("../lib/genres/browse");
+const { artistIdsForExactQuery } = require("../lib/artists/read");
 
 const router = express.Router();
 const DEFAULT_LIMIT = 24;
@@ -101,8 +102,11 @@ function externalSearchUnavailable(res, diagnostic) {
 async function findLocal(query, { skip = 0, limit, paginated = false, genreIds = null }) {
   // Search exposes only a next-page flag, not a total. One extra row answers
   // that question without counting every match across the catalog.
+  // With artist pages on, an exact artist name or reviewed alias also finds
+  // that artist's linked releases under any credited spelling.
+  const artistIds = isArtistPagesEnabled() ? await artistIdsForExactQuery(query) : [];
   const albums = await AlbumCatalog.aggregate(buildRankedCatalogSearchPipeline(query, {
-    skip, limit: limit + (paginated ? 1 : 0), genreIds,
+    skip, limit: limit + (paginated ? 1 : 0), genreIds, artistIds,
   }));
   return { albums: paginated ? albums.slice(0, limit) : albums, hasNextPage: paginated && albums.length > limit };
 }

@@ -20,6 +20,10 @@ function isGenresEnabled(env = process.env) {
   return String(env.GENRES_ENABLED || "").trim().toLowerCase() === "true";
 }
 
+function isArtistPagesEnabled(env = process.env) {
+  return String(env.ARTIST_PAGES_ENABLED || "").trim().toLowerCase() === "true";
+}
+
 function isDataExportEnabled(env = process.env) {
   return String(env.DATA_EXPORT_ENABLED || "").trim().toLowerCase() === "true";
 }
@@ -127,6 +131,7 @@ module.exports = {
   buildCorsOptions,
   getAllowedOrigins,
   getConfiguredOrigins,
+  isArtistPagesEnabled,
   isDataExportEnabled,
   isExternalAlbumSearchEnabled,
   isGenresEnabled,

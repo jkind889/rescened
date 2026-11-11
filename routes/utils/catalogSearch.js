@@ -63,7 +63,18 @@ function artistExpression(pattern) {
   ] };
 }
 
-function buildRankedCatalogSearchPipeline(value, { skip = 0, limit = 24, genreIds = null } = {}) {
+// True when any credit carries one of the given registry artistIds.
+function creditIdentityExpression(artistIds) {
+  return { $anyElementTrue: [{ $map: {
+    input: { $ifNull: ["$artistCredits", []] }, as: "credit",
+    in: { $in: [{ $ifNull: ["$$credit.artistId", ""] }, artistIds] },
+  } }] };
+}
+
+// artistIds: registry artists whose name or reviewed alias equals the whole
+// query (see lib/artists/read). Their linked releases match and rank with
+// exact artist matches even when credited under another spelling or script.
+function buildRankedCatalogSearchPipeline(value, { skip = 0, limit = 24, genreIds = null, artistIds = [] } = {}) {
   const query = normalizeQuery(value);
   const pattern = buildRankedSearchPattern(query);
   const tokens = [...new Set(query.split(" "))];
@@ -79,14 +90,18 @@ function buildRankedCatalogSearchPipeline(value, { skip = 0, limit = 24, genreId
   const preferredPattern = preferredArtists.length
     ? `^(?:${preferredArtists.map(buildRankedSearchPattern).join("|")})$`
     : null;
-  const match = preferredPattern
-    ? { $or: [textMatch, matchFields(SEARCH_FIELDS.slice(1, 3), preferredPattern)] }
-    : textMatch;
+  const identityIds = Array.isArray(artistIds) ? artistIds.filter((id) => typeof id === "string" && id) : [];
+  const alternatives = [
+    ...(preferredPattern ? [matchFields(SEARCH_FIELDS.slice(1, 3), preferredPattern)] : []),
+    ...(identityIds.length ? [{ "artistCredits.artistId": { $in: identityIds } }] : []),
+  ];
+  const match = alternatives.length ? { $or: [textMatch, ...alternatives] } : textMatch;
   const exact = `^${pattern}$`;
   return [
     { $match: genreIds ? { $and: [match, { genres: { $in: genreIds } }] } : match },
     { $set: { searchRank: { $switch: { branches: [
       ...(preferredPattern ? [{ case: artistExpression(preferredPattern), then: -1 }] : []),
+      ...(identityIds.length ? [{ case: creditIdentityExpression(identityIds), then: 0 }] : []),
       { case: artistExpression(exact), then: 0 },
       { case: regexExpression("$title", exact), then: 1 },
       { case: regexExpression("$label", exact), then: 2 },

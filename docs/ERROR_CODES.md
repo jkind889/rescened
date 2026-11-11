@@ -166,6 +166,19 @@ At approval, `GENRE_RETIRED` and `GENRE_NOT_FOUND` are `409`: an added genre was
 
 Invalid genre suggestion bodies use `INVALID_SUBMISSION`, and missing albums use `CATALOG_TARGET_NOT_FOUND`, as for corrections. Marking a genre suggestion as a duplicate returns `400 INVALID_MODERATION_REQUEST`.
 
+### Artist pages
+
+The `/artists` routes are public reads. See [artist identity](ARTIST_IDENTITY.md#artist-pages-prototype).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `ARTIST_PAGES_DISABLED` | `503` | `ARTIST_PAGES_ENABLED` is off. |
+| `INVALID_ARTIST_ID` | `400` | The path segment is not a Rescened artist ID (UUID v4). |
+| `ARTIST_NOT_FOUND` | `404` | No registry artist has that `artistId`. |
+| `INVALID_ARTIST_RELEASES` | `400` | `GET /artists/:artistId/releases` got an unsupported query field, a `type` other than `all`, `album`, `ep`, `single`, `mixtape`, or `other`, or a `limit` outside 1–48. |
+| `INVALID_ARTIST_CURSOR` | `400` | A release cursor is empty, malformed, too long, or belongs to another `type`. |
+| `INVALID_ARTIST_SEARCH` | `400` | `GET /artists/search` got an unsupported query field, a `q` longer than 200 characters, or a `limit` outside 1–12. |
+
 ### Review comments
 
 Comment mutations require Clerk authentication and `REVIEW_COMMENTS_ENABLED=true`. Create, edit and delete, and report each have their own limit (see below). Malformed review IDs return `400 INVALID_REVIEW_ID`, and a missing or hidden review returns `404 REVIEW_NOT_FOUND`. See [the review comments guide](REVIEW_COMMENTS.md).
@@ -240,7 +253,7 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | --- | --- | --- | --- |
 | Global API | Every API route except `/health` and `/share` | IP | 300 requests per 5 minutes |
 | Share preview | `GET /share/album/:albumId`, `GET /share/review/:reviewId`, `GET /share/sitemap.xml` (not cumulative with the global bucket) | IP (Vercel's address when proxied) | 600 requests per 5 minutes |
-| Local search | `GET /search/search`, `GET /genres/search`, `GET /genres/:slug/albums` | IP | 90 requests per minute |
+| Local search | `GET /search/search`, `GET /genres/search`, `GET /genres/:slug/albums`, `GET /artists/search`, `GET /artists/:artistId/releases` | IP | 90 requests per minute |
 | External search | `GET /search/external`, `GET /search/musicbrainz/release-group/:mbid` | IP | 30 requests per minute |
 | Album save | `POST /boards/:boardId/albums` | authenticated user | 30 attempts per 10 minutes |
 | Diary mutation | `POST /diary`, `PATCH`/`DELETE /diary/:listenId`, `PUT`/`DELETE /boards/:boardId/listens/:listenId` | authenticated user | 30 attempts per 10 minutes |
