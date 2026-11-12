@@ -27,6 +27,14 @@ const RATE_LIMITS = {
     duration: 60,
     message: "Too many searches. Please slow down and try again soon.",
   },
+  // Batched artist-link checks made by ordinary page views. Their own bucket
+  // keeps browsing off the search budget; the global API limit still applies.
+  artistLinks: {
+    keyPrefix: "rescened:artist-links",
+    points: 120,
+    duration: 60,
+    message: "Too many artist link checks. Please try again soon.",
+  },
   contributorEditions: {
     keyPrefix: "rescened:contributor-editions", points: 10, duration: 60,
     message: "Too many edition requests. Please try again soon.",
@@ -285,6 +293,7 @@ function createRateLimitMiddleware(limiter, options = {}) {
 const globalApiLimiter = createRateLimiter(RATE_LIMITS.globalApi);
 const sharePreviewLimiter = createRateLimiter(RATE_LIMITS.sharePreview);
 const searchLimiter = createRateLimiter(RATE_LIMITS.search);
+const artistLinksLimiter = createRateLimiter(RATE_LIMITS.artistLinks);
 const externalSearchLimiter = createRateLimiter(RATE_LIMITS.externalSearch);
 const albumSaveLimiter = createRateLimiter(RATE_LIMITS.albumSave);
 const reviewCreateLimiter = createRateLimiter(RATE_LIMITS.reviewCreate);
@@ -421,6 +430,10 @@ module.exports = {
   searchRateLimit: createRateLimitMiddleware(searchLimiter, {
     keyGenerator: getIpRateLimitKey,
     message: RATE_LIMITS.search.message,
+  }),
+  artistLinksRateLimit: createRateLimitMiddleware(artistLinksLimiter, {
+    keyGenerator: getIpRateLimitKey,
+    message: RATE_LIMITS.artistLinks.message,
   }),
   sendRateLimitError,
 };

@@ -9,8 +9,8 @@ const { fail } = require("./diaryValidation");
 
 // The pick card shows only these; tracks and references stay on the album page.
 function pickSummary(album) {
-  const { albumId, title, artistDisplayName, releaseYear, cover } = album;
-  return { albumId, title, artistDisplayName, releaseYear, cover };
+  const { albumId, title, artistDisplayName, artistCredits, releaseYear, cover } = album;
+  return { albumId, title, artistDisplayName, artistCredits, releaseYear, cover };
 }
 
 // Explicitly saved albums the user has neither logged nor reviewed. Albums that

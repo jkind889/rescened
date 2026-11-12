@@ -177,6 +177,7 @@ The `/artists` routes are public reads. See [artist identity](ARTIST_IDENTITY.md
 | `ARTIST_NOT_FOUND` | `404` | No registry artist has that `artistId`. |
 | `INVALID_ARTIST_RELEASES` | `400` | `GET /artists/:artistId/releases` got an unsupported query field, a `type` other than `all`, `album`, `ep`, `single`, `mixtape`, or `other`, or a `limit` outside 1–48. |
 | `INVALID_ARTIST_CURSOR` | `400` | A release cursor is empty, malformed, too long, or belongs to another `type`. |
+| `INVALID_ARTIST_LINKS` | `400` | `GET /artists/links` got a query field other than one `ids` string, an entry that is not a Rescened artist ID, or more than 100 IDs. |
 | `INVALID_ARTIST_SEARCH` | `400` | `GET /artists/search` got an unsupported query field, a `q` longer than 200 characters, or a `limit` outside 1–12. |
 | `ARTIST_DISCOGRAPHY_DISABLED` | `503` | `ARTIST_DISCOGRAPHY_ENABLED` is off (`GET /artists/:artistId/discography`). Artist pages still work. |
 | `INVALID_ARTIST_DISCOGRAPHY` | `400` | The discography request has an unsupported query field or a `type` other than `album`, `ep`, `single`, `other`, or `all`. |

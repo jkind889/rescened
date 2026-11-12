@@ -99,9 +99,14 @@ integration("rating order puts well-reviewed albums first and includes sub-genre
   assert.equal(first.body.includeChildren, true);
   assert.deepEqual(first.body.albums.map((row) => row.title), ["Classic", "Solid", "Child Only", "Few But High", "Unreviewed"]);
   assert.deepEqual(first.body.albums[0], {
-    albumId: albums.classic.albumId, title: "Classic", artistDisplayName: "Classic Artist", releaseYear: null,
+    albumId: albums.classic.albumId, title: "Classic", artistDisplayName: "Classic Artist", artistCredits: [], releaseYear: null,
     releaseType: "album", cover: "", reviewCount: 3, averageRating: 4.7,
   });
+  // Cards carry the album's credits, with their artistId, so the page can link a verified artist.
+  const artistId = crypto.randomUUID();
+  await AlbumCatalog.updateOne({ _id: albums.solid._id }, { $set: { artistCredits: [{ name: "Solid Artist", role: "main", artistId }] } });
+  const credited = (await request("/genres/hip-hop/albums")).body.albums.find((row) => row.title === "Solid");
+  assert.deepEqual(credited.artistCredits, [{ name: "Solid Artist", role: "main", artistId }]);
   assert.equal(first.body.albums.at(-1).averageRating, null);
   assert.equal(JSON.stringify(first.body).includes(String(albums.classic._id)), false);
 

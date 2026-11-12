@@ -28,7 +28,7 @@ test("picks only saved albums the user has neither logged nor reviewed", async (
     assert.equal(result.album.albumId, "33333333-3333-4333-8333-333333333333");
     assert.ok(result.candidateCount >= 1 && result.candidateCount <= 2);
     assert.equal(JSON.stringify(result).includes(String(open)), false);
-    assert.deepEqual(Object.keys(result.album).sort(), ["albumId", "artistDisplayName", "cover", "releaseYear", "title"]);
+    assert.deepEqual(Object.keys(result.album).sort(), ["albumId", "artistCredits", "artistDisplayName", "cover", "releaseYear", "title"]);
   }
   assert.deepEqual(distinctCalls[0], { userId: "owner" });
 });

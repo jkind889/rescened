@@ -334,3 +334,34 @@ integration("the header offers stored covers only from main-credited releases an
     await Artist.deleteMany({ artistId: { $in: [artists.coverArtist.artistId, artists.coverGuest.artistId] } });
   }
 });
+
+integration("artist link checks name only registry artists, by identity, with the flag and input bounds enforced", async () => {
+  const ghost = crypto.randomUUID();
+  const ids = [artists.jay.artistId.toUpperCase(), ghost, artists.vSinger.artistId, artists.jay.artistId];
+  const found = await request(`/artists/links?ids=${ids.join(",")}`);
+  assert.equal(found.status, 200, JSON.stringify(found.body));
+  // Unknown IDs and duplicates are dropped. Two same-named artists are separate IDs, and only the one asked about returns.
+  assert.deepEqual(found.body, { artistIds: [artists.jay.artistId, artists.vSinger.artistId] });
+  assert.equal(JSON.stringify(found.body).includes(String(artists.jay._id)), false, "no Mongo IDs");
+  assert.deepEqual((await request("/artists/links")).body, { artistIds: [] });
+  assert.deepEqual((await request(`/artists/links?ids=${ghost}`)).body, { artistIds: [] });
+
+  for (const bad of ["ids=not-an-id", `ids=${artists.jay.artistId},nope`, "ids=a&ids=b", "q=jay", "name=JAY-Z"]) {
+    const response = await request(`/artists/links?${bad}`);
+    assert.equal(response.status, 400, bad);
+    assert.equal(response.body.code, "INVALID_ARTIST_LINKS", bad);
+  }
+  const tooMany = await request(`/artists/links?ids=${Array.from({ length: 101 }, () => crypto.randomUUID()).join(",")}`);
+  assert.equal(tooMany.status, 400);
+  const limit = await request(`/artists/links?ids=${Array.from({ length: 100 }, () => crypto.randomUUID()).join(",")}`);
+  assert.equal(limit.status, 200);
+
+  delete process.env.ARTIST_PAGES_ENABLED;
+  try {
+    const disabled = await request(`/artists/links?ids=${artists.jay.artistId}`);
+    assert.equal(disabled.status, 503);
+    assert.equal(disabled.body.code, "ARTIST_PAGES_DISABLED");
+  } finally {
+    process.env.ARTIST_PAGES_ENABLED = "true";
+  }
+});

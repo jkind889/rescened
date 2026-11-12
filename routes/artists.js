@@ -1,8 +1,8 @@
 const { randomUUID } = require("node:crypto");
 const express = require("express");
 const { isArtistBiographiesEnabled, isArtistDiscographyEnabled, isArtistPagesEnabled } = require("./utils/serverConfig");
-const { externalSearchRateLimit, searchRateLimit } = require("./utils/rateLimit");
-const { artistDetail, artistReleases, searchArtists } = require("../lib/artists/read");
+const { artistLinksRateLimit, externalSearchRateLimit, searchRateLimit } = require("./utils/rateLimit");
+const { artistDetail, artistLinks, artistReleases, searchArtists } = require("../lib/artists/read");
 const { artistDiscography } = require("../lib/artists/discography");
 const { publicBiography } = require("../lib/artists/biographies");
 const { MusicBrainzSearchError } = require("../lib/musicBrainzSearch");
@@ -30,6 +30,16 @@ router.get("/search", searchRateLimit, async (req, res) => {
     return res.json(await searchArtists(req.query || {}));
   } catch (error) {
     return sendError(res, error, "Failed to search artists");
+  }
+});
+
+// Which of the listed artistIds have an artist page. List pages ask once per
+// batch of rendered credits and link only the IDs returned here.
+router.get("/links", artistLinksRateLimit, async (req, res) => {
+  try {
+    return res.json(await artistLinks(req.query || {}));
+  } catch (error) {
+    return sendError(res, error, "Failed to check artist links");
   }
 });
 
