@@ -306,3 +306,20 @@ test('launcher passes the artist opt-in and guarded connect to the API only', as
   child.kill('SIGINT'); const [code] = await finished;
   assert.equal(code, 0, output); assert.equal(output.includes('sk_test_fixture'), false); assert.equal(output.includes('fake@'), false);
 });
+
+test('artist discography is a separate opt-in that requires artist pages', async () => {
+  const off = wt.buildEnvironments(profile(), { apiPort: 3101, webPort: 5201 }, { ARTIST_DISCOGRAPHY_ENABLED: 'true' }, { artistPages: true });
+  assert.equal(off.backend.ARTIST_DISCOGRAPHY_ENABLED, 'false');
+  const alone = wt.buildEnvironments(profile(), { apiPort: 3101, webPort: 5201 }, {}, { artistDiscography: true });
+  assert.equal(alone.backend.ARTIST_DISCOGRAPHY_ENABLED, 'false');
+  assert.equal(alone.backend.ARTIST_PAGES_ENABLED, 'false');
+  const on = wt.buildEnvironments(profile(), { apiPort: 3101, webPort: 5201 }, {}, { artistPages: true, artistDiscography: true });
+  assert.equal(on.backend.ARTIST_DISCOGRAPHY_ENABLED, 'true');
+  assert.equal(on.backend.EXTERNAL_ALBUM_SEARCH_ENABLED, 'false', 'suggestion prefill stays off');
+  assert.equal(on.backend.COMMUNITY_SUBMISSIONS_ENABLED, 'false');
+  assert.deepEqual(Object.keys(on.frontend).sort(), ['NODE_ENV', 'VITE_API_URL', 'VITE_CLERK_PUBLISHABLE_KEY']);
+  assert.deepEqual(wt.parseArgs(['start', '--profile', '/p.json', '--artist-pages', '--artist-discography']).options, { profile: '/p.json', artistPages: true, artistDiscography: true });
+  assert.throws(() => wt.parseArgs(['start', '--artist-discography', '--artist-discography']), /Duplicate/);
+  await assert.rejects(wt.main(['setup', '--artist-discography']), /not supported/);
+  await assert.rejects(wt.main(['start', '--profile', '/nonexistent/profile.json', '--artist-discography']), /requires --artist-pages/);
+});

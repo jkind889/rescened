@@ -88,6 +88,8 @@ npm run worktree -- start --profile "$HOME/.config/rescened/shared-development.j
 2. checks that the connected database name equals the profile's `database`, and stops before any write if it does not;
 3. ensures only `albumcatalogs` index `artistCredits.artistId_1` (sparse, non-unique). An existing matching index is reused. A conflicting index stops startup and is never dropped or changed.
 
+Add `--artist-discography` (only together with `--artist-pages`) to also set `ARTIST_DISCOGRAPHY_ENABLED=true`. The API then makes live, read-only MusicBrainz requests when someone opens an artist page's discography, behind the shared rate gate. It writes nothing to the database. Suggestion prefill and submissions stay off, so the section shows MusicBrainz links instead of "Suggest this album".
+
 The log says whether the index was created or already present. Because automatic initialization is off, this run relies on the collections and indexes that already exist in the development database, including those for moderation features. Without the switch, startup behaves as before and `ARTIST_PAGES_ENABLED` is forced to `false`. See [artist pages](ARTIST_IDENTITY.md#artist-pages-prototype).
 
 Detection access does not ingest plays, run detection jobs, or publish new diary listens. Its view requires an existing active/paused Last.fm connection and stored detection records for the approved test account; without those, the view can be empty. Changing a connected account's time zone still writes shared connection state and queues detection work. Automatic diary opt-in, confirmation and publication stay disabled. Ordinary app actions, including manually recording a listen, are not made read-only by these flags.

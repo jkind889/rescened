@@ -14,7 +14,7 @@ const DISABLED = [
   'COMMUNITY_SUBMISSIONS_ENABLED', 'COMMUNITY_MODERATION_ENABLED', 'GENRES_ENABLED',
   'DATA_EXPORT_ENABLED', 'REVIEW_COMMENTS_ENABLED', 'REVIEW_EPISODES_ENABLED',
   'REVIEW_EFFORT_TIMER_ENABLED', 'SHARE_PREVIEWS_ENABLED', 'CONTRIBUTOR_EDITIONS_ENABLED',
-  'ARTIST_PAGES_ENABLED',
+  'ARTIST_PAGES_ENABLED', 'ARTIST_DISCOGRAPHY_ENABLED',
 ];
 const fail = (message) => { throw new Error(message); };
 function git(root, args) {
@@ -128,7 +128,9 @@ function buildEnvironments(profile, state, inherited = process.env, options = {}
     COMMUNITY_MODERATION_ENABLED: String(moderators.length > 0),
     ALBUM_MAPPING_MODERATION_ENABLED: String(moderators.length > 0),
     TRACKLIST_BASELINE_MODERATION_ENABLED: String(moderators.length > 0),
-    ...(options.artistPages === true ? { ARTIST_PAGES_ENABLED: 'true', RESCENED_PREVIEW_INIT: 'artist-pages', RESCENED_PREVIEW_DATABASE: profile.database } : {}) };
+    ...(options.artistPages === true ? { ARTIST_PAGES_ENABLED: 'true', RESCENED_PREVIEW_INIT: 'artist-pages', RESCENED_PREVIEW_DATABASE: profile.database } : {}),
+    // Read-only MusicBrainz browsing for artist pages; only with --artist-pages.
+    ...(options.artistPages === true && options.artistDiscography === true ? { ARTIST_DISCOGRAPHY_ENABLED: 'true' } : {}) };
   const frontend = { ...base, NODE_ENV: 'development', VITE_API_URL: `http://127.0.0.1:${state.apiPort}`, VITE_CLERK_PUBLISHABLE_KEY: profile.server.CLERK_PUBLISHABLE_KEY };
   return { backend, frontend };
 }
@@ -138,15 +140,16 @@ function rejectEnvFiles(root) {
     if (files.length) fail('This worktree contains dotenv files. Preserve/move them yourself before using the isolated profile launcher. No files were overwritten.');
   }
 }
-function display(state) {
-  console.log(`Worktree: ${state.root}\nDatabase: shared development\nAPI: http://127.0.0.1:${state.apiPort}\nFrontend: http://127.0.0.1:${state.webPort}\nWorkers/providers: off`);
+function display(state, { providers = false } = {}) {
+  console.log(`Worktree: ${state.root}\nDatabase: shared development\nAPI: http://127.0.0.1:${state.apiPort}\nFrontend: http://127.0.0.1:${state.webPort}\nWorkers: off\nProviders: ${providers ? 'MusicBrainz artist discography only (read-only)' : 'off'}`);
 }
-async function start(ctx, profilePath, { artistPages = false } = {}) {
+async function start(ctx, profilePath, { artistPages = false, artistDiscography = false } = {}) {
+  if (artistDiscography && !artistPages) fail('--artist-discography requires --artist-pages.');
   requireLinked(ctx);
   const state = readState(ctx);
   rejectEnvFiles(ctx.root);
   const profile = loadProfile(profilePath, ctx);
-  const envs = buildEnvironments(profile, state, process.env, { artistPages });
+  const envs = buildEnvironments(profile, state, process.env, { artistPages, artistDiscography });
   const vite = path.join(ctx.root, 'frontend/node_modules/vite/bin/vite.js');
   if (!fs.existsSync(path.join(ctx.root, 'node_modules/express')) || !fs.existsSync(vite)) fail('Install each package first: npm ci && npm --prefix frontend ci.');
   await locked(ctx, async () => {
@@ -169,11 +172,12 @@ async function start(ctx, profilePath, { artistPages = false } = {}) {
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   try {
-    display(state);
+    display(state, { providers: artistDiscography });
     console.log(`Detection pilots: ${profile.preview?.listeningPilotUserIds?.length || 0}; moderators with approval access: ${profile.preview?.moderatorUserIds?.length || 0}.`);
     console.log(artistPages
       ? `Artist pages: on. Automatic collection/index creation is off; only ${profile.database}.albumcatalogs artistCredits.artistId_1 is ensured.`
       : 'Artist pages: off.');
+    console.log(`Artist MusicBrainz discography: ${artistDiscography ? 'on (live read-only MusicBrainz browsing, shared 1.1 s rate gate)' : 'off'}.`);
     console.log('Starting API + Vite only. Ctrl+C stops this pair. Shared development writes persist after worktree removal.');
     const specs = [
       { args: [path.join(__dirname, 'worktree-server.cjs'), path.join(ctx.root, 'server.js')], cwd: ctx.root, env: envs.backend },
@@ -244,6 +248,7 @@ function parseArgs(args) {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--discard-generated') options.discardGenerated = true;
     else if (args[i] === '--artist-pages') { if (options.artistPages) fail('Duplicate --artist-pages.'); options.artistPages = true; }
+    else if (args[i] === '--artist-discography') { if (options.artistDiscography) fail('Duplicate --artist-discography.'); options.artistDiscography = true; }
     else if (['--profile', '--base'].includes(args[i])) { const key = args[i].slice(2); if (options[key] || !args[i + 1] || args[i + 1].startsWith('--')) fail(`Missing or duplicate ${args[i]}.`); options[key] = args[++i]; }
     else if (args[i].startsWith('--')) fail(`Unknown option: ${args[i]}`);
     else positional.push(args[i]);
@@ -253,17 +258,17 @@ function parseArgs(args) {
 async function main(args = process.argv.slice(2)) {
   const { positional: [command, target, ...extra], options } = parseArgs(args);
   if (!command || command === 'help') {
-    console.log('worktree create NAME [--base REF]\nworktree setup\nworktree status\nworktree start --profile /absolute/private/dev.json [--artist-pages]\nworktree remove /absolute/worktree [--base origin/main] [--discard-generated]\n\nCreate uses repository-local rescened.worktreeBase, otherwise origin/main.\nSee docs/WORKTREES.md. Setup never copies secrets or connects to a database.');
+    console.log('worktree create NAME [--base REF]\nworktree setup\nworktree status\nworktree start --profile /absolute/private/dev.json [--artist-pages [--artist-discography]]\nworktree remove /absolute/worktree [--base origin/main] [--discard-generated]\n\nCreate uses repository-local rescened.worktreeBase, otherwise origin/main.\nSee docs/WORKTREES.md. Setup never copies secrets or connects to a database.');
     return;
   }
   if (extra.length || (target && !['create', 'remove'].includes(command))) fail('Unexpected positional argument.');
-  const allowedOptions = { create: ['base'], setup: [], status: [], start: ['profile', 'artistPages'], remove: ['base', 'discardGenerated'] };
+  const allowedOptions = { create: ['base'], setup: [], status: [], start: ['profile', 'artistPages', 'artistDiscography'], remove: ['base', 'discardGenerated'] };
   if (allowedOptions[command] && Object.keys(options).some((key) => !allowedOptions[command].includes(key))) fail('Option is not supported by this command.');
   const ctx = context();
   if (command === 'create') display(await create(ctx, target, options.base));
   else if (command === 'setup') display(await setup(ctx));
   else if (command === 'status') { display(readState(ctx)); console.log(`Run marker: ${fs.existsSync(runPath(ctx)) ? 'present (inspect owning terminal)' : 'absent'}`); }
-  else if (command === 'start') await start(ctx, options.profile, { artistPages: options.artistPages === true });
+  else if (command === 'start') await start(ctx, options.profile, { artistPages: options.artistPages === true, artistDiscography: options.artistDiscography === true });
   else if (command === 'remove') await remove(ctx, target, options.base, options.discardGenerated);
   else fail(`Unknown command: ${command}`);
 }
