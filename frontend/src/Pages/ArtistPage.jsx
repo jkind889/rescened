@@ -6,6 +6,7 @@ import Cover from "../Components/Cover";
 import PageMeta from "../Components/PageMeta";
 import { SITE_NAME } from "../utils/pageMeta";
 import {
+  discographyAdvertised,
   otherCredits,
   releaseCountLabel,
   releaseCreditNote,
@@ -13,6 +14,7 @@ import {
   releaseTypeLabel,
   visibleReleaseFilters,
 } from "../features/artists/artists";
+import ArtistDiscography from "../features/artists/ArtistDiscography";
 import "../Components/Community/GenreSuggestion.css";
 import "../features/artists/ArtistPage.css";
 
@@ -43,8 +45,9 @@ function OtherCredits({ release, artistId }) {
 }
 
 // A local artist page: the registry heading and the artist's releases in the
-// Rescened catalog. It is not a complete discography and fetches nothing from
-// outside Rescened.
+// Rescened catalog, which never depend on a provider. When the API advertises
+// it, a separately loaded MusicBrainz section (ArtistDiscography) follows; its
+// failures stay inside that section.
 export function ArtistPage() {
   const { artistId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -54,6 +57,10 @@ export function ArtistPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [moreError, setMoreError] = useState("");
   const moreRequest = useRef(null);
+  useEffect(() => () => {
+    moreRequest.current?.abort();
+    moreRequest.current = null;
+  }, []);
   const listKey = `${artistId}|${type}`;
   const artistUrl = `${API_BASE_URL}/artists/${encodeURIComponent(artistId)}`;
 
@@ -233,6 +240,8 @@ export function ArtistPage() {
           </button>
         ) : null}
       </section>
+
+      {artist && discographyAdvertised(data) ? <ArtistDiscography key={artist.artistId} artistId={artist.artistId} /> : null}
     </section>
   );
 }

@@ -129,7 +129,15 @@ integration("artist header shows the registry name, credited spellings, reviewed
       musicBrainzUrl: `https://musicbrainz.org/artist/${artists.loona.externalReferences[0].externalId}`,
     },
     releaseCounts: { all: 6, album: 2, ep: 1, single: 1, mixtape: 1, other: 1 },
+    features: { discography: false },
   });
+  const previousDiscography = process.env.ARTIST_DISCOGRAPHY_ENABLED;
+  process.env.ARTIST_DISCOGRAPHY_ENABLED = "true";
+  try {
+    assert.deepEqual((await request(`/artists/${artists.loona.artistId}`)).body.features, { discography: true });
+  } finally {
+    if (previousDiscography === undefined) delete process.env.ARTIST_DISCOGRAPHY_ENABLED; else process.env.ARTIST_DISCOGRAPHY_ENABLED = previousDiscography;
+  }
   assert.equal(JSON.stringify(loona.body).includes(String(artists.loona._id)), false);
 
   const bts = await request(`/artists/${artists.bts.artistId}`);

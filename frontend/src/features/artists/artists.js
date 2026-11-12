@@ -83,3 +83,62 @@ export function artistMatchSummary(result) {
   if (Array.isArray(result?.knownFor) && result.knownFor.length) parts.push(result.knownFor.join(", "));
   return parts.join(" · ");
 }
+
+// MusicBrainz discography filters. Album, EP, and single mean that
+// MusicBrainz primary type with no secondary type; they are not a guarantee
+// of official studio releases.
+// `noun` names what the filter shows; `scope` names what MusicBrainz's raw
+// browse count covers for that request, before local verification.
+// `nounOne`/`scopeOne` are the singular forms.
+export const DISCOGRAPHY_FILTERS = [
+  { value: "album", label: "Albums", noun: "album groups without a secondary type", nounOne: "album group without a secondary type", scope: "album-type groups (including live, compilation, and other secondary types)", scopeOne: "album-type group (including live, compilation, and other secondary types)" },
+  { value: "ep", label: "EPs", noun: "EP groups without a secondary type", nounOne: "EP group without a secondary type", scope: "EP-type groups (including secondary types)", scopeOne: "EP-type group (including secondary types)" },
+  { value: "single", label: "Singles", noun: "single groups without a secondary type", nounOne: "single group without a secondary type", scope: "single-type groups (including secondary types)", scopeOne: "single-type group (including secondary types)" },
+  { value: "other", label: "Other", noun: "other release groups", nounOne: "other release group", scope: "release groups of every type", scopeOne: "release group of any type" },
+  { value: "all", label: "All", noun: "release groups", nounOne: "release group", scope: "release groups of every type", scopeOne: "release group of any type" },
+];
+
+// Mount the MusicBrainz section only when the artist header says this API
+// serves it. Older APIs omit `features`, so their pages stay unchanged.
+export function discographyAdvertised(detail) {
+  return detail?.features?.discography === true;
+}
+
+// Errors that mean "this API has no discography for us": the coded
+// disabled responses, or a 404/503 without our code (an older API with no
+// route). The coded ARTIST_DISCOGRAPHY_NOT_AVAILABLE 404 is a real answer
+// and is shown in the section instead.
+export function discographyHidden(error) {
+  if (!error) return false;
+  if (["ARTIST_DISCOGRAPHY_DISABLED", "ARTIST_PAGES_DISABLED"].includes(error.code)) return true;
+  return !error.code && [404, 503].includes(error.status);
+}
+
+// Appends a provider page, dropping release groups already shown, because
+// MusicBrainz pages can overlap between requests. Returns how many rows were new.
+export function mergeDiscographyRows(existing, incoming) {
+  const seen = new Set((existing || []).map((row) => row.externalId));
+  const added = [];
+  for (const row of Array.isArray(incoming) ? incoming : []) {
+    if (!row?.externalId || seen.has(row.externalId)) continue;
+    seen.add(row.externalId);
+    added.push(row);
+  }
+  return { rows: [...(existing || []), ...added], added: added.length };
+}
+
+// Coverage and order wording that matches what was actually loaded. The
+// provider count is MusicBrainz's raw browse total for the request's scope,
+// which is not the number of rows matching the filter; `shown` is the
+// verified rows loaded so far.
+export function discographySummary({ filter, providerCount, shown, pagesLoaded, pageSize = 100, hasMore }) {
+  const option = DISCOGRAPHY_FILTERS.find((item) => item.value === filter) || DISCOGRAPHY_FILTERS[0];
+  const scope = Number.isInteger(providerCount)
+    ? `MusicBrainz's default view has ${providerCount} ${providerCount === 1 ? option.scopeOne : option.scope} for this artist`
+    : "MusicBrainz did not report a total";
+  const order = pagesLoaded > 1 || hasMore || (Number.isInteger(providerCount) && providerCount > pageSize)
+    ? `newest first within each batch of up to ${pageSize}`
+    : "newest first";
+  const more = hasMore ? " so far" : "";
+  return `${scope}. Showing ${shown} verified ${shown === 1 ? option.nounOne : option.noun}${more}, ${order}.`;
+}

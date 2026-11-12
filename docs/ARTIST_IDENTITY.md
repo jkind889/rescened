@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-11-11
 
-Phase 1 gives artists stable public Rescened IDs and keeps MusicBrainz artist IDs on album credits. A flagged [artist pages prototype](#artist-pages-prototype) builds on it with local artist pages, credit links, and multilingual search aliases. There are still no biographies, artist images, external discographies, or merges. Listening stats still group top artists by display name.
+Phase 1 gives artists stable public Rescened IDs and keeps MusicBrainz artist IDs on album credits. A flagged [artist pages prototype](#artist-pages-prototype) builds on it with local artist pages, credit links, and multilingual search aliases, and a separately flagged [MusicBrainz discography](#musicbrainz-discography-prototype). There are still no biographies, artist images, or merges. Listening stats still group top artists by display name.
 
 ## Data contract
 
@@ -138,7 +138,7 @@ Before enabling it in production, run verified-name backfill planning (see [Veri
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| `GET` | `/artists/:artistId` | Header: `artist { artistId, name, aliases, creditedAs, musicBrainzUrl }` and `releaseCounts { all, album, ep, single, mixtape, other }`. `other` covers soundtrack, compilation, live, remix, and other. |
+| `GET` | `/artists/:artistId` | Header: `artist { artistId, name, aliases, creditedAs, musicBrainzUrl }`, `releaseCounts { all, album, ep, single, mixtape, other }`, and `features { discography }`. `other` covers soundtrack, compilation, live, remix, and other. |
 | `GET` | `/artists/:artistId/releases?type=&limit=&cursor=` | Linked catalog releases, newest first (year, then release date, then title and `albumId`). Keyset-paged with an opaque cursor that holds no Mongo IDs; `limit` 1–48, default 24. Local search rate limit. |
 | `GET` | `/artists/search?q=&limit=` | Artists whose registry name, reviewed alias, or credited spelling contains the query. `limit` 1–12, default 6. Local search rate limit. |
 
@@ -169,11 +169,47 @@ The full results page shows matching artists above album results on page one, wi
 
 On page one, the results page calls both `/search/search` and `/artists/search`, so it spends two points of the shared local-search rate limit. While the flag is off, it still sends the artist search request and ignores the `503`. The header route `GET /artists/:artistId` has only the global rate limit, like `GET /genres/:slug`.
 
+## MusicBrainz discography (prototype)
+
+`ARTIST_DISCOGRAPHY_ENABLED=true` (server-side, default off, and only with `ARTIST_PAGES_ENABLED`) adds an "On MusicBrainz" section below "On Rescened". It is the only artist route that contacts a provider. The page loads it after the local header, and its loading, errors, and retries stay inside the section. The header response includes `features: { discography }`, which is `true` only while the flag is on and the artist has a MusicBrainz identity. The page mounts the section only when it is `true`. An older API that omits `features`, the flag being off, or an artist without an MBID leaves the page without the section. While the flag is off, `GET /artists/:artistId/discography` returns `503 ARTIST_DISCOGRAPHY_DISABLED`. As a fallback, the section also hides itself on that code or on an uncoded 404 or 503, such as a missing route, but not on the coded `ARTIST_DISCOGRAPHY_NOT_AVAILABLE`.
+
+### Request
+
+`GET /artists/:artistId/discography?type=&cursor=` resolves the registry artist's MusicBrainz MBID and makes one provider request per call:
+
+```
+GET https://musicbrainz.org/ws/2/release-group?artist=<mbid>&type=<album|ep|single>&release-group-status=website-default&inc=artist-credits&limit=100&offset=<n>&fmt=json
+```
+
+- **Browse, not search.** Browsing by artist reads MusicBrainz's database directly. `release-group-status=website-default` matches the artist overview on musicbrainz.org: it leaves out release groups whose releases are all promotional, bootleg, or pseudo-releases. That is not an official-only filter, and poorly tagged groups can remain. In one-off manual probes, Radiohead's album-type groups fell from 389 (all statuses) to 29. An earlier design used the search index with `arid:<mbid>`; its rows embed release lists, and in an earlier run of the experiment script its album pages for the five sampled artists were 2.7–15 times larger (43–181 kB, against 9–28 kB for browse). The committed script now measures only the browse design.
+- **Types.** `album` (the default), `ep`, and `single` send that MusicBrainz primary type and then keep only rows with no secondary type: no live, compilation, remix, soundtrack, demo, DJ-mix, and so on. These are labeled as MusicBrainz album, EP, or single groups, not as guaranteed studio releases. `other` is the complement and `all` keeps everything; both browse without a type and filter locally.
+- **Verified identity.** A row is kept only if its own artist credit names the requested MBID. Collaborations therefore appear on each credited artist's discography, and an index or provider mistake cannot attach another artist's release. `filteredOut` counts returned rows dropped because the artist credit did not verify, the type did not match the filter, or the row could not be normalized. Duplicates within a page are not counted.
+- **Counts.** `providerCount` is MusicBrainz's raw browse total for the request, described by `providerScope`. For `album`, `ep`, and `single` it counts every website-default group of that primary type, including secondary types. For `other` and `all` it is the whole website-default discography. It is not the number of rows matching the filter. The UI shows it as "MusicBrainz's default view has N …" and separately counts the verified rows shown.
+- **Order.** Browse results arrive in MusicBrainz's internal order, not by date. Each page is sorted newest first. When a filter spans more than one page, the UI says "newest first within each batch of up to 100".
+
+### Reconciliation
+
+Each returned release group is matched against `AlbumCatalog` by its `musicbrainz` / `release-group` reference. A match is returned as `kind: "catalog"` with its public `albumId` and the catalog's own title, credits, type, year, and cover, linking to `/album/:albumId`. Every other row stays a `kind: "external"` candidate with no `albumId`, shown with "Not in Rescened". Nothing is imported, and provider IDs never become `albumId` values.
+
+"Suggest this album" prefills from `GET /search/musicbrainz/release-group/:mbid`, which `EXTERNAL_ALBUM_SEARCH_ENABLED` gates. The response's `suggestionsAvailable` mirrors that flag. While it is off, external cards show only their MusicBrainz link, so the section never advertises a suggestion it cannot start. Submitting a suggestion still needs `COMMUNITY_SUBMISSIONS_ENABLED`; this feature does not enable either flag.
+
+### Paging and bounds
+
+- **Cursor.** The opaque cursor names the artist, the type, and the raw provider offset (1–1,000). It cannot be replayed against another artist or type. The next offset advances by the rows MusicBrainz returned, not by the rows kept, so filtering never skips or repeats provider rows. A page can be empty after filtering and still have a next page; the UI keeps "Load more from MusicBrainz" and says the batch had no new verified matches. Paging stops at the provider total, after an empty provider page, or at offset 1,000 (`truncatedAtOffsetCap`).
+- **De-duplication.** Duplicates are removed within a page on the server and across pages in the UI.
+- **Requests.** The first page loads with the section on each artist view; further pages load only when someone clicks "Load more". There is no crawl and no automatic retry. The shared rate gate queues requests without a bound, and time spent waiting there is not covered by the timeout. A browser abort does not cancel a provider request already in progress. Under heavy use, waits can therefore grow; the per-IP route limit and the cache are the current protections. Each provider page is one request, behind the same per-process 1.1 s rate gate, in-flight de-duplication, and bounded in-memory cache as external search. Discography pages stay cached for 10 minutes. The timeout is 6 s with no retries. Response bodies are limited to 2 MiB of decoded bytes as they are read. The route uses the 30-per-minute external-search rate limit.
+- **Failures.** A MusicBrainz error, timeout, invalid response, or 503 returns `502 EXTERNAL_DISCOGRAPHY_UNAVAILABLE` with allowlisted diagnostics. MusicBrainz documents a limit of one request per second per client; a 503 can mean throttling or general server load, so the UI offers "Try again" without blaming either.
+- **Cache.** The cache is in memory and per process. There is no persisted discography cache and no database write; restarting the API empties it, and several API instances each keep their own cache and rate gate.
+
+MusicBrainz core data is CC0. The section credits MusicBrainz and links to the artist there. Covers are hotlinked from the Cover Art Archive and are not copied.
+
 ## Verification
 
 - `tests/artistNames.test.js` covers exact-ID lookup, rate limits, bounded retries/timeouts, response validation, private-cache reuse/resume, and credited-name preservation. All provider responses are fixtures.
 - `tests/artistIdentity.test.js` covers the identity helpers, model invariants, submission validation, importer planning, backfill classification and sealing, the checked-in seed dataset as a source, and the frontend credit helpers.
 - `tests/artistPages.test.js` covers the collaboration badge (duplicate same-ID credits, distinct and homonymous artists, unresolved credits), reviewed-alias validation, search-key folding, query parsing, the search pipeline expansion, the feature flag, and the frontend credit and release helpers.
+- `tests/musicBrainzDiscography.test.js` covers the browse URL, a captured CC0 browse fixture, artist-credit verification, type filtering, raw-offset paging with empty filtered pages, the offset cap, caching and in-flight sharing, the shared rate gate, the streamed response-size limit, cursor binding, catalog reconciliation, and suggestion availability. `tests/artistPages.test.js` covers the discography route flag, safe 502 diagnostics, and the count wording.
+- `tests/artistDiscography.browser.test.js` is opt-in (`RUN_FRONTEND_BROWSER_TESTS=true` with Playwright). It checks repeated clicks, filter changes and unmount during in-flight requests, empty batches, the hidden suggestion action, and 390 px overflow, with fetch stubbed in the page.
 - `tests/artistPages.integration.test.js` covers artist headers, keyset release paging and type filters (including untyped rows and equal-title ties), multi-credited releases, homonyms, the search candidate cap, alias and credited-name search, identity search expansion with the flag on and off, and album-detail link resolution. It fails if any request leaves the test server.
 - `tests/artistIdentity.integration.test.js` covers the transactional paths on a replica set: import registration and idempotency, approval resolution and conflicts, and backfill planning without writes, target refusal, guarded apply, mapping carry-forward, rerun, and registry drift.
 
@@ -187,4 +223,4 @@ On page one, the results page calls both `/search/search` and `/artists/search`,
 - Legacy migration and the importer's provider adapters still drop join phrases from credits.
 - Listening stats and activity still use credit names. Catalog search expands by identity only for exact registry names and reviewed aliases, and only while artist pages are enabled.
 - Reviewed aliases are a checked-in table, not stored registry data. There is no alias editor or MusicBrainz alias import yet.
-- Artist pages have no biography, image, or external discography.
+- Artist pages have no biography or image. The MusicBrainz discography is flagged off by default, reads its total before local filtering, and has no persisted cache.

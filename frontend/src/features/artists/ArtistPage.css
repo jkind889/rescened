@@ -145,3 +145,34 @@
   font-size: .75rem;
   overflow-wrap: anywhere;
 }
+
+/* MusicBrainz discography reuses the external album cards from search. */
+.artist-discography {
+  --search-accent: #744e96;
+  --search-line: #242424;
+  --search-muted: #8c8c8c;
+}
+
+:root[data-theme="light"] .artist-discography {
+  --search-line: var(--app-line);
+  --search-muted: var(--app-muted);
+}
+
+.artist-discography-note,
+.artist-discography-summary {
+  margin: 0 0 .8rem;
+}
+
+.artist-discography .external-candidates-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+}
+
+.artist-discography-source {
+  color: var(--app-muted);
+  font-size: .75rem;
+  margin: 1rem 0 0;
+}
+
+.artist-discography-source a {
+  color: inherit;
+}

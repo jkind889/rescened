@@ -62,7 +62,7 @@ function query(rows) {
   };
 }
 
-function install({ searchResults = [], draft = null, catalogs = [], searchError = null, providerSearch = null } = {}) {
+function install({ searchResults = [], draft = null, catalogs = [], searchError = null, providerSearch = null, providerCount = null } = {}) {
   let searchCalls = 0;
   let draftCalls = 0;
   AlbumCatalog.find = () => query(catalogs);
@@ -80,16 +80,16 @@ function install({ searchResults = [], draft = null, catalogs = [], searchError 
     filename: adapterPath,
     loaded: true,
     exports: {
+      MAX_PROVIDER_OFFSET: realAdapter.MAX_PROVIDER_OFFSET,
       MusicBrainzSearchError: realAdapter.MusicBrainzSearchError,
       normalizeLimit: realAdapter.normalizeLimit,
       normalizeSearchQuery: realAdapter.normalizeSearchQuery,
-      searchReleaseGroups: async (queryValue, limit) => {
+      searchReleaseGroupPage: async (queryValue, options) => {
         searchCalls += 1;
         if (searchError) throw searchError;
-        if (providerSearch) return providerSearch(queryValue, limit);
+        if (providerSearch) return providerSearch(queryValue, options);
         assert.equal(queryValue, "imaginal disk");
-        assert.equal(limit, 12);
-        return searchResults;
+        return { candidates: searchResults, providerCount, offset: options.offset, returned: searchResults.length, nextOffset: null, truncatedAtOffsetCap: false };
       },
       getSuggestionDraft: async () => {
         draftCalls += 1;
@@ -108,6 +108,7 @@ test.afterEach(() => {
   delete require.cache[rateLimitPath];
   delete require.cache[searchPath];
   delete process.env.EXTERNAL_ALBUM_SEARCH_ENABLED;
+  delete process.env.EXTERNAL_SEARCH_PROVIDER_PAGING_ENABLED;
 });
 
 test("external search reconciles known MBIDs into normal catalog matches", async () => {
@@ -200,11 +201,12 @@ test("ranked provider pool shares the public limit across catalog matches and ex
     title: "Current Catalog Title", artistDisplayName: "An Artist",
     externalReferences: [{ provider: "musicbrainz", entityType: "release-group", externalId: mbid(49) }],
   };
-  const installed = install({ providerSearch: client.searchReleaseGroups, catalogs: [known] });
+  const installed = install({ providerSearch: client.searchReleaseGroupPage, catalogs: [known] });
   for (const [limit, expected] of [[undefined, 12], [100, 12], [2, 2], [1, 1]]) {
     const result = await callRoute(installed.router, "get", "/external", { query: { q: "imaginal disk", limit } });
     assert.equal(result.status, 200);
-    assert.deepEqual(Object.keys(result.body).sort(), ["candidates", "catalogMatches", "provider", "query"]);
+    assert.deepEqual(Object.keys(result.body).sort(), ["candidates", "catalogMatches", "nextCursor", "provider", "providerCount", "query"]);
+    assert.ok(result.body.nextCursor, "the rest of the fetched provider page is available");
     assert.equal(result.body.provider, "musicbrainz");
     assert.equal(result.body.catalogMatches.length + result.body.candidates.length, expected);
     assert.equal(result.body.catalogMatches[0].albumId, known.albumId);
@@ -291,4 +293,108 @@ test("external 502 exposes only allowlisted diagnostics and never invents an ups
     assert.equal(result.body.upstreamStatus, logs.at(-1).upstreamStatus);
     if (diagnostics) assert.equal(logs.at(-1).fetchDurationMs, 3003);
   }
+});
+
+function fingerprint(query) {
+  return require("node:crypto").createHash("sha256").update(query.toLowerCase(), "utf8").digest("base64url").slice(0, 22);
+}
+
+function pagedClient(totalRows, providerCount) {
+  const mbid = (index) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+  const urls = [];
+  const client = realAdapter.createMusicBrainzSearch({
+    intervalMs: 0,
+    fetchFn: async (url) => {
+      const parsed = new URL(url);
+      urls.push(parsed);
+      const offset = Number(parsed.searchParams.get("offset") || 0);
+      const rows = Array.from({ length: Math.max(0, Math.min(50, totalRows - offset)) }, (_, index) => ({
+        id: mbid(offset + index), title: `Imaginal Disk ${offset + index}`, "artist-credit": [{ name: "An Artist" }], "primary-type": "Album", score: 100,
+      }));
+      return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ count: providerCount, "release-groups": rows }) };
+    },
+  });
+  return { client, urls };
+}
+
+async function collect(installed, limit = 12) {
+  const ids = [];
+  let cursor;
+  let requests = 0;
+  do {
+    const result = await callRoute(installed.router, "get", "/external", { query: { q: "imaginal disk", limit: String(limit), ...(cursor ? { cursor } : {}) } });
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    ids.push(...result.body.candidates.map((item) => item.externalId));
+    cursor = result.body.nextCursor;
+    requests += 1;
+  } while (cursor && requests < 20);
+  return { ids, requests };
+}
+
+test("show more reveals the rest of the cached provider page, then stops without provider paging", async () => {
+  process.env.EXTERNAL_ALBUM_SEARCH_ENABLED = "true";
+  const { client, urls } = pagedClient(120, 120);
+  const installed = install({ providerSearch: client.searchReleaseGroupPage });
+  const { ids, requests } = await collect(installed);
+  assert.equal(ids.length, 50);
+  assert.equal(new Set(ids).size, 50);
+  assert.equal(requests, 5);
+  assert.equal(urls.length, 1, "slices of one cached page cost one provider request");
+});
+
+test("provider paging is opt-in and advances the raw provider offset", async () => {
+  process.env.EXTERNAL_ALBUM_SEARCH_ENABLED = "true";
+  process.env.EXTERNAL_SEARCH_PROVIDER_PAGING_ENABLED = "true";
+  const { client, urls } = pagedClient(120, 120);
+  const installed = install({ providerSearch: client.searchReleaseGroupPage });
+  const { ids } = await collect(installed, 12);
+  assert.equal(ids.length, 120);
+  assert.equal(new Set(ids).size, 120);
+  assert.deepEqual(urls.map((url) => url.searchParams.get("offset")), [null, "50", "100"]);
+});
+
+test("external cursors are bound to the query and the provider offset cap", async () => {
+  process.env.EXTERNAL_ALBUM_SEARCH_ENABLED = "true";
+  const { client, urls } = pagedClient(120, 120);
+  const installed = install({ providerSearch: client.searchReleaseGroupPage });
+  const first = await callRoute(installed.router, "get", "/external", { query: { q: "imaginal disk" } });
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const h = fingerprint("imaginal disk");
+  // The real cursor shape decodes, so each case below fails for its own reason.
+  assert.deepEqual(JSON.parse(Buffer.from(first.body.nextCursor, "base64url").toString("utf8")), { v: 2, h, o: 0, s: 12 });
+  const cases = [
+    { q: "another query", cursor: first.body.nextCursor },
+    { q: "imaginal disk", cursor: "not-a-cursor" },
+    { q: "imaginal disk", cursor: encode({ v: 2, h, o: 50, s: 0 }) },
+    { q: "imaginal disk", cursor: encode({ v: 1, q: "imaginal disk", o: 0, s: 12 }) },
+    { q: "imaginal disk", cursor: "a".repeat(513) },
+  ];
+  for (const query of cases) {
+    const result = await callRoute(installed.router, "get", "/external", { query });
+    assert.equal(result.status, 400, JSON.stringify(query));
+    assert.equal(result.body.code, "INVALID_EXTERNAL_SEARCH");
+  }
+  process.env.EXTERNAL_SEARCH_PROVIDER_PAGING_ENABLED = "true";
+  const atCap = await callRoute(installed.router, "get", "/external", { query: { q: "imaginal disk", cursor: encode({ v: 2, h, o: realAdapter.MAX_PROVIDER_OFFSET, s: 0 }) } });
+  assert.equal(atCap.status, 200, "the cap itself is a valid offset");
+  const overCap = await callRoute(installed.router, "get", "/external", { query: { q: "imaginal disk", cursor: encode({ v: 2, h, o: realAdapter.MAX_PROVIDER_OFFSET + 50, s: 0 }) } });
+  assert.equal(overCap.status, 400, "an offset beyond the cap is a client error, not a provider failure");
+  assert.equal(urls.length, 2);
+});
+
+test("cursors stay usable for the longest accepted multibyte query", async () => {
+  process.env.EXTERNAL_ALBUM_SEARCH_ENABLED = "true";
+  const { client, urls } = pagedClient(120, 120);
+  const installed = install({ providerSearch: client.searchReleaseGroupPage });
+  const q = "音".repeat(200);
+  const first = await callRoute(installed.router, "get", "/external", { query: { q } });
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  assert.ok(first.body.nextCursor.length <= 128, `cursor length ${first.body.nextCursor.length}`);
+  const second = await callRoute(installed.router, "get", "/external", { query: { q, cursor: first.body.nextCursor } });
+  assert.equal(second.status, 200, JSON.stringify(second.body));
+  assert.equal(second.body.candidates.length, 12);
+  assert.equal(new Set([...first.body.candidates, ...second.body.candidates].map((item) => item.externalId)).size, 24);
+  const otherQuery = await callRoute(installed.router, "get", "/external", { query: { q: `${"音".repeat(199)}楽`, cursor: first.body.nextCursor } });
+  assert.equal(otherQuery.status, 400, "the fingerprint still binds the cursor to its query");
+  assert.equal(urls.length, 1);
 });

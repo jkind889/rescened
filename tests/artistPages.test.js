@@ -241,3 +241,106 @@ test("a collaboration needs another credited party, decided by identity only", a
   assert.equal(hasOtherCreditedParty(undefined, ARTIST_A), false);
   assert.equal(releaseCard({ ...base, artistCredits: [{ name: "Solo", role: "main", artistId: ARTIST_A }] }, ARTIST_A).collaboration, false);
 });
+
+test("discography route is separately flagged and maps provider failures to a safe 502", async (t) => {
+  const musicBrainz = require("../lib/musicBrainzSearch");
+  const Artist = require("../models/Artist");
+  const saved = { pages: process.env.ARTIST_PAGES_ENABLED, discography: process.env.ARTIST_DISCOGRAPHY_ENABLED, browse: musicBrainz.browseArtistDiscography, findOne: Artist.findOne };
+  const logs = [];
+  t.mock.method(console, "warn", (line) => logs.push(line));
+  const app = express();
+  app.use("/artists", require("../routes/artists"));
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const base = `http://127.0.0.1:${server.address().port}/artists`;
+  let browsed = 0;
+  try {
+    process.env.ARTIST_PAGES_ENABLED = "true";
+    delete process.env.ARTIST_DISCOGRAPHY_ENABLED;
+    const disabled = await fetch(`${base}/${ARTIST_A}/discography`);
+    assert.equal(disabled.status, 503);
+    assert.equal((await disabled.json()).code, "ARTIST_DISCOGRAPHY_DISABLED");
+
+    process.env.ARTIST_DISCOGRAPHY_ENABLED = "true";
+    Artist.findOne = () => ({ select: () => ({ lean: async () => ({ artistId: ARTIST_A, externalReferences: [{ provider: "musicbrainz", entityType: "artist", externalId: BTS }] }) }) });
+    musicBrainz.browseArtistDiscography = async () => {
+      browsed += 1;
+      const error = new musicBrainz.MusicBrainzSearchError("failed https://musicbrainz.org/ws/2/release-group?artist=secret");
+      error.diagnostics = { category: "upstream_http", upstreamStatus: 503, gateWaitMs: 1 };
+      throw error;
+    };
+    const badCursor = await fetch(`${base}/${ARTIST_A}/discography?cursor=nope`);
+    assert.equal(badCursor.status, 400);
+    assert.equal((await badCursor.json()).code, "INVALID_DISCOGRAPHY_CURSOR");
+    assert.equal(browsed, 0);
+
+    const failed = await fetch(`${base}/${ARTIST_A}/discography`);
+    const body = await failed.json();
+    assert.equal(failed.status, 502);
+    assert.deepEqual(Object.keys(body).sort(), ["category", "code", "error", "requestId", "upstreamStatus"]);
+    assert.equal(body.code, "EXTERNAL_DISCOGRAPHY_UNAVAILABLE");
+    assert.equal(body.upstreamStatus, 503);
+    assert.equal(JSON.stringify(body).includes("secret") || logs.join("").includes("secret"), false);
+  } finally {
+    musicBrainz.browseArtistDiscography = saved.browse;
+    Artist.findOne = saved.findOne;
+    for (const [key, value] of [["ARTIST_PAGES_ENABLED", saved.pages], ["ARTIST_DISCOGRAPHY_ENABLED", saved.discography]]) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    server.close();
+  }
+});
+
+test("discography helpers merge overlapping pages and describe coverage honestly", async () => {
+  const { mergeDiscographyRows, discographySummary } = await helpers;
+  const first = mergeDiscographyRows([], [{ externalId: "a" }, { externalId: "b" }, { externalId: "a" }, {}]);
+  assert.deepEqual([first.rows.map((row) => row.externalId), first.added], [["a", "b"], 2]);
+  const second = mergeDiscographyRows(first.rows, [{ externalId: "b" }, { externalId: "c" }]);
+  assert.deepEqual([second.rows.map((row) => row.externalId), second.added], [["a", "b", "c"], 1]);
+  assert.equal(mergeDiscographyRows(second.rows, [{ externalId: "c" }]).added, 0);
+  // Radiohead's captured album browse: 29 raw album-type groups, 9 verified.
+  assert.equal(
+    discographySummary({ filter: "album", providerCount: 29, shown: 9, pagesLoaded: 1, hasMore: false }),
+    "MusicBrainz's default view has 29 album-type groups (including live, compilation, and other secondary types) for this artist. Showing 9 verified album groups without a secondary type, newest first.",
+  );
+  // For Other, the raw count is the whole discography, never an Other count.
+  const other = discographySummary({ filter: "other", providerCount: 108, shown: 51, pagesLoaded: 1, hasMore: true });
+  assert.equal(other, "MusicBrainz's default view has 108 release groups of every type for this artist. Showing 51 verified other release groups so far, newest first within each batch of up to 100.");
+  assert.equal(/108 other/.test(other), false);
+  assert.equal(discographySummary({ filter: "all", providerCount: null, shown: 0, pagesLoaded: 1, hasMore: false }), "MusicBrainz did not report a total. Showing 0 verified release groups, newest first.");
+  assert.equal(
+    discographySummary({ filter: "ep", providerCount: 1, shown: 1, pagesLoaded: 1, hasMore: false }),
+    "MusicBrainz's default view has 1 EP-type group (including secondary types) for this artist. Showing 1 verified EP group without a secondary type, newest first.",
+  );
+});
+
+test("the discography section mounts only when the API advertises it", async () => {
+  const { discographyAdvertised, discographyHidden } = await helpers;
+  // A header from an API without the capability (an older, still-running preview).
+  assert.equal(discographyAdvertised({ artist: { artistId: ARTIST_A }, releaseCounts: {} }), false);
+  assert.equal(discographyAdvertised({ features: { discography: false } }), false);
+  assert.equal(discographyAdvertised({ features: { discography: "true" } }), false);
+  assert.equal(discographyAdvertised({ features: { discography: true } }), true);
+  assert.equal(discographyAdvertised(null), false);
+  assert.equal(discographyHidden({ status: 503, code: "ARTIST_DISCOGRAPHY_DISABLED" }), true);
+  assert.equal(discographyHidden({ status: 404, code: "" }), true, "a missing route on an older API hides the section");
+  assert.equal(discographyHidden({ status: 503, code: "" }), true);
+  assert.equal(discographyHidden({ status: 404, code: "ARTIST_DISCOGRAPHY_NOT_AVAILABLE" }), false, "the coded answer is shown");
+  assert.equal(discographyHidden({ status: 502, code: "EXTERNAL_DISCOGRAPHY_UNAVAILABLE" }), false, "provider failures offer Try again");
+  assert.equal(discographyHidden(null), false);
+  const page = fs.readFileSync(path.join(__dirname, "../frontend/src/Pages/ArtistPage.jsx"), "utf8");
+  assert.match(page, /discographyAdvertised\(data\) \? <ArtistDiscography/);
+});
+
+test("experiment summaries count tiers, duplicates, and verified discography rows offline", () => {
+  const experiment = require("../benchmarks/musicbrainz/run.cjs");
+  const fixture = require("./fixtures/musicBrainz/browse-radiohead-album-website-default.json");
+  assert.deepEqual(experiment.summarizeDiscography(fixture, "album", "a74b1b7f-71a5-4011-9441-d0b5e4122711"), { providerCount: 29, returned: 29, kept: 9, filteredOut: 20, pagesAt100: 1 });
+  const row = (id, title, artist = "Radiohead") => ({ id, title, "artist-credit": [{ name: artist }], "primary-type": "Album" });
+  const ids = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"];
+  const summary = experiment.summarizeSearch({ count: 3, "release-groups": [row(ids[0], "Kid A"), row(ids[1], "Kid A"), row(ids[0], "Kid A"), row(ids[2], "Other")] }, "kid a");
+  assert.deepEqual([summary.providerCount, summary.returned, summary.validCandidates, summary.duplicateIds, summary.nearDuplicates], [3, 4, 3, 1, 1]);
+  assert.deepEqual(summary.tiers["1-12"], { shown: 3, strong: 2, matched: 2 });
+  assert.equal(experiment.plan(experiment.parseArgs([])).length, 42);
+  assert.throws(() => experiment.parseArgs(["--limits", "101"]), /1-100/);
+});

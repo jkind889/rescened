@@ -178,6 +178,11 @@ The `/artists` routes are public reads. See [artist identity](ARTIST_IDENTITY.md
 | `INVALID_ARTIST_RELEASES` | `400` | `GET /artists/:artistId/releases` got an unsupported query field, a `type` other than `all`, `album`, `ep`, `single`, `mixtape`, or `other`, or a `limit` outside 1–48. |
 | `INVALID_ARTIST_CURSOR` | `400` | A release cursor is empty, malformed, too long, or belongs to another `type`. |
 | `INVALID_ARTIST_SEARCH` | `400` | `GET /artists/search` got an unsupported query field, a `q` longer than 200 characters, or a `limit` outside 1–12. |
+| `ARTIST_DISCOGRAPHY_DISABLED` | `503` | `ARTIST_DISCOGRAPHY_ENABLED` is off (`GET /artists/:artistId/discography`). Artist pages still work. |
+| `INVALID_ARTIST_DISCOGRAPHY` | `400` | The discography request has an unsupported query field or a `type` other than `album`, `ep`, `single`, `other`, or `all`. |
+| `INVALID_DISCOGRAPHY_CURSOR` | `400` | A discography cursor is malformed, belongs to another artist or `type`, or names an offset outside 1–1,000. |
+| `ARTIST_DISCOGRAPHY_NOT_AVAILABLE` | `404` | The registry artist has no MusicBrainz artist identity to browse. |
+| `EXTERNAL_DISCOGRAPHY_UNAVAILABLE` | `502` | MusicBrainz failed, was busy, timed out, or returned data that could not be normalized or exceeded the response-size limit. Adds `category`, `upstreamStatus`, and `requestId` as for external search. Local artist content is unaffected. |
 
 ### Review comments
 
@@ -230,7 +235,7 @@ Bulk approval returns `200` with a result for each item. Its per-item `error.cod
 
 | Code | Status | Meaning |
 | --- | --- | --- |
-| `INVALID_EXTERNAL_SEARCH` | `400` | The query, limit, or release-group MBID is invalid. |
+| `INVALID_EXTERNAL_SEARCH` | `400` | The query, limit, release-group MBID, or `cursor` is invalid. A cursor is invalid when it belongs to another query, names an offset beyond 1,000, or needs provider paging while `EXTERNAL_SEARCH_PROVIDER_PAGING_ENABLED` is off. |
 | `RATE_LIMITED` | `429` | The Rescened external-search bucket is exhausted; this is not a MusicBrainz response code. |
 | `EXTERNAL_SEARCH_UNAVAILABLE` | `502` | MusicBrainz failed, timed out, or returned data that could not be normalized. Local catalog search remains available. |
 | `EXTERNAL_SEARCH_DISABLED` | `503` | `EXTERNAL_ALBUM_SEARCH_ENABLED` is off. |
@@ -254,7 +259,7 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Global API | Every API route except `/health` and `/share` | IP | 300 requests per 5 minutes |
 | Share preview | `GET /share/album/:albumId`, `GET /share/review/:reviewId`, `GET /share/sitemap.xml` (not cumulative with the global bucket) | IP (Vercel's address when proxied) | 600 requests per 5 minutes |
 | Local search | `GET /search/search`, `GET /genres/search`, `GET /genres/:slug/albums`, `GET /artists/search`, `GET /artists/:artistId/releases` | IP | 90 requests per minute |
-| External search | `GET /search/external`, `GET /search/musicbrainz/release-group/:mbid` | IP | 30 requests per minute |
+| External search | `GET /search/external`, `GET /search/musicbrainz/release-group/:mbid`, `GET /artists/:artistId/discography` | IP | 30 requests per minute |
 | Album save | `POST /boards/:boardId/albums` | authenticated user | 30 attempts per 10 minutes |
 | Diary mutation | `POST /diary`, `PATCH`/`DELETE /diary/:listenId`, `PUT`/`DELETE /boards/:boardId/listens/:listenId` | authenticated user | 30 attempts per 10 minutes |
 | Review create | `POST /reviews/review` | authenticated user | 6 attempts per 10 minutes |
@@ -304,7 +309,8 @@ These are internal diagnostics. Public external-search routes normally translate
 | Code | Meaning |
 | --- | --- |
 | `MUSICBRAINZ_SEARCH_FAILED` | Generic interactive search-adapter failure. |
-| `MUSICBRAINZ_INVALID_SEARCH_RESPONSE` | A search response is malformed or contains no usable release groups. |
+| `MUSICBRAINZ_INVALID_SEARCH_RESPONSE` | A search or artist-browse response is malformed or contains no usable release groups. |
+| `MUSICBRAINZ_RESPONSE_TOO_LARGE` | The decoded response body exceeded 2 MiB while being read, or the server declared a larger `Content-Length`. |
 | `MUSICBRAINZ_INVALID_RELEASE_GROUP` | An exact release-group response cannot be validated or normalized. |
 | `MUSICBRAINZ_REQUEST_FAILED` | The shared provider request layer failed. |
 | `MUSICBRAINZ_PROVIDER_ERROR` | An unexpected provider or adapter error occurred. |

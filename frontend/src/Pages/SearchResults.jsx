@@ -1,5 +1,5 @@
 import { API_BASE_URL } from "../config/api";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import AsyncState from "../Components/Loading/AsyncState";
 import ExternalAlbumCard from "../Components/ExternalAlbumCard";
@@ -21,6 +21,16 @@ export function SearchResults() {
   const [catalogMatches, setCatalogMatches] = useState([]);
   const [externalCandidates, setExternalCandidates] = useState([]);
   const [externalRetry, setExternalRetry] = useState(0);
+  // "Show more" for MusicBrainz results: a cursor from the API, bound to the
+  // query. Paging is best effort: the API reuses its short-lived cached
+  // provider page when it can and fetches afresh otherwise, so results are
+  // de-duplicated here and a provider reorder can still skip one.
+  const [externalMore, setExternalMore] = useState({ cursor: null, loading: false, error: "" });
+  const externalMoreRequest = useRef(null);
+  useEffect(() => () => {
+    externalMoreRequest.current?.abort();
+    externalMoreRequest.current = null;
+  }, []);
   const [artistMatches, setArtistMatches] = useState({ key: "", results: [] });
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -96,6 +106,9 @@ export function SearchResults() {
     setExternalError("");
     setCatalogMatches([]);
     setExternalCandidates([]);
+    externalMoreRequest.current?.abort();
+    externalMoreRequest.current = null;
+    setExternalMore({ cursor: null, loading: false, error: "" });
 
     // External candidates carry no genres, so a genre-filtered search skips them.
     if (!query || page !== 1 || genre) {
@@ -129,6 +142,7 @@ export function SearchResults() {
 
         setCatalogMatches(Array.isArray(data?.catalogMatches) ? data.catalogMatches : []);
         setExternalCandidates(Array.isArray(data?.candidates) ? data.candidates : []);
+        setExternalMore({ cursor: data?.nextCursor || null, loading: false, error: "" });
         setExternalState("ready");
       } catch (searchError) {
         if (shouldIgnore || searchError.name === "AbortError") return;
@@ -162,6 +176,35 @@ export function SearchResults() {
       });
     return () => controller.abort();
   }, [query, page, genre]);
+
+  async function loadMoreExternal() {
+    if (!externalMore.cursor || externalMore.loading || externalMoreRequest.current) return;
+    const controller = new AbortController();
+    externalMoreRequest.current = controller;
+    setExternalMore((current) => ({ ...current, loading: true, error: "" }));
+    try {
+      const params = new URLSearchParams({ q: query, limit: String(EXTERNAL_SEARCH_LIMIT), cursor: externalMore.cursor });
+      const response = await fetch(`${API_BASE_URL}/search/external?${params.toString()}`, { signal: controller.signal });
+      if (!response.ok) throw new Error(await getApiErrorMessage(response, "More external results are temporarily unavailable."));
+      const data = await response.json();
+      if (externalMoreRequest.current !== controller) return;
+      // Provider pages can overlap; keep the first copy of each result.
+      setExternalCandidates((current) => {
+        const seen = new Set(current.map((item) => item.externalId));
+        return [...current, ...(Array.isArray(data?.candidates) ? data.candidates : []).filter((item) => item?.externalId && !seen.has(item.externalId) && seen.add(item.externalId))];
+      });
+      setCatalogMatches((current) => {
+        const seen = new Set(current.map((item) => item.albumId));
+        return [...current, ...(Array.isArray(data?.catalogMatches) ? data.catalogMatches : []).filter((item) => item?.albumId && !seen.has(item.albumId) && seen.add(item.albumId))];
+      });
+      setExternalMore({ cursor: data?.nextCursor || null, loading: false, error: "" });
+    } catch (moreError) {
+      if (moreError.name === "AbortError" || externalMoreRequest.current !== controller) return;
+      setExternalMore((current) => ({ ...current, loading: false, error: moreError.message }));
+    } finally {
+      if (externalMoreRequest.current === controller) externalMoreRequest.current = null;
+    }
+  }
 
   function updatePage(nextPage) {
     const nextParams = new URLSearchParams(searchParams);
@@ -283,6 +326,13 @@ export function SearchResults() {
               ))}
             </div>
           </section>
+        ) : null}
+
+        {externalMore.error ? <p className="external-search-no-results" role="alert">{externalMore.error}</p> : null}
+        {externalMore.cursor ? (
+          <button className="external-search-retry" disabled={externalMore.loading} onClick={loadMoreExternal} type="button">
+            {externalMore.loading ? "Loading…" : "Show more MusicBrainz results"}
+          </button>
         ) : null}
 
         {!hasAdditionalCatalogMatches && !hasCandidates ? (
