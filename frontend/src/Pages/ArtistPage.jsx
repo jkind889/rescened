@@ -6,6 +6,7 @@ import Cover from "../Components/Cover";
 import PageMeta from "../Components/PageMeta";
 import { SITE_NAME } from "../utils/pageMeta";
 import {
+  biographyAdvertised,
   discographyAdvertised,
   otherCredits,
   releaseCountLabel,
@@ -15,6 +16,8 @@ import {
   visibleReleaseFilters,
 } from "../features/artists/artists";
 import ArtistDiscography from "../features/artists/ArtistDiscography";
+import ArtistBiography from "../features/artists/ArtistBiography";
+import ArtistBiographyModeration from "../features/artists/ArtistBiographyModeration";
 import "../Components/Community/GenreSuggestion.css";
 import "../features/artists/ArtistPage.css";
 
@@ -56,6 +59,8 @@ export function ArtistPage() {
   const [releases, setReleases] = useState({ key: "", rows: [], nextCursor: null, loading: true, error: "" });
   const [loadingMore, setLoadingMore] = useState(false);
   const [moreError, setMoreError] = useState("");
+  // Bumped after a moderator command so the About section reloads.
+  const [biographyVersion, setBiographyVersion] = useState(0);
   const moreRequest = useRef(null);
   useEffect(() => () => {
     moreRequest.current?.abort();
@@ -175,6 +180,13 @@ export function ArtistPage() {
           </p>
         ) : null}
       </header>
+
+      {artist && biographyAdvertised(data) ? (
+        <>
+          <ArtistBiography key={`${artist.artistId}-${biographyVersion}`} artistId={artist.artistId} />
+          <ArtistBiographyModeration key={artist.artistId} artistId={artist.artistId} onChanged={() => setBiographyVersion((value) => value + 1)} />
+        </>
+      ) : null}
 
       <section className="artist-releases" aria-labelledby="artist-releases-heading">
         <div className="artist-releases-heading">

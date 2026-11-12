@@ -176,3 +176,107 @@
 .artist-discography-source a {
   color: inherit;
 }
+
+/* Cached biography and its attribution. */
+.artist-biography {
+  margin: 1.25rem 0 0;
+  max-width: 46rem;
+}
+
+.artist-biography-heading {
+  font-size: 1rem;
+  margin: 0 0 .4rem;
+}
+
+.artist-biography-text {
+  line-height: 1.55;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.artist-biography-attribution {
+  color: var(--app-muted);
+  font-size: .75rem;
+  line-height: 1.5;
+  margin: .4rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.artist-biography-attribution a {
+  color: inherit;
+}
+
+.artist-biography-moderation {
+  border: 1px solid var(--app-line-strong);
+  margin: 1rem 0 0;
+  max-width: 46rem;
+  padding: .5rem .75rem;
+}
+
+.artist-biography-moderation summary {
+  cursor: pointer;
+  font-size: .85rem;
+}
+
+.artist-biography-moderation-body {
+  display: grid;
+  gap: .6rem;
+  margin-top: .6rem;
+}
+
+.artist-biography-facts {
+  display: grid;
+  font-size: .8rem;
+  gap: .25rem;
+  margin: 0;
+}
+
+.artist-biography-facts div {
+  display: grid;
+  gap: .5rem;
+  grid-template-columns: minmax(7rem, auto) minmax(0, 1fr);
+}
+
+.artist-biography-facts dt {
+  color: var(--app-muted);
+}
+
+.artist-biography-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.artist-biography-candidate blockquote {
+  border-left: 2px solid var(--app-line-strong);
+  margin: .3rem 0 0;
+  padding-left: .6rem;
+}
+
+.artist-biography-field {
+  display: grid;
+  font-size: .8rem;
+  gap: .25rem;
+}
+
+.artist-biography-field input,
+.artist-biography-field textarea {
+  background: var(--app-surface-strong);
+  border: 1px solid var(--app-line-strong);
+  color: var(--app-text);
+  font: inherit;
+  min-width: 0;
+  padding: .4rem .6rem;
+}
+
+.artist-biography-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+
+.artist-biography-history {
+  color: var(--app-muted);
+  font-size: .75rem;
+  margin: 0;
+  padding-left: 1.2rem;
+}

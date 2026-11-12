@@ -142,3 +142,51 @@ export function discographySummary({ filter, providerCount, shown, pagesLoaded, 
   const more = hasMore ? " so far" : "";
   return `${scope}. Showing ${shown} verified ${shown === 1 ? option.nounOne : option.noun}${more}, ${order}.`;
 }
+
+// Load the cached biography only when the API says it serves biographies.
+export function biographyAdvertised(detail) {
+  return detail?.features?.biography === true;
+}
+
+// The change notice required when reusing Wikipedia text: always an
+// excerpt of the lead; "shortened" when it is not the whole lead; "edited"
+// when a moderator corrected the wording.
+export function biographyChangeNotice(biography) {
+  if (!biography) return "";
+  const parts = ["Excerpt"];
+  if (biography.shortened) parts.push("shortened");
+  if (biography.edited) parts.push("edited by Rescened moderators");
+  return parts.join(", ");
+}
+
+const BIOGRAPHY_STATE_LABELS = {
+  verified: "Verified match",
+  needs_review: "Needs review",
+  conflict: "Conflicting evidence",
+  not_linked: "No Wikidata link",
+  no_article: "No English article",
+  unsuitable: "Article not usable",
+  unchecked: "Not checked yet",
+};
+
+export function biographyStateLabel(state) {
+  return BIOGRAPHY_STATE_LABELS[state] || "Unknown";
+}
+
+// Drops stale async results. begin() returns a token for one request;
+// isCurrent(token) is false once a newer request began or invalidate() ran
+// (for example on sign-out, user switch, or unmount).
+export function createRequestGuard() {
+  let generation = 0;
+  return {
+    begin() { generation += 1; return generation; },
+    invalidate() { generation += 1; },
+    isCurrent(token) { return token === generation; },
+  };
+}
+
+// Text the correction box should show for a record: the current correction,
+// otherwise the published excerpt.
+export function correctionDraftFor(record) {
+  return record?.manual?.text || record?.accepted?.text || "";
+}
