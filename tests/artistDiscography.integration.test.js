@@ -110,7 +110,7 @@ integration("discography input errors and an artist without MusicBrainz identity
   const noMbid = await Artist.findOne({ name: "No MBID" }).lean();
   const missing = await request(`/artists/${noMbid.artistId}/discography`);
   assert.deepEqual([missing.status, missing.body.code], [404, "ARTIST_DISCOGRAPHY_NOT_AVAILABLE"]);
-  assert.deepEqual((await request(`/artists/${noMbid.artistId}`)).body.features, { discography: false }, "no MBID: the page does not mount the section");
-  assert.deepEqual((await request(`/artists/${artist.artistId}`)).body.features, { discography: true });
+  assert.deepEqual((await request(`/artists/${noMbid.artistId}`)).body.features, { discography: false, biography: false }, "no MBID: the page does not mount the section");
+  assert.deepEqual((await request(`/artists/${artist.artistId}`)).body.features, { discography: true, biography: false });
   assert.equal(providerCalls.length, calls);
 });

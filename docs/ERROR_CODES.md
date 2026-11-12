@@ -184,6 +184,20 @@ The `/artists` routes are public reads. See [artist identity](ARTIST_IDENTITY.md
 | `ARTIST_DISCOGRAPHY_NOT_AVAILABLE` | `404` | The registry artist has no MusicBrainz artist identity to browse. |
 | `EXTERNAL_DISCOGRAPHY_UNAVAILABLE` | `502` | MusicBrainz failed, was busy, timed out, or returned data that could not be normalized or exceeded the response-size limit. Adds `category`, `upstreamStatus`, and `requestId` as for external search. Local artist content is unaffected. |
 
+### Artist biographies
+
+See [artist biographies](ARTIST_BIOGRAPHIES.md).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `ARTIST_BIOGRAPHIES_DISABLED` | `503` | `ARTIST_BIOGRAPHIES_ENABLED` is off (`GET /artists/:artistId/biography` and `/moderation/artist-biographies`). |
+| `BIOGRAPHY_NOT_FOUND` | `404` | No biography record exists for that artist (moderation routes). |
+| `INVALID_BIOGRAPHY_COMMAND` | `400`/`404` | A moderation command or queue request has an unknown command (`404`), unsupported field, missing `expectedRevision` or `reason`, invalid corrected text, or bad `state`/`limit`. |
+| `BIOGRAPHY_REVISION_CONFLICT` | `409` | The record changed since `expectedRevision`; reload and retry. |
+| `BIOGRAPHY_STATE_CONFLICT` | `409` | The command does not apply to the record's current state, for example confirming without a reviewable candidate. |
+
+The operator command (`npm run artists:biographies`) reports provider failures with `BIOGRAPHY_PROVIDER_TIMEOUT`, `BIOGRAPHY_PROVIDER_NETWORK`, `BIOGRAPHY_PROVIDER_HTTP`, `BIOGRAPHY_PROVIDER_THROTTLED`, `BIOGRAPHY_INVALID_RESPONSE`, and `BIOGRAPHY_REVISION_UNAVAILABLE`, and refuses to run with `INVALID_ARGUMENTS`, `INVALID_PLAN`, `PLAN_CHECKSUM_MISMATCH`, `TARGET_MISMATCH`, or `MISSING_MONGO_URI`. Apply and refresh results per artist are `written`, `stale`, `record_changed`, `artist_changed`, `outcome_changed`, or `not_applicable`.
+
 ### Review comments
 
 Comment mutations require Clerk authentication and `REVIEW_COMMENTS_ENABLED=true`. Create, edit and delete, and report each have their own limit (see below). Malformed review IDs return `400 INVALID_REVIEW_ID`, and a missing or hidden review returns `404 REVIEW_NOT_FOUND`. See [the review comments guide](REVIEW_COMMENTS.md).
@@ -258,7 +272,7 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | --- | --- | --- | --- |
 | Global API | Every API route except `/health` and `/share` | IP | 300 requests per 5 minutes |
 | Share preview | `GET /share/album/:albumId`, `GET /share/review/:reviewId`, `GET /share/sitemap.xml` (not cumulative with the global bucket) | IP (Vercel's address when proxied) | 600 requests per 5 minutes |
-| Local search | `GET /search/search`, `GET /genres/search`, `GET /genres/:slug/albums`, `GET /artists/search`, `GET /artists/:artistId/releases` | IP | 90 requests per minute |
+| Local search | `GET /search/search`, `GET /genres/search`, `GET /genres/:slug/albums`, `GET /artists/search`, `GET /artists/:artistId/releases`, `GET /artists/:artistId/biography` | IP | 90 requests per minute |
 | External search | `GET /search/external`, `GET /search/musicbrainz/release-group/:mbid`, `GET /artists/:artistId/discography` | IP | 30 requests per minute |
 | Album save | `POST /boards/:boardId/albums` | authenticated user | 30 attempts per 10 minutes |
 | Diary mutation | `POST /diary`, `PATCH`/`DELETE /diary/:listenId`, `PUT`/`DELETE /boards/:boardId/listens/:listenId` | authenticated user | 30 attempts per 10 minutes |
@@ -274,7 +288,7 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Correction create | `POST /suggestions/corrections` | authenticated user | 6 attempts per 5 minutes |
 | Suggestion mutation | `POST /suggestions/:submissionId/revise`, `POST /suggestions/:submissionId/withdraw` | authenticated user | 20 attempts per 10 minutes |
 | Genre suggestion | `POST /suggestions/genres` | authenticated user | 20 attempts per hour |
-| Moderation mutation | Request-changes, reject, duplicate, and approve commands, bulk approval (one point per item), genre vocabulary commands, and comment remove and dismiss | authenticated moderator | 120 points per 10 minutes |
+| Moderation mutation | Request-changes, reject, duplicate, and approve commands, bulk approval (one point per item), genre vocabulary commands, artist biography commands, and comment remove and dismiss | authenticated moderator | 120 points per 10 minutes |
 | Comment create | `POST /reviews/review/:reviewId/comments` | authenticated user | 20 attempts per 10 minutes |
 | Comment mutation | `PATCH` and `DELETE /reviews/comments/:commentId` | authenticated user | 60 attempts per 10 minutes |
 | Comment report | `POST /reviews/comments/:commentId/report` | authenticated user | 10 attempts per 10 minutes |

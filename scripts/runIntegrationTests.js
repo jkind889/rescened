@@ -27,6 +27,7 @@ const files = [
   "tests/artistIdentity.integration.test.js",
   "tests/artistPages.integration.test.js",
   "tests/artistDiscography.integration.test.js",
+  "tests/artistBiographies.integration.test.js",
   "tests/legacyMigration.integration.test.js",
   "tests/reviews.integration.test.js",
   "tests/notifications.integration.test.js",

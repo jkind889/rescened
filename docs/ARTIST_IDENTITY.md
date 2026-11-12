@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-11-11
 
-Phase 1 gives artists stable public Rescened IDs and keeps MusicBrainz artist IDs on album credits. A flagged [artist pages prototype](#artist-pages-prototype) builds on it with local artist pages, credit links, and multilingual search aliases, and a separately flagged [MusicBrainz discography](#musicbrainz-discography-prototype). There are still no biographies, artist images, or merges. Listening stats still group top artists by display name.
+Phase 1 gives artists stable public Rescened IDs and keeps MusicBrainz artist IDs on album credits. A flagged [artist pages prototype](#artist-pages-prototype) builds on it with local artist pages, credit links, and multilingual search aliases, and a separately flagged [MusicBrainz discography](#musicbrainz-discography-prototype). A separately flagged, cached [biography](ARTIST_BIOGRAPHIES.md) can add a short Wikipedia excerpt. There are still no artist images or merges. Listening stats still group top artists by display name.
 
 ## Data contract
 
@@ -223,4 +223,4 @@ MusicBrainz core data is CC0. The section credits MusicBrainz and links to the a
 - Legacy migration and the importer's provider adapters still drop join phrases from credits.
 - Listening stats and activity still use credit names. Catalog search expands by identity only for exact registry names and reviewed aliases, and only while artist pages are enabled.
 - Reviewed aliases are a checked-in table, not stored registry data. There is no alias editor or MusicBrainz alias import yet.
-- Artist pages have no biography or image. The MusicBrainz discography is flagged off by default, reads its total before local filtering, and has no persisted cache.
+- Artist pages have no image. Cached, flagged Wikipedia excerpts are described in [artist biographies](ARTIST_BIOGRAPHIES.md). The MusicBrainz discography is flagged off by default, reads its total before local filtering, and has no persisted cache.

@@ -1,9 +1,10 @@
 const { randomUUID } = require("node:crypto");
 const express = require("express");
-const { isArtistDiscographyEnabled, isArtistPagesEnabled } = require("./utils/serverConfig");
+const { isArtistBiographiesEnabled, isArtistDiscographyEnabled, isArtistPagesEnabled } = require("./utils/serverConfig");
 const { externalSearchRateLimit, searchRateLimit } = require("./utils/rateLimit");
 const { artistDetail, artistReleases, searchArtists } = require("../lib/artists/read");
 const { artistDiscography } = require("../lib/artists/discography");
+const { publicBiography } = require("../lib/artists/biographies");
 const { MusicBrainzSearchError } = require("../lib/musicBrainzSearch");
 
 // Local artist pages. Read-only and public. The header, releases, and search
@@ -62,6 +63,19 @@ router.get("/:artistId/discography", discographyEnabled, externalSearchRateLimit
       upstreamStatus,
       requestId,
     });
+  }
+});
+
+// Cached biography only: this route never contacts a provider. An absent,
+// suppressed, or unverified biography returns { biography: null }.
+router.get("/:artistId/biography", searchRateLimit, async (req, res) => {
+  if (!isArtistBiographiesEnabled()) {
+    return res.status(503).json({ error: "Artist biographies are currently disabled", code: "ARTIST_BIOGRAPHIES_DISABLED" });
+  }
+  try {
+    return res.json(await publicBiography(req.params.artistId));
+  } catch (error) {
+    return sendError(res, error, "Failed to fetch artist biography");
   }
 });
 

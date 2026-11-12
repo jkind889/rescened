@@ -74,6 +74,7 @@ app.use("/moderation/album-mappings", require("./routes/albumMappings"));
 app.use("/moderation/album-baselines", require("./routes/albumBaselines"));
 app.use("/moderation/review-effort", require("./routes/reviewEffort"));
 app.use("/moderation/genres", require("./routes/genreModeration"));
+app.use("/moderation/artist-biographies", require("./routes/artistBiographyModeration"));
 app.use("/moderation/comment-reports", require("./routes/commentModeration"));
 
 async function startServer({
