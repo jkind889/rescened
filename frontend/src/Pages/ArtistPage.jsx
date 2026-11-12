@@ -13,10 +13,12 @@ import {
   releaseCreditNote,
   releaseFilterFrom,
   releaseTypeLabel,
+  usableCovers,
   visibleReleaseFilters,
 } from "../features/artists/artists";
 import ArtistDiscography from "../features/artists/ArtistDiscography";
 import ArtistBiography from "../features/artists/ArtistBiography";
+import ArtistCoverCycle from "../features/artists/ArtistCoverCycle";
 import ArtistBiographyModeration from "../features/artists/ArtistBiographyModeration";
 import "../Components/Community/GenreSuggestion.css";
 import "../features/artists/ArtistPage.css";
@@ -143,6 +145,9 @@ export function ArtistPage() {
   const counts = data?.releaseCounts;
   const showRows = releases.key === listKey;
   const filters = counts ? visibleReleaseFilters(counts, type) : [];
+  // The header picture is stored release art. The cycle renders nothing when
+  // the API sent no usable cover, so the header then keeps its text layout.
+  const headerCovers = artist && usableCovers(data?.covers).length ? data.covers : null;
 
   return (
     <section className="community-page artist-page">
@@ -153,6 +158,7 @@ export function ArtistPage() {
         />
       ) : null}
       <header className="community-page-header artist-page-header">
+        {headerCovers ? <ArtistCoverCycle artistName={artist.name} covers={headerCovers} key={artist.artistId} /> : null}
         <p className="community-page-kicker">Artist</p>
         <h1 className="community-page-title">{artist?.name || "Loading…"}</h1>
         {artist?.aliases?.length ? (

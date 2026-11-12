@@ -190,3 +190,59 @@ export function createRequestGuard() {
 export function correctionDraftFor(record) {
   return record?.manual?.text || record?.accepted?.text || "";
 }
+
+// Artist header cover cycle. The covers are stored catalog artwork for
+// releases the API says credit this artist as a main artist. They are
+// release art, not a portrait, and the page says so.
+export const COVER_CYCLE_INTERVAL_MS = 6000;
+export const COVER_CYCLE_MAX = 8;
+
+// Covers the browser may still show: well-formed entries with an https
+// image, not already failed to load, one per image URL, capped. Anything
+// else is dropped, so a missing or broken cover never leaves an empty slot.
+export function usableCovers(covers, failed = []) {
+  const failedUrls = new Set(failed);
+  const seen = new Set();
+  const usable = [];
+  for (const cover of Array.isArray(covers) ? covers : []) {
+    if (!cover || typeof cover.albumId !== "string" || !cover.albumId || typeof cover.title !== "string" || !cover.title) continue;
+    if (typeof cover.cover !== "string" || !cover.cover.startsWith("https://")) continue;
+    if (failedUrls.has(cover.cover) || seen.has(cover.cover)) continue;
+    seen.add(cover.cover);
+    usable.push(cover);
+    if (usable.length >= COVER_CYCLE_MAX) break;
+  }
+  return usable;
+}
+
+function wrapIndex(index, count) {
+  return Number.isInteger(index) ? ((index % count) + count) % count : 0;
+}
+
+// The index one step forward (1) or back (-1), wrapping. A shrinking list
+// (a cover failed to load) never leaves the index out of range.
+export function coverCycleStep(index, count, direction = 1) {
+  if (!Number.isInteger(count) || count < 1) return 0;
+  return wrapIndex(wrapIndex(index, count) + (direction < 0 ? -1 : 1), count);
+}
+
+export function coverCycleLabel(index, count) {
+  if (!Number.isInteger(count) || count < 1) return "";
+  return `${wrapIndex(index, count) + 1} of ${count}`;
+}
+
+// The cycle advances by itself only while it is not in the way: more than
+// one cover, the person has not paused it, motion is not reduced, nothing is
+// hovered or focused inside it, and the tab is visible.
+export function shouldAutoAdvance({ count, paused = false, reducedMotion = false, hovered = false, focused = false, hidden = false }) {
+  return count > 1 && !paused && !reducedMotion && !hovered && !focused && !hidden;
+}
+
+export function currentCover(covers, index) {
+  return covers.length ? covers[wrapIndex(index, covers.length)] : null;
+}
+
+export function coverCaption(cover) {
+  if (!cover) return "";
+  return Number.isInteger(cover.releaseYear) ? `${cover.title} (${cover.releaseYear})` : cover.title;
+}

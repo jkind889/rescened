@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-11-11
 
-Phase 1 gives artists stable public Rescened IDs and keeps MusicBrainz artist IDs on album credits. A flagged [artist pages prototype](#artist-pages-prototype) builds on it with local artist pages, credit links, and multilingual search aliases, and a separately flagged [MusicBrainz discography](#musicbrainz-discography-prototype). A separately flagged, cached [biography](ARTIST_BIOGRAPHIES.md) can add a short Wikipedia excerpt. There are still no artist images or merges. Listening stats still group top artists by display name.
+Phase 1 gives artists stable public Rescened IDs and keeps MusicBrainz artist IDs on album credits. A flagged [artist pages prototype](#artist-pages-prototype) builds on it with local artist pages, credit links, and multilingual search aliases, and a separately flagged [MusicBrainz discography](#musicbrainz-discography-prototype). A separately flagged, cached [biography](ARTIST_BIOGRAPHIES.md) can add a short Wikipedia excerpt. The page header shows a cycle of the artist's stored release cover art (see [Header cover art](#header-cover-art)); there are no artist photos and no merges. Listening stats still group top artists by display name.
 
 ## Data contract
 
@@ -150,6 +150,28 @@ A release is on an artist's page only when one of its credits carries that artis
 
 `creditedAs` lists up to 20 credited spellings on linked releases that differ from the registry name, most used first. The header lists them; album credits keep their own wording, and the registry name is not changed.
 
+### Header cover art
+
+The header picture is **release cover art that is already stored in the Rescened catalog**, not an artist photo. Rescened does not fetch artist images from Wikidata, Wikimedia Commons, or any other provider, so no image licensing, attribution, or refresh pipeline is involved; covers carry the same status they already have on release cards.
+
+`GET /artists/:artistId` returns `covers`: up to 8 `{ albumId, title, releaseYear, cover }` entries (public fields only, no Mongo `_id`). They come from one bounded `AlbumCatalog` query (the newest 60 releases credited by `artistId` that have a stored cover), then:
+
+- a release qualifies only when this artist's credit, matched by `artistId` and never by name, has the role `main` (a missing role counts as `main`); a featured or guest credit does not put that release's art in the artist's header;
+- releases with no other credited party come first, then collaborations; each group stays newest first;
+- the cover must be an `https` URL without credentials and at most 2,048 characters; releases sharing one image count once.
+
+The list is empty when nothing qualifies. An older API that omits `covers`, or an empty list, leaves the header as it was.
+
+The page (`ArtistCoverCycle`) shows one cover at a time with a caption that links to the release (`/album/:albumId`) and the note "Cover art from this artist's releases". Behavior:
+
+- Several covers advance every 6 seconds with a short fade. Previous and next buttons always work and wrap.
+- It stops advancing while the pointer is over it, while keyboard focus is inside it (mouse clicks do not count), while the tab is hidden, and after the person presses Pause. Play resumes it. A Pause control is provided because the content moves for more than five seconds (WCAG 2.2.2).
+- With `prefers-reduced-motion: reduce` it never advances by itself, does not fade, and has no Play/Pause control; previous and next remain. The preference is followed live.
+- The caption is a polite live region only while the cycle is not advancing by itself, so a screen reader is not interrupted every turn. A group of several covers is announced as a carousel of slides ("2 of 5"); a single cover is plain.
+- A cover that fails to load is dropped from the cycle. One cover shows no controls and never moves. With no usable cover the component renders nothing and the header returns to its text layout (the two-column layout applies only while the cycle is rendered, via `:has()`). Below 640 px the cover sits above the text.
+
+There is no new flag: the data is local and rides the already flagged artist page. Images are loaded by the visitor's browser from the stored cover URLs, exactly as release cards load them, and the artist route makes no provider request.
+
 ### Search aliases
 
 Aliases attach to one stable `artistId` and never merge artists. They come from two sources:
@@ -210,7 +232,9 @@ MusicBrainz core data is CC0. The section credits MusicBrainz and links to the a
 - `tests/artistPages.test.js` covers the collaboration badge (duplicate same-ID credits, distinct and homonymous artists, unresolved credits), reviewed-alias validation, search-key folding, query parsing, the search pipeline expansion, the feature flag, and the frontend credit and release helpers.
 - `tests/musicBrainzDiscography.test.js` covers the browse URL, a captured CC0 browse fixture, artist-credit verification, type filtering, raw-offset paging with empty filtered pages, the offset cap, caching and in-flight sharing, the shared rate gate, the streamed response-size limit, cursor binding, catalog reconciliation, and suggestion availability. `tests/artistPages.test.js` covers the discography route flag, safe 502 diagnostics, and the count wording.
 - `tests/artistDiscography.browser.test.js` is opt-in (`RUN_FRONTEND_BROWSER_TESTS=true` with Playwright). It checks repeated clicks, filter changes and unmount during in-flight requests, empty batches, the hidden suggestion action, and 390 px overflow, with fetch stubbed in the page.
-- `tests/artistPages.integration.test.js` covers artist headers, keyset release paging and type filters (including untyped rows and equal-title ties), multi-credited releases, homonyms, the search candidate cap, alias and credited-name search, identity search expansion with the flag on and off, and album-detail link resolution. It fails if any request leaves the test server.
+- `tests/artistCovers.test.js` covers cover selection (main credit by identity, solo before collaboration, https-only, de-duplication, the cap, public fields only), the cycle helpers (wrapping, dropping failed covers, auto-advance conditions), and the component and style contract.
+- `tests/artistCoverCycle.browser.test.js` is opt-in (`RUN_FRONTEND_BROWSER_TESTS=true` with Playwright). With images stubbed and time controlled, it checks advancing and wrapping, stopping on hover, keyboard focus, a hidden tab, and Pause, reduced motion, the fade, and broken, single, and missing covers.
+- `tests/artistPages.integration.test.js` covers artist headers (including the `covers` list), keyset release paging and type filters (including untyped rows and equal-title ties), multi-credited releases, homonyms, the search candidate cap, alias and credited-name search, identity search expansion with the flag on and off, and album-detail link resolution. It fails if any request leaves the test server.
 - `tests/artistIdentity.integration.test.js` covers the transactional paths on a replica set: import registration and idempotency, approval resolution and conflicts, and backfill planning without writes, target refusal, guarded apply, mapping carry-forward, rerun, and registry drift.
 
 ## Known limitations
@@ -223,4 +247,4 @@ MusicBrainz core data is CC0. The section credits MusicBrainz and links to the a
 - Legacy migration and the importer's provider adapters still drop join phrases from credits.
 - Listening stats and activity still use credit names. Catalog search expands by identity only for exact registry names and reviewed aliases, and only while artist pages are enabled.
 - Reviewed aliases are a checked-in table, not stored registry data. There is no alias editor or MusicBrainz alias import yet.
-- Artist pages have no image. Cached, flagged Wikipedia excerpts are described in [artist biographies](ARTIST_BIOGRAPHIES.md). The MusicBrainz discography is flagged off by default, reads its total before local filtering, and has no persisted cache.
+- Artist pages have no artist photo; the header shows stored release cover art, which is not a portrait (see [Header cover art](#header-cover-art)). Cached, flagged Wikipedia excerpts are described in [artist biographies](ARTIST_BIOGRAPHIES.md). The MusicBrainz discography is flagged off by default, reads its total before local filtering, and has no persisted cache.

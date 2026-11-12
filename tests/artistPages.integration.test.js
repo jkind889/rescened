@@ -128,6 +128,7 @@ integration("artist header shows the registry name, credited spellings, reviewed
       creditedAs: ["이달의 소녀"],
       musicBrainzUrl: `https://musicbrainz.org/artist/${artists.loona.externalReferences[0].externalId}`,
     },
+    covers: [],
     releaseCounts: { all: 6, album: 2, ep: 1, single: 1, mixtape: 1, other: 1 },
     features: { discography: false, biography: false },
   });
@@ -299,4 +300,37 @@ integration("an exactly named artist survives the candidate cap on a common shor
   const results = (await request("/artists/search?q=air&limit=3")).body.results;
   assert.equal(results[0].artistId, air.artistId);
   assert.equal(results[0].match, null);
+});
+
+integration("the header offers stored covers only from main-credited releases and falls back to none", async () => {
+  // Distinct names and cleanup keep the shared fixtures' counts and search results unchanged.
+  const created = await artist("coverArtist", "Zzyzx Covers");
+  await artist("coverGuest", "Zzyzx Guest");
+  const cover = (n) => `https://coverartarchive.org/release/${String(n).padStart(8, "0")}-0000-4000-8000-000000000000/front-500`;
+  const keys = ["coverNew", "coverOld", "coverCollab", "coverFeature", "coverNone", "coverHttp", "coverDup"];
+  try {
+    await album("coverOld", "Older", [credit("Zzyzx Covers", "coverArtist")], { releaseYear: 2001, cover: cover(1) });
+    await album("coverNew", "Newer", [credit("Zzyzx Covers", "coverArtist")], { releaseYear: 2020, cover: cover(2) });
+    await album("coverCollab", "Together", [credit("Zzyzx Covers", "coverArtist"), credit("Zzyzx Guest", "coverGuest")], { releaseYear: 2022, cover: cover(3) });
+    await album("coverFeature", "Guest Spot", [credit("Zzyzx Guest", "coverGuest"), credit("Zzyzx Covers", "coverArtist", "featured")], { releaseYear: 2023, cover: cover(4) });
+    await album("coverNone", "No Cover", [credit("Zzyzx Covers", "coverArtist")], { releaseYear: 2024 });
+    await album("coverHttp", "Insecure", [credit("Zzyzx Covers", "coverArtist")], { releaseYear: 2025, cover: "http://example.invalid/insecure.jpg" });
+    await album("coverDup", "Same Art", [credit("Zzyzx Covers", "coverArtist")], { releaseYear: 1999, cover: cover(2) });
+
+    const detail = await request(`/artists/${created.artistId}`);
+    assert.equal(detail.status, 200, JSON.stringify(detail.body));
+    assert.deepEqual(detail.body.covers.map((entry) => entry.title), ["Newer", "Older", "Together"], "solo newest first, then collaborations; guest, missing, insecure, and duplicate art are left out");
+    assert.deepEqual(detail.body.covers[0], { albumId: albums.coverNew.albumId, title: "Newer", releaseYear: 2020, cover: cover(2) });
+    const serialized = JSON.stringify(detail.body.covers);
+    for (const key of keys) assert.equal(serialized.includes(String(albums[key]._id)), false, "no internal id is exposed");
+
+    // The other artist holds a main credit on both collaborations, so both are offered there, newest first.
+    const guest = await request(`/artists/${artists.coverGuest.artistId}`);
+    assert.deepEqual(guest.body.covers.map((entry) => entry.title), ["Guest Spot", "Together"]);
+    // An artist with no releases gets an empty list, not a placeholder.
+    assert.deepEqual((await request(`/artists/${artists.quiet.artistId}`)).body.covers, []);
+  } finally {
+    await AlbumCatalog.deleteMany({ albumId: { $in: keys.map((key) => albums[key]?.albumId).filter(Boolean) } });
+    await Artist.deleteMany({ artistId: { $in: [artists.coverArtist.artistId, artists.coverGuest.artistId] } });
+  }
 });
