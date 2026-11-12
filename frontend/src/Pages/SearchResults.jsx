@@ -6,6 +6,8 @@ import ExternalAlbumCard from "../Components/ExternalAlbumCard";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import Cover from "../Components/Cover";
 import { artistMatchSummary } from "../features/artists/artists";
+import ArtistCredits from "../features/artists/ArtistCredits";
+import { CardLink, CardTitleLink } from "../Components/CardLink";
 import "../features/artists/ArtistPage.css";
 
 const EXTERNAL_SEARCH_LIMIT = 12;
@@ -229,18 +231,18 @@ export function SearchResults() {
     return (
       <div className={viewMode === "list" ? "results-list" : "results-grid"}>
         {Array.isArray(results) && results.map((result) => (
-          <Link className="result-card" key={result.albumId} to={`/album/${result.albumId}`}>
+          <CardLink className="result-card" key={result.albumId}>
             {result.cover ? (
               <Cover className="result-cover" src={result.cover} alt={`${result.title} cover`} size={viewMode === "list" ? 58 : undefined} />
             ) : (
               <span className="result-cover result-cover-fallback" aria-label="No cover available">No cover</span>
             )}
             <span className="result-copy">
-              <h3>{result.title}</h3>
-              <p>{result.artistDisplayName}</p>
+              <h3><CardTitleLink to={`/album/${result.albumId}`}>{result.title}</CardTitleLink></h3>
+              <p><ArtistCredits album={result} /></p>
             </span>
             <span className="result-year">{result.releaseYear || "Year unknown"}</span>
-          </Link>
+          </CardLink>
         ))}
       </div>
     );

@@ -644,7 +644,7 @@ button.signal-queue-action {
   font-size: 0.8rem;
 }
 
-a.community-lead:hover strong {
+.community-lead.card-link:hover strong {
   text-decoration: underline;
   text-underline-offset: 4px;
 }

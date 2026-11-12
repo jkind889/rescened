@@ -87,18 +87,6 @@
   color: var(--app-muted);
 }
 
-.artist-credit-link {
-  color: inherit;
-  text-decoration: underline;
-  text-decoration-color: var(--app-line-strong);
-  text-underline-offset: .2em;
-}
-
-.artist-credit-link:hover,
-.artist-credit-link:focus-visible {
-  text-decoration-color: var(--app-accent);
-}
-
 /* Matching artists above album search results. */
 .search-artist-matches {
   margin: 0 0 1.25rem;

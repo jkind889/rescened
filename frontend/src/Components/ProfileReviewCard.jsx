@@ -4,6 +4,8 @@ import ShareButton from "./ShareButton";
 import CommentCountLink from "../features/comments/CommentCountLink";
 import Cover from "./Cover";
 import EditedTag from "../features/reviews/EditedTag";
+import { CardLink, CardTitleLink } from "./CardLink";
+import ArtistCredits from "../features/artists/ArtistCredits";
 
 function formatDate(value) {
   if (!value) {
@@ -34,13 +36,13 @@ function AlbumCover({ src, title }) {
 export function ProfileReviewCard({ review, likeMessage = "", onToggleLike }) {
   return (
     <article className="profile-review-card">
-      <Link className="profile-review-album" to={`/album/${review.albumId}`}>
+      <CardLink className="profile-review-album">
         <AlbumCover src={review.album?.cover} title={review.album?.title} />
         <div>
-          <h3>{review.album?.title || "Untitled album"}</h3>
-          <p>{review.album?.artistDisplayName || "Artist unknown"}</p>
+          <h3><CardTitleLink to={`/album/${review.albumId}`}>{review.album?.title || "Untitled album"}</CardTitleLink></h3>
+          <p><ArtistCredits album={review.album} fallback="Artist unknown" /></p>
         </div>
-      </Link>
+      </CardLink>
       <div className="profile-review-meta">
         <span>{review.rating}/5</span>
         <time>{formatDate(review.date)}</time>

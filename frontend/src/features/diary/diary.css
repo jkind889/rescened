@@ -143,7 +143,7 @@
   list-style: none;
 }
 
-.diary-calendar-day-list a {
+.diary-calendar-day-list .card-link {
   display: flex;
   align-items: center;
   gap: 0.7rem;
@@ -151,7 +151,7 @@
   text-decoration: none;
 }
 
-.diary-calendar-day-list a:hover strong {
+.diary-calendar-day-list .card-link:hover strong {
   color: var(--app-accent);
 }
 

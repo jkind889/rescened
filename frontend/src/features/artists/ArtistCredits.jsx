@@ -1,18 +1,25 @@
 import { Fragment } from "react";
 import { Link } from "react-router-dom";
-import { creditSegments } from "./artists";
+import { artistDisplaySegments } from "./artists";
+import { useArtistLinks } from "./useArtistLinks";
+import "./ArtistCredits.css";
 
-// Album credits in stored order. Identified credits that resolve to an artist
-// page are links; everything else stays plain text. Renders only text and
-// links (no wrapper spans) so it can sit inside the album meta line.
-export function ArtistCredits({ album }) {
-  const segments = creditSegments(album, album?.artistPages?.artistIds);
+// An album's artist line. A credit links to its artist page only when it
+// carries an artistId that the API confirmed has one; everything else is plain
+// text, including credits without an ID and any list while the check is
+// pending or unavailable. `fallback` is shown when the album has no artist.
+// Renders only text and links (no wrapper element), so it can sit inside any
+// text element. Never place it inside another link: use CardLink for cards.
+// `linkProps` are passed to each artist link (for example draggable={false}).
+export function ArtistCredits({ album, fallback = "", linkProps }) {
+  const isLinked = useArtistLinks(album);
+  const segments = artistDisplaySegments(album, isLinked);
+  if (!segments.length) return fallback;
   return segments.map((segment, index) => (
-    <Fragment key={`${index}-${segment.name}`}>
-      {index > 0 ? ", " : null}
+    <Fragment key={`${index}-${segment.text}`}>
       {segment.artistId ? (
-        <Link className="artist-credit-link" to={`/artist/${segment.artistId}`}>{segment.name}</Link>
-      ) : segment.name}
+        <Link {...linkProps} className="artist-credit-link" to={`/artist/${segment.artistId}`}>{segment.text}</Link>
+      ) : segment.text}
     </Fragment>
   ));
 }

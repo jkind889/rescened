@@ -150,7 +150,7 @@
   font-size: 0.8rem;
 }
 
-.stats-album-list a {
+.stats-album-list .card-link {
   display: flex;
   flex: 1 1 auto;
   align-items: center;
@@ -160,7 +160,7 @@
   text-decoration: none;
 }
 
-.stats-album-list a:hover strong {
+.stats-album-list .card-link:hover strong {
   color: var(--app-accent);
 }
 
@@ -173,7 +173,7 @@
   background: var(--app-surface-strong);
 }
 
-.stats-album-list a > span {
+.stats-album-list .card-link > span {
   display: grid;
   min-width: 0;
 }

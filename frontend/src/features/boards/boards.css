@@ -150,8 +150,8 @@
   gap: 0.75rem 1rem;
 }
 
-.board-album-row.is-arrangeable > a,
-.board-album-list.is-ranked .board-album-row > a,
+.board-album-row.is-arrangeable > .card-link,
+.board-album-list.is-ranked .board-album-row > .card-link,
 .board-album-row.is-arrangeable > .board-album-info,
 .board-album-list.is-ranked .board-album-row > .board-album-info {
   flex: 1 1 200px;

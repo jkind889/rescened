@@ -8,6 +8,7 @@ import {
   requestCommunityJson,
 } from "../features/community/community";
 import Cover from "../Components/Cover";
+import ArtistCredits from "../features/artists/ArtistCredits";
 
 const PAGE_LIMIT = 20;
 const SEARCH_DELAY_MS = 300;
@@ -41,7 +42,7 @@ function ApprovedCard({ item }) {
       <div className="approved-feed-copy">
         <p className="community-eyebrow">{formatCommunityValue(item.publicationType)}</p>
         <h2><Link to={`/album/${album.albumId}`}>{album.title || "Untitled album"}</Link></h2>
-        <p className="approved-feed-artist">{album.artistDisplayName || "Unknown artist"}</p>
+        <p className="approved-feed-artist"><ArtistCredits album={album} fallback="Unknown artist" /></p>
         <p className="approved-feed-meta">
           {[album.releaseDate || album.releaseYear, formatCommunityValue(album.releaseType)].filter(Boolean).join(" · ")}
         </p>

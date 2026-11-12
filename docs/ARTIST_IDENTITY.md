@@ -140,9 +140,26 @@ Before enabling it in production, run verified-name backfill planning (see [Veri
 | --- | --- | --- |
 | `GET` | `/artists/:artistId` | Header: `artist { artistId, name, aliases, creditedAs, musicBrainzUrl }`, `releaseCounts { all, album, ep, single, mixtape, other }`, and `features { discography }`. `other` covers soundtrack, compilation, live, remix, and other. |
 | `GET` | `/artists/:artistId/releases?type=&limit=&cursor=` | Linked catalog releases, newest first (year, then release date, then title and `albumId`). Keyset-paged with an opaque cursor that holds no Mongo IDs; `limit` 1–48, default 24. Local search rate limit. |
+| `GET` | `/artists/links?ids=` | Which of up to 100 comma-separated `artistId` values have an artist page: `{ artistIds }`, in request order, deduplicated, lowercase. Unknown IDs are left out. Any entry that is not a Rescened artist ID, a list over 100, or any other query field is `400 INVALID_ARTIST_LINKS`. An empty list returns `{ artistIds: [] }` without reading the registry. Read-only; its own `artistLinks` rate limit (120 per minute per IP) plus the global limit. |
 | `GET` | `/artists/search?q=&limit=` | Artists whose registry name, reviewed alias, or credited spelling contains the query. `limit` 1–12, default 6. Local search rate limit. |
 
 `GET /albums/album/:albumId` adds `artistPages: { artistIds }`: the credited `artistId` values that resolve to a registry artist. The frontend links only those credits to `/artist/:artistId`. Name-only and unresolved credits stay plain text.
+
+### Artist links across the app
+
+Artist names link to `/artist/:artistId` wherever the app shows a local catalog album's artist line: search and genre results, the home page (new, popular, featured, ranked, community lead, and review queue), profile pins, favorites, saved albums, reviews, activity, rankings, top albums and the diary calendar, queue, board items, review permalinks, and the approved feed. A credit becomes a link only when all three hold:
+
+1. The album response carries a credit with an `artistId`. Name-only credits never link, and a display name is never split or matched, so homonyms stay separate.
+2. The API confirmed that `artistId` has a registry artist. Album detail does this with `artistPages.artistIds`. Every other surface asks `GET /artists/links` once for the credits on screen (batched within about 25 ms, up to 100 per request) and caches the answers for the page session.
+3. Artist pages are enabled. While the flag is off, or on an API without the route (`503 ARTIST_PAGES_DISABLED`, or an uncoded 404/503), the first check ends link lookups for five minutes and every credit stays plain text; a later page render asks again after that, so a passing proxy `503` cannot disable links for a whole visit. A failed or rate-limited check leaves its credits unlinked and is not retried for 60 seconds. Nothing retries on its own.
+
+Until a check finishes, and whenever it fails, the line is exactly the stored display name. When some credits link, the line keeps the display name's own wording and punctuation ("A & B feat. C") if every credit appears in it, in order, as a whole name; otherwise the credits are listed by name, comma-separated, in stored order. Credits without an ID inside a mixed line stay plain text.
+
+Anchors cannot nest, so a card that opens an album is a container (`CardLink`) and only its title is the album link (`CardTitleLink`). The title link's `::after` stretches over the whole card, and artist links sit above it. The card still opens the album from anywhere except an artist name, keyboard focus reaches the album link and each artist link separately, the album link's name is the visible title, and artist links are underlined rather than marked by color alone. Draggable lists (the owner's queue and board items) pass `draggable={false}` to every link so a drag still reorders.
+
+Album-bearing summaries that feed these surfaces now include the album's `artistCredits`: listening stats top albums, track-ranking entries, board picks, the diary calendar, and genre browse cards. The credits are the same public shape other album responses already return.
+
+Not linked, by design: MusicBrainz external candidates ("Not in Rescened"), contributor suggestion and correction forms and moderation queues (proposed text, not catalog identity), pickers and selection lists (profile favorites editor, board pick, search suggestions, Last.fm detections), the listening log's expandable button rows, notification sentences, and track-level artists (tracks carry no artist identity).
 
 ### Linked releases
 
@@ -189,7 +206,7 @@ The full results page shows matching artists above album results on page one, wi
 
 `AlbumCatalog` gains a sparse index on `artistCredits.artistId`, which serves the header, release, and album-detail reads. Artist search scans registry names, and the catalog's credit names, with regular expressions, as catalog search already does. It orders the capped candidate lists by exact, prefix, then substring match, so a common short query cannot crowd out an exactly named artist. With the flag on, every catalog search page also runs a case-insensitive anchored regex over registry names; `Artist.name` has no index, so this scans the registry. Measure both before relying on them for a large catalog.
 
-On page one, the results page calls both `/search/search` and `/artists/search`, so it spends two points of the shared local-search rate limit. While the flag is off, it still sends the artist search request and ignores the `503`. The header route `GET /artists/:artistId` has only the global rate limit, like `GET /genres/:slug`.
+On page one, the results page calls both `/search/search` and `/artists/search`, so it spends two points of the shared local-search rate limit. While the flag is off, it still sends the artist search request and ignores the `503`. Credit links add at most one `/artists/links` request per batch of newly shown credits, from a separate bucket; while the flag is off, one `503` per page load ends them. The header route `GET /artists/:artistId` has only the global rate limit, like `GET /genres/:slug`.
 
 ## MusicBrainz discography (prototype)
 
@@ -234,12 +251,14 @@ MusicBrainz core data is CC0. The section credits MusicBrainz and links to the a
 - `tests/artistDiscography.browser.test.js` is opt-in (`RUN_FRONTEND_BROWSER_TESTS=true` with Playwright). It checks repeated clicks, filter changes and unmount during in-flight requests, empty batches, the hidden suggestion action, and 390 px overflow, with fetch stubbed in the page.
 - `tests/artistCovers.test.js` covers cover selection (main credit by identity, solo before collaboration, https-only, de-duplication, the cap, public fields only), the cycle helpers (wrapping, dropping failed covers, auto-advance conditions), and the component and style contract.
 - `tests/artistCoverCycle.browser.test.js` is opt-in (`RUN_FRONTEND_BROWSER_TESTS=true` with Playwright). With images stubbed and time controlled, it checks advancing and wrapping, stopping on hover, keyboard focus, a hidden tab, and Pause, reduced motion, the fade, and broken, single, and missing covers.
-- `tests/artistPages.integration.test.js` covers artist headers (including the `covers` list), keyset release paging and type filters (including untyped rows and equal-title ties), multi-credited releases, homonyms, the search candidate cap, alias and credited-name search, identity search expansion with the flag on and off, and album-detail link resolution. It fails if any request leaves the test server.
+- `tests/artistLinks.test.js` covers link-query validation, the flag on `/artists/links`, credited-ID collection, display-line segmentation (wording kept, whole-name matching, homonyms, name-only credits), the link store (batching, caching, cool-down without self-retry, the disabled stop), and a source guard that no `ArtistCredits` sits inside another link and external candidates stay plain. `tests/artistLinks.component.test.js` renders the real credits, card, ranked list, and review queue to static markup (it skips without `npm --prefix frontend ci`) and asserts the links, their text, and that no anchor nests.
+- `tests/artistPages.integration.test.js` covers artist headers, keyset release paging and type filters (including untyped rows and equal-title ties), multi-credited releases, homonyms, the search candidate cap, alias and credited-name search, identity search expansion with the flag on and off, album-detail link resolution, stored main-credit header cover selection, and `/artists/links` (unknown IDs, duplicates, homonym IDs, bounds, the flag). It fails if any request leaves the test server.
 - `tests/artistIdentity.integration.test.js` covers the transactional paths on a replica set: import registration and idempotency, approval resolution and conflicts, and backfill planning without writes, target refusal, guarded apply, mapping carry-forward, rerun, and registry drift.
 
 ## Known limitations
 
 - Older datasets and community-only registrations may still have provisional credit-derived names. Provenance distinguishes those from verified MusicBrainz artist names. Existing registry names are not renamed automatically.
+- Surfaces that render an album from a response without `artistCredits` (an older API) show plain text. Link checks run in the browser after a page renders, so a credit becomes a link a moment after its text. A credit already checked on the page costs no further request.
 - Credits without an MBID stay unlinked. There is no name matching, and the suggestion and correction forms have no artist search or picker. Contributors can propose identity only through a MusicBrainz prefill or by keeping an existing credit's name.
 - The correction form's comma-separated credit field still splits names that contain commas, such as "Tyler, The Creator". This is a pre-existing problem. Those pieces no longer match the current credit, so the correction submits them without identity.
 - Moderator details show a credit's `artistId` and MusicBrainz link. They do not show the registry artist's own name.

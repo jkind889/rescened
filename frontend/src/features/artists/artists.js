@@ -53,6 +53,83 @@ export function creditSegments(album, linkedArtistIds) {
   }));
 }
 
+// Credited artistIds worth checking for a page link, from one album or a list.
+// Display names are never consulted: a credit without an artistId has nothing
+// to check.
+export function creditArtistIds(albums) {
+  const ids = new Set();
+  for (const album of Array.isArray(albums) ? albums : [albums]) {
+    for (const credit of Array.isArray(album?.artistCredits) ? album.artistCredits : []) {
+      if (typeof credit?.artistId === "string" && credit.artistId.trim()) ids.add(credit.artistId.trim().toLowerCase());
+    }
+  }
+  return [...ids];
+}
+
+const WORD_CHARACTER = /[\p{L}\p{N}\p{M}]/u;
+const JOINING_CHARACTER = /['\u2019.\-\u2010-\u2015]/u;
+
+// True when the character beside a match continues a larger word: a letter or
+// digit, or a hyphen, apostrophe, or period that is itself followed (or, on the
+// left, preceded) by one ("Wu-Tang", "O'Brien", "Mr.Big").
+function continuesWord(adjacent, beyond) {
+  if (!adjacent) return false;
+  if (WORD_CHARACTER.test(adjacent)) return true;
+  return JOINING_CHARACTER.test(adjacent) && Boolean(beyond) && WORD_CHARACTER.test(beyond);
+}
+
+// Finds `name` in `text` from `from`, accepting only whole-word matches so a
+// short credit ("V") cannot attach to part of another word ("Various", "V-Tang").
+function findWholeName(text, name, from) {
+  let index = text.indexOf(name, from);
+  while (index !== -1) {
+    const end = index + name.length;
+    const startsOk = !WORD_CHARACTER.test(name[0]) || !continuesWord(text[index - 1], text[index - 2]);
+    const endsOk = !WORD_CHARACTER.test(name[name.length - 1]) || !continuesWord(text[end], text[end + 1]);
+    if (startsOk && endsOk) return index;
+    index = text.indexOf(name, index + 1);
+  }
+  return -1;
+}
+
+// Text for an album's artist line as { text, artistId } pieces. Only a credit
+// whose artistId passes `isLinked` carries an artistId; every other piece is
+// plain text. While no credit is linked this is exactly the stored display
+// name. With links, the display name keeps its own wording ("A & B") when
+// every credit appears in it, in order, as a whole name; otherwise the
+// credits are listed by name, comma-separated, in stored order. Names are
+// never split, searched for, or matched to infer an identity.
+export function artistDisplaySegments(album, isLinked) {
+  const linkedFor = typeof isLinked === "function" ? isLinked : (id) => (isLinked instanceof Set ? isLinked.has(id) : false);
+  const display = typeof album?.artistDisplayName === "string" ? album.artistDisplayName : "";
+  const credits = (Array.isArray(album?.artistCredits) ? album.artistCredits : [])
+    .filter((credit) => typeof credit?.name === "string" && credit.name)
+    .map((credit) => ({
+      name: credit.name,
+      artistId: typeof credit.artistId === "string" && linkedFor(credit.artistId.trim().toLowerCase()) ? credit.artistId.trim().toLowerCase() : null,
+    }));
+  if (!credits.some((credit) => credit.artistId)) {
+    if (display) return [{ text: display, artistId: null }];
+    return credits.flatMap((credit, index) => [...(index ? [{ text: ", ", artistId: null }] : []), { text: credit.name, artistId: null }]);
+  }
+  if (display) {
+    const pieces = [];
+    let cursor = 0;
+    for (const credit of credits) {
+      const index = findWholeName(display, credit.name, cursor);
+      if (index === -1) { pieces.length = 0; break; }
+      if (index > cursor) pieces.push({ text: display.slice(cursor, index), artistId: null });
+      pieces.push({ text: credit.name, artistId: credit.artistId });
+      cursor = index + credit.name.length;
+    }
+    if (pieces.length) {
+      if (cursor < display.length) pieces.push({ text: display.slice(cursor), artistId: null });
+      return pieces;
+    }
+  }
+  return credits.flatMap((credit, index) => [...(index ? [{ text: ", ", artistId: null }] : []), { text: credit.name, artistId: credit.artistId }]);
+}
+
 // Other credits on a release shown on one artist's page. Credits that belong
 // to the page's artist are left out by identity, never by name.
 export function otherCredits(release, artistId) {

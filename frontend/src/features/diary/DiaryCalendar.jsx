@@ -4,6 +4,8 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@clerk/react";
 import { getApiErrorMessage } from "../../utils/apiErrors";
 import "./diary.css";
+import { CardLink, CardTitleLink } from "../../Components/CardLink";
+import ArtistCredits from "../artists/ArtistCredits";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MAX_COVERS_PER_DAY = 3;
@@ -144,13 +146,13 @@ export function DiaryCalendar({ userId = "" }) {
           <ul>
             {selectedListens.map((listen) => (
               <li key={listen.listenId}>
-                <Link to={`/album/${listen.album.albumId}`}>
+                <CardLink>
                   {listen.album.cover ? <img src={listen.album.cover} alt="" /> : <span className="diary-calendar-cover-fallback" />}
                   <span>
-                    <strong>{listen.album.title || "Untitled album"}</strong>
-                    <em>{listen.album.artistDisplayName || "Artist unknown"}{listen.source === "automatic" ? " · Automatic" : ""}</em>
+                    <strong><CardTitleLink to={`/album/${listen.album.albumId}`}>{listen.album.title || "Untitled album"}</CardTitleLink></strong>
+                    <em><ArtistCredits album={listen.album} fallback="Artist unknown" />{listen.source === "automatic" ? " · Automatic" : ""}</em>
                   </span>
-                </Link>
+                </CardLink>
               </li>
             ))}
           </ul>

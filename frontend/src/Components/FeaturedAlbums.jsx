@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { API_BASE_URL } from "../config/api";
+import { CardLink, CardTitleLink } from "./CardLink";
+import ArtistCredits from "../features/artists/ArtistCredits";
 
 function ArrowIcon() {
     return (
@@ -77,22 +78,21 @@ export function FeaturedAlbums({ limit = 24 }) {
                     const isActive = album.albumId === activeAlbumId;
 
                     return (
-                        <Link
+                        <CardLink
                             className={`featured-catalog-row${isActive ? " is-active" : ""}`}
                             key={album.albumId}
-                            to={`/album/${album.albumId}`}
                             onMouseEnter={() => setActiveAlbumId(album.albumId)}
                             onFocus={() => setActiveAlbumId(album.albumId)}
                         >
                             <span className="featured-catalog-copy">
-                                <strong>{album.title}</strong>
-                                <small>{album.artistDisplayName}</small>
+                                <strong><CardTitleLink to={`/album/${album.albumId}`}>{album.title}</CardTitleLink></strong>
+                                <small><ArtistCredits album={album} /></small>
                             </span>
                             <span className="featured-catalog-year">{album.releaseYear || "—"}</span>
                             <span className="featured-catalog-arrow">
                                 <ArrowIcon />
                             </span>
-                        </Link>
+                        </CardLink>
                     );
                 })}
             </div>

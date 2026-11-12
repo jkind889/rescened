@@ -7,6 +7,8 @@ import {
     RankedAlbumList,
     SignalPanel,
 } from "../features/home/SignalPanels";
+import { CardLink, CardTitleLink } from "../Components/CardLink";
+import ArtistCredits from "../features/artists/ArtistCredits";
 import { PeopleToFollow } from "../features/home/PeopleToFollow";
 import { fetchJson, formatShortDate, getAlbumId, settledArray, uniqueAlbums } from "../features/home/signals";
 import "../features/home/home.css";
@@ -62,14 +64,14 @@ function LeadAlbum({ album, isLoading }) {
     }
 
     return (
-        <Link className="community-lead" to={`/album/${getAlbumId(album)}`}>
+        <CardLink className="community-lead">
             <span className="community-lead-label">Lead album</span>
             <AlbumCover album={album} className="community-lead-cover" />
             <span className="community-lead-copy">
-                <strong>{album.title || "Untitled album"}</strong>
-                <small>{album.artistDisplayName || "Unknown artist"} / {album.releaseYear || "----"}</small>
+                <strong><CardTitleLink to={`/album/${getAlbumId(album)}`}>{album.title || "Untitled album"}</CardTitleLink></strong>
+                <small><ArtistCredits album={album} fallback="Unknown artist" /> / {album.releaseYear || "----"}</small>
             </span>
-        </Link>
+        </CardLink>
     );
 }
 

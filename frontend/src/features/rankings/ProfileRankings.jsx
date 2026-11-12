@@ -5,6 +5,8 @@ import { useAuth } from "@clerk/react";
 import { getApiErrorMessage } from "../../utils/apiErrors";
 import "./rankings.css";
 import Cover from "../../Components/Cover";
+import { CardLink, CardTitleLink } from "../../Components/CardLink";
+import ArtistCredits from "../artists/ArtistCredits";
 
 // A profile's track rankings, most recently changed first, each showing its top tracks.
 export function ProfileRankings({ userId, isOwner = false }) {
@@ -84,17 +86,17 @@ export function ProfileRankings({ userId, isOwner = false }) {
       <ul className="profile-rankings-list">
         {rankings.map((entry) => (
           <li key={entry.album.albumId}>
-            <Link className="profile-rankings-album" to={`/album/${entry.album.albumId}`}>
+            <CardLink className="profile-rankings-album">
               {entry.album.cover ? <Cover src={entry.album.cover} /> : <span className="profile-rankings-fallback">No cover</span>}
               <span>
-                <strong>{entry.album.title || "Untitled album"}</strong>
-                <em>{entry.album.artistDisplayName || "Artist unknown"}</em>
+                <strong><CardTitleLink to={`/album/${entry.album.albumId}`}>{entry.album.title || "Untitled album"}</CardTitleLink></strong>
+                <em><ArtistCredits album={entry.album} fallback="Artist unknown" /></em>
                 <small>
                   Ranked {entry.rankedCount === entry.trackCount ? "all" : `${entry.rankedCount} of`} {entry.trackCount} tracks
                   {entry.updatedAt && <> · <time dateTime={entry.updatedAt}>{new Date(entry.updatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</time></>}
                 </small>
               </span>
-            </Link>
+            </CardLink>
             <ol className="profile-rankings-tracks">
               {entry.topTracks.map((track) => (
                 <li key={track.trackId}>

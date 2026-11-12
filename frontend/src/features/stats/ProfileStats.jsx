@@ -4,6 +4,8 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@clerk/react";
 import { getApiErrorMessage } from "../../utils/apiErrors";
 import "./stats.css";
+import { CardLink, CardTitleLink } from "../../Components/CardLink";
+import ArtistCredits from "../artists/ArtistCredits";
 
 const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -142,13 +144,13 @@ export function ProfileStats({ userId, isOwner = false }) {
                 {topAlbums.map((entry, index) => (
                   <li key={entry.album.albumId}>
                     <span className="stats-rank">{index + 1}</span>
-                    <Link to={`/album/${entry.album.albumId}`}>
+                    <CardLink>
                       {entry.album.cover ? <img src={entry.album.cover} alt="" loading="lazy" /> : <span className="stats-cover-fallback" />}
                       <span>
-                        <strong>{entry.album.title || "Untitled album"}</strong>
-                        <em>{entry.album.artistDisplayName || "Artist unknown"}</em>
+                        <strong><CardTitleLink to={`/album/${entry.album.albumId}`}>{entry.album.title || "Untitled album"}</CardTitleLink></strong>
+                        <em><ArtistCredits album={entry.album} fallback="Artist unknown" /></em>
                       </span>
-                    </Link>
+                    </CardLink>
                     <span className="stats-count">{entry.listenCount}×</span>
                   </li>
                 ))}

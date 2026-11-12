@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { API_BASE_URL } from "../config/api";
 import { getApiErrorMessage } from "../utils/apiErrors";
+import { CardLink, CardTitleLink } from "../Components/CardLink";
+import ArtistCredits from "../features/artists/ArtistCredits";
 import "../Components/Community/GenreSuggestion.css";
 import Cover from "../Components/Cover";
 
@@ -156,21 +158,21 @@ export function GenrePage() {
       {showRows ? (
         <div className="results-grid">
           {albums.rows.map((album) => (
-            <Link className="result-card" key={album.albumId} to={`/album/${album.albumId}`}>
+            <CardLink className="result-card" key={album.albumId}>
               {album.cover ? (
                 <Cover className="result-cover" src={album.cover} alt={`${album.title} cover`} />
               ) : (
                 <span className="result-cover result-cover-fallback" aria-label="No cover available">No cover</span>
               )}
               <span className="result-copy">
-                <h3>{album.title}</h3>
-                <p>{album.artistDisplayName}</p>
+                <h3><CardTitleLink to={`/album/${album.albumId}`}>{album.title}</CardTitleLink></h3>
+                <p><ArtistCredits album={album} /></p>
               </span>
               <span className="result-year">
                 {album.releaseYear || "Year unknown"}
                 {album.reviewCount ? <span className="genre-page-rating"> · ★ {album.averageRating} ({album.reviewCount})</span> : null}
               </span>
-            </Link>
+            </CardLink>
           ))}
         </div>
       ) : null}

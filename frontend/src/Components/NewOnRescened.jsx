@@ -1,7 +1,8 @@
 import { API_BASE_URL } from "../config/api";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import Cover from "./Cover";
+import { CardLink, CardTitleLink } from "./CardLink";
+import ArtistCredits from "../features/artists/ArtistCredits";
 
 export function NewOnRescened({ limit = 6 }) {
     const [albums, setAlbums] = useState([]);
@@ -58,15 +59,15 @@ export function NewOnRescened({ limit = 6 }) {
     return (
         <div className="front-album-strip">
             {albums.map((album) => (
-                <Link className="front-album-card" key={album.albumId} to={`/album/${album.albumId}`}>
+                <CardLink className="front-album-card" key={album.albumId}>
                     {album.cover ? (
                         <Cover src={album.cover} alt={`${album.title} cover`} />
                     ) : (
                         <span className="front-album-cover-fallback">No cover</span>
                     )}
-                    <span>{album.title}</span>
-                    <small>{album.artistDisplayName}</small>
-                </Link>
+                    <span><CardTitleLink to={`/album/${album.albumId}`}>{album.title}</CardTitleLink></span>
+                    <small><ArtistCredits album={album} /></small>
+                </CardLink>
             ))}
         </div>
     );

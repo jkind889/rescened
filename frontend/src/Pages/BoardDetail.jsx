@@ -13,6 +13,8 @@ import { moveItem } from "../features/queue/queue";
 import { earlierOrderTarget, normalizeDraft, orderLimitOf, rankMap, sameOrder, saveBoardOrder, saveBoardSettings, saveBoardNote } from "../features/boards/boardOrder";
 import "../features/boards/boards.css";
 import Cover from "../Components/Cover";
+import { CardLink, CardTitleLink } from "../Components/CardLink";
+import ArtistCredits from "../features/artists/ArtistCredits";
 
 const MAX_DESCRIPTION_LENGTH = 500;
 const UNSAVED_ORDER_HINT = "Save or discard your new order first";
@@ -31,6 +33,9 @@ function byYear(first, second, direction) {
   return direction * (a - b);
 }
 
+// Links inside a draggable board item must not start a link drag instead of a reorder.
+const NO_DRAG = { draggable: false };
+
 // A manual board's saved order. It is the default sort there and does not re-sort.
 const CUSTOM_SORT = "custom";
 
@@ -43,10 +48,6 @@ const ALBUM_SORTS = {
   title: { label: "Title A–Z", compare: (a, b) => byText(a.title, b.title) },
   listens: { label: "Most listened", compare: (a, b) => (b.listenCount || 0) - (a.listenCount || 0) },
 };
-
-function getArtistName(album) {
-  return album.artistDisplayName || "Artist unknown";
-}
 
 export function BoardDetail() {
   const { boardId, userId } = useParams();
@@ -745,11 +746,11 @@ export function BoardDetail() {
           {filteredAlbums.map((album, index) => (
             <Fragment key={album.albumId}>
               <article className={itemClassName("board-album-card", index)} {...arrangeProps(index)}>
-                <Link to={`/album/${album.albumId}`} draggable={false}>
+                <CardLink>
                   {album.cover ? <Cover src={album.cover} alt={`${album.title} cover`} draggable={false} /> : <span>No cover</span>}
-                  <h2>{album.title || "Untitled album"}</h2>
-                  <p>{getArtistName(album)}</p>
-                </Link>
+                  <h2><CardTitleLink to={`/album/${album.albumId}`} draggable={false}>{album.title || "Untitled album"}</CardTitleLink></h2>
+                  <p><ArtistCredits album={album} fallback="Artist unknown" linkProps={NO_DRAG} /></p>
+                </CardLink>
                 {renderNote(album)}
                 {renderRank(album)}
                 {renderArrangeControls(album, index, true)}
@@ -767,11 +768,11 @@ export function BoardDetail() {
               <article className={itemClassName("board-album-row", index)} {...arrangeProps(index)}>
                 {renderRank(album)}
                 <div className="board-album-info">
-                  <Link to={`/album/${album.albumId}`} draggable={false}>
+                  <CardLink>
                     {album.cover ? <Cover src={album.cover} alt={`${album.title} cover`} draggable={false} size={58} /> : <span>No cover</span>}
-                    <strong>{album.title || "Untitled album"}</strong>
-                    <em>{getArtistName(album)}</em>
-                  </Link>
+                    <strong><CardTitleLink to={`/album/${album.albumId}`} draggable={false}>{album.title || "Untitled album"}</CardTitleLink></strong>
+                    <em><ArtistCredits album={album} fallback="Artist unknown" linkProps={NO_DRAG} /></em>
+                  </CardLink>
                   {renderNote(album)}
                 </div>
                 {renderArrangeControls(album, index, false)}
