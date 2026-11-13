@@ -179,13 +179,13 @@ The header picture is **release cover art that is already stored in the Rescened
 
 The list is empty when nothing qualifies. An older API that omits `covers`, or an empty list, leaves the header as it was.
 
-The page (`ArtistCoverCycle`) shows one cover at a time with a caption that links to the release (`/album/:albumId`) and the note "Cover art from this artist's releases". Behavior:
+The page (`ArtistCoverCycle`) shows one cover at a time with a caption that links to the release (`/album/:albumId`). The carousel has an accessible release-art label; secondary explanatory header copy is omitted. Behavior:
 
 - Several covers advance every 6 seconds with a short fade. Previous and next buttons always work and wrap.
 - It stops advancing while the pointer is over it, while keyboard focus is inside it (mouse clicks do not count), while the tab is hidden, and after the person presses Pause. Play resumes it. A Pause control is provided because the content moves for more than five seconds (WCAG 2.2.2).
 - With `prefers-reduced-motion: reduce` it never advances by itself, does not fade, and has no Play/Pause control; previous and next remain. The preference is followed live.
 - The caption is a polite live region only while the cycle is not advancing by itself, so a screen reader is not interrupted every turn. A group of several covers is announced as a carousel of slides ("2 of 5"); a single cover is plain.
-- A cover that fails to load is dropped from the cycle. One cover shows no controls and never moves. With no usable cover the component renders nothing and the header returns to its text layout (the two-column layout applies only while the cycle is rendered, via `:has()`). Below 640 px the cover sits above the text.
+- A cover that fails to load is dropped from the cycle. One cover shows no controls and never moves. With no usable cover the component renders nothing and the header returns to its text layout (the two-column layout applies only while the cycle is rendered, via `:has()`). Below 640 px the title and About section come first, followed by the cover.
 
 There is no new flag: the data is local and rides the already flagged artist page. Images are loaded by the visitor's browser from the stored cover URLs, exactly as release cards load them, and the artist route makes no provider request.
 
