@@ -445,6 +445,7 @@ Source: [`lib/catalogImport/listenBrainz.js`](../lib/catalogImport/listenBrainz.
 | `FINAL_DOCUMENT_SEMANTIC_INVALID` | A merged row violates date, reference, or cover invariants. |
 | `MODEL_VALIDATION_FAILED` | A merged catalog row fails Mongoose validation. |
 | `CONCURRENT_CATALOG_CHANGE` | An imported row changed between preflight and its guarded write. |
+| `IDENTITY_RELINK_NEEDS_BACKFILL` | `--apply` would re-version albums whose only change is artist credit identity. Run the artist backfill first, or pass `--allow-identity-relink`. Nothing was built or written. |
 | `TRANSACTION_UNAVAILABLE` | Transaction-capable MongoDB is unavailable. |
 | `TRANSACTION_ROLLED_BACK` | The import transaction did not commit. |
 | `MISSING_MONGO_URI` | `MONGO_URI` was not supplied. |

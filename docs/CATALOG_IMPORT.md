@@ -45,7 +45,7 @@ Apply the accepted rows:
 MONGO_URI='mongodb://...' npm run catalog:import -- --input data/catalog-import/seeds/listenbrainz-YYYY-MM-DD.json --apply
 ```
 
-`--apply` is always explicit; omitting it keeps the command in dry-run mode. Import reports distinguish inserted, refreshed, unchanged, quarantined, and conflicting rows. Exit code `0` means a clean run, `2` means the run completed with quarantined/conflicting rows, and `1` means a fatal error or transaction rollback.
+`--apply` is always explicit; omitting it keeps the command in dry-run mode. Import reports distinguish inserted, refreshed, unchanged, quarantined, and conflicting rows. They also list `identityRelinks`: refreshed albums whose only change is artist credit identity. `--apply` refuses (`IDENTITY_RELINK_NEEDS_BACKFILL`, before building indexes or writing) while that list is non-empty; run the [artist identity backfill](ARTIST_IDENTITY.md#backfill) first, or pass `--allow-identity-relink` to re-version those albums deliberately. Exit code `0` means a clean run, `2` means the run completed with quarantined/conflicting rows, and `1` means a fatal error or transaction rollback.
 
 ## Dataset contract
 

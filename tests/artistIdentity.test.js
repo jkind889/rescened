@@ -313,6 +313,36 @@ test("import refresh keeps user-owned credits untouched instead of adding identi
   assert.equal(plan.artistOperations.length, 0, "artists referenced only by preserved credits are not registered");
 });
 
+test("an import that would re-version albums only to add credit identities is refused unless allowed", async () => {
+  // Albums imported before artist identity: what this importer inserts for the
+  // same rows, with the credit identities removed. One also has a real change.
+  const rows = [datasetRow(), datasetRow({ releaseGroupMbid: GROUP_2 })];
+  const inserted = await preflightImport({ validation: importValidation(rows), AlbumCatalog: fakeCatalog(), Artist: fakeRegistry() });
+  const preIdentity = (document, extra) => ({
+    ...clone(document),
+    artistCredits: document.artistCredits.map(({ artistId: _id, artistMbid: _mbid, ...credit }) => credit),
+    _id: new mongoose.Types.ObjectId(),
+    ...extra,
+  });
+  const existing = preIdentity(inserted.accepted[0].document, { catalogRevision: 3 });
+  const changed = preIdentity(inserted.accepted[1].document, { title: "Old title" });
+  const plan = await preflightImport({ validation: importValidation(rows), AlbumCatalog: fakeCatalog([existing, changed]), Artist: fakeRegistry() });
+  assert.equal(plan.counts.refreshed, 2);
+  assert.deepEqual(plan.identityRelinks, [{ rowIndex: 0, releaseGroupMbid: GROUP_1, albumId: existing.albumId }], "only the identity-only refresh is listed; a real data change is not");
+  assert.deepEqual(createImportReport(plan).identityRelinks, plan.identityRelinks);
+
+  let started = 0;
+  const session = { async withTransaction(work) { await work(); }, async endSession() {} };
+  const mongooseStub = { startSession: async () => { started += 1; return session; } };
+  await assert.rejects(
+    applyImport({ plan, AlbumCatalog: fakeCatalog([existing, changed]), Artist: fakeRegistry(), mongoose: mongooseStub }),
+    (error) => error.code === "IDENTITY_RELINK_NEEDS_BACKFILL" && /catalog:backfill-artists/.test(error.message),
+  );
+  assert.equal(started, 0, "refused before any transaction");
+  await applyImport({ plan, AlbumCatalog: fakeCatalog([existing, changed], { bulkWrite: async () => ({ matchedCount: 2 }) }), Artist: fakeRegistry(), mongoose: mongooseStub, allowIdentityRelink: true });
+  assert.equal(started, 1, "an explicit override applies");
+});
+
 test("import apply registers artists before catalog writes in the same transaction", async () => {
   const calls = [];
   const session = {

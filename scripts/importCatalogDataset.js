@@ -12,6 +12,7 @@ const { readDatasetFile } = require("../lib/catalogImport/dataset");
 const {
   CatalogImportError,
   applyImport,
+  assertIdentityRelinksAllowed,
   createImportReport,
   parseImportArgs,
   preflightImport,
@@ -27,6 +28,9 @@ Options:
   --quarantine-report <path>   Quarantine report output path
   --dry-run                    Preflight only (default)
   --apply                      Apply accepted writes in one transaction
+  --allow-identity-relink      With --apply: allow refreshes that change only
+                               artist credit identities (run the artist
+                               backfill first instead)
   --help                       Show this help`;
 
 function artifactPath(input, suffix) {
@@ -270,11 +274,13 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     staged.push(await artifactIO.stage(targets.quarantine, quarantine));
 
     if (options.apply) {
+      // Refuse identity-only re-versioning before building indexes or writing.
+      assertIdentityRelinksAllowed(plan, options.allowIdentityRelink);
       // Apply only: build the catalog and registry indexes (including the unique
       // MusicBrainz index) before inserting, since connecting does not.
       if (typeof Model.createIndexes === "function") await Model.createIndexes();
       if (typeof ArtistModel.createIndexes === "function") await ArtistModel.createIndexes();
-      await applyImport({ plan, AlbumCatalog: Model, Artist: ArtistModel, mongoose: db });
+      await applyImport({ plan, AlbumCatalog: Model, Artist: ArtistModel, mongoose: db, allowIdentityRelink: options.allowIdentityRelink });
       databaseApplyCompleted = true;
     }
 
