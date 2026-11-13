@@ -1,5 +1,21 @@
 [
   {
+    "id": "artist-pages",
+    "date": "2026-11-12",
+    "title": "Artist pages",
+    "summary": "Open an artist from any album to see their releases on Rescened, cover art from their records, and a short introduction.",
+    "changes": [
+      "Artist names on albums, search results, the home page, profiles, boards, reviews, your diary, queue, rankings, and stats link to that artist's page. A name links only when the album is tied to a known artist, so two artists who share a name stay separate.",
+      "An artist page lists their releases on Rescened, newest first, with filters for albums, EPs, singles, and other release types. Collaborations appear on the page of every credited artist.",
+      "The top of the page shows cover art from the artist's own releases. With several covers it cycles through them, with buttons to go back, go forward, or pause, and it stays still if your device is set to reduce motion.",
+      "Some artists have a short About section taken from English Wikipedia, with a link to the exact version it came from and its license. When Wikipedia's text changes, a moderator checks the new wording before it replaces what you see.",
+      "An On MusicBrainz section lists the artist's albums, EPs, and singles from MusicBrainz and points out the ones already on Rescened.",
+      "Search shows matching artists above album results. Searching an artist's exact name, or a reviewed alternative name such as 방탄소년단 for BTS, also finds albums credited to that artist.",
+      "Use Show more MusicBrainz results in search to see more albums from the same MusicBrainz lookup.",
+      "Moderators reviewing a suggestion or correction can see which artist each credit is linked to, with a warning when the credited name differs."
+    ]
+  },
+  {
     "id": "profile-search-and-board-improvements",
     "date": "2026-11-10",
     "title": "Find reviews faster and make boards your own",
