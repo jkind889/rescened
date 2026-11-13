@@ -7,6 +7,7 @@ const path = require("node:path");
 const mongoose = require("mongoose");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const Artist = require("../models/Artist");
+const AlbumSubmission = require("../models/AlbumSubmission");
 const { readDatasetFile } = require("../lib/catalogImport/dataset");
 const { evidenceBackfillSource, readEvidenceFile } = require("../lib/artists/enrichmentEvidence");
 const {
@@ -120,6 +121,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
         validations,
         unresolved,
         linkUserOwned: options.linkUserOwned,
+        AlbumSubmission: options.linkUserOwned ? dependencies.AlbumSubmission || AlbumSubmission : undefined,
         AlbumCatalog: AlbumModel,
         Artist: ArtistModel,
         databaseName: db.connection.name,

@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const { artistMbidOf, newArtistDocument } = require("../lib/artists/identity");
-const { buildPlan, buildSourceIndex, parseBackfillArgs, verifySealedPlan } = require("../lib/artists/backfill");
+const { applyPlan, buildPlan, buildSourceIndex, parseBackfillArgs, sealPlan, verifySealedPlan } = require("../lib/artists/backfill");
 const { buildEvidence, evidenceBackfillSource, publishEvidence } = require("../lib/artists/enrichmentEvidence");
 
 const RG = (n) => `${String(n).padStart(8, "0")}-1111-4111-8111-111111111111`;
@@ -229,10 +229,35 @@ test("the backfill CLI passes --link-user-owned into the sealed plan", async (co
     mongoose: { connection: { readyState: 1, name: "rescened_dev" } },
     AlbumCatalog: { find: () => ({ select: () => Promise.resolve([album(3, [{ name: "Alpha", role: "main" }], { source: "community" })]) }) },
     Artist: { find: () => Promise.resolve([]) },
+    AlbumSubmission: { find: () => ({ select: () => Promise.resolve([]) }) },
     now: new Date(GENERATED),
   };
   const planPath = path.join(directory, "plan.json");
   assert.equal(await main(["--enrichment", file, "--enrichment-sha256", evidence().evidenceSha256, "--out", planPath, "--link-user-owned"], connected), 0);
   const plan = JSON.parse(fs.readFileSync(planPath, "utf8"));
   assert.deepEqual([plan.counts.link, plan.counts.review, plan.counts.userOwnedLinks], [1, 0, 1]);
+});
+
+test("opted-in plans report open corrections and keep every other check for user-owned albums", () => {
+  const unowned = { ...album(3, [{ name: "Alpha", role: "main" }], { source: "community" }), fieldProvenance: {}, catalogSource: "community" };
+  const counted = album(1, [{ name: "Alpha", role: "main" }], { source: "community" });
+  const deferredAlbum = album(8, [{ name: "Zeta", role: "main" }], { source: "manual" });
+  const plan = planFrom([unowned, counted, deferredAlbum], [], { linkUserOwned: true, pendingCorrections: new Map([[unowned.albumId, 2]]) });
+  const byAlbum = new Map(plan.albumUpdates.map((update) => [update.albumId, update]));
+  assert.equal(byAlbum.get(unowned.albumId).creditProvenance, "community (no credit provenance)");
+  assert.equal(byAlbum.get(unowned.albumId).pendingCorrections, 2);
+  assert.equal(byAlbum.has(counted.albumId), false, "a count mismatch is still flagged");
+  assert.deepEqual(plan.flagged.map((entry) => [entry.albumId, entry.code]).sort(), [[counted.albumId, "CREDIT_COUNT_MISMATCH"], [deferredAlbum.albumId, "ENRICHMENT_UNRESOLVED"]].sort());
+  assert.deepEqual([plan.counts.linkedAlbumsWithOpenCorrections, plan.counts.openCorrectionsMadeStale], [1, 2]);
+});
+
+test("apply refuses user-owned updates without a consistent opt-in, before any write", async () => {
+  const community = album(3, [{ name: "Alpha", role: "main" }], { source: "community" });
+  const plan = planFrom([community], [], { linkUserOwned: true });
+  const noWrites = { startSession: () => assert.fail("must not open a transaction") };
+  const apply = (candidate) => applyPlan({ plan: candidate, expectedSha256: candidate.planSha256, confirmTarget: "rescened_test", databaseName: "rescened_test", AlbumCatalog: {}, Artist: {}, mongoose: noWrites });
+  const { options: _options, ...withoutOption } = plan;
+  for (const candidate of [sealPlan(withoutOption), sealPlan({ ...plan, counts: { ...plan.counts, userOwnedLinks: 0 } })]) {
+    await assert.rejects(apply(candidate), { code: "INVALID_PLAN" });
+  }
 });

@@ -560,10 +560,15 @@ async function userOwnedEnrichmentTest() {
     evidenceRow(groups[1], [{ name: "Alpha", joinPhrase: "", artistMbid: MBID_A, artistName: "Alpha" }]),
     evidenceRow(groups[2], [{ name: "Beta", joinPhrase: "", artistMbid: MBID_B, artistName: "Beta" }]),
   ]);
-  const reviewOnly = await createPlan({ validations: [source], unresolved, AlbumCatalog, Artist, databaseName: DB_NAME });
+  // An open correction on the manual album will go stale once it is linked.
+  const openCorrection = await createCorrection(await AlbumCatalog.findById(manual._id).lean(), { artists: { artistDisplayName: "Alpha (open)", artistCredits: [{ name: "Alpha", role: "main" }] } });
+  const reviewOnly = await createPlan({ validations: [source], unresolved, AlbumCatalog, AlbumSubmission, Artist, databaseName: DB_NAME });
   assert.deepEqual([reviewOnly.counts.link, reviewOnly.counts.review], [0, 3], "without the option user-owned credits are only proposed");
-  const plan = await createPlan({ validations: [source], unresolved, linkUserOwned: true, AlbumCatalog, Artist, databaseName: DB_NAME });
+  assert.equal(reviewOnly.counts.openCorrectionsMadeStale, undefined);
+  const plan = await createPlan({ validations: [source], unresolved, linkUserOwned: true, AlbumCatalog, AlbumSubmission, Artist, databaseName: DB_NAME });
   assert.deepEqual([plan.counts.link, plan.counts.review, plan.counts.userOwnedLinks], [3, 0, 3]);
+  assert.deepEqual([plan.counts.linkedAlbumsWithOpenCorrections, plan.counts.openCorrectionsMadeStale], [1, 1]);
+  assert.equal(plan.albumUpdates.find((update) => update.albumId === manual.albumId).pendingCorrections, 1);
 
   // A moderator approves a correction for one album after planning.
   const current = await AlbumCatalog.findById(corrected._id).lean();
@@ -572,6 +577,8 @@ async function userOwnedEnrichmentTest() {
 
   const report = await applyPlan({ plan, expectedSha256: plan.planSha256, confirmTarget: DB_NAME, databaseName: DB_NAME, AlbumCatalog, Artist, mongoose });
   assert.deepEqual([report.counts.applied, report.counts.conflict], [2, 1]);
+  assert.deepEqual(report.options, { linkUserOwnedCredits: true });
+  assert.ok(report.albums.filter((outcome) => outcome.status === "applied").every((outcome) => outcome.userOwnedCredits === true));
   const alpha = await Artist.findOne({ "externalReferences.externalId": MBID_A }).lean();
   const beta = await Artist.findOne({ "externalReferences.externalId": MBID_B }).lean();
   const linked = await AlbumCatalog.findById(community._id).lean();
@@ -581,11 +588,14 @@ async function userOwnedEnrichmentTest() {
   ], "wording, roles, and order are kept");
   assert.deepEqual(linked.fieldProvenance.artistCredits, communityProvenance, "the original credit provenance is unchanged");
   assert.equal(linked.fieldProvenance.artistIdentity.planSha256, plan.planSha256);
+  assert.equal(linked.fieldProvenance.artistIdentity.userOwnedCredits, true);
+  assert.equal(linked.fieldProvenance.artistIdentity.creditProvenance, "community");
   assert.equal(linked.catalogRevision, 4);
   assert.equal(linked.artistDisplayName, "Alpha & Beta");
   const manualAfter = await AlbumCatalog.findById(manual._id).lean();
   assert.equal(manualAfter.fieldProvenance.artistCredits.source, "manual");
   assert.equal(manualAfter.artistCredits[0].artistId, alpha.artistId);
+  assert.equal((await AlbumSubmission.findOne({ submissionId: openCorrection.submissionId }).lean()).status, "pending", "linking never changes a submission; it only advances the album revision");
   const correctedAfter = await AlbumCatalog.findById(corrected._id).lean();
   assert.deepEqual(correctedAfter.artistCredits, [{ name: "Beta", role: "main" }], "a correction approved after planning wins");
   assert.equal(correctedAfter.artistDisplayName, "Beta (corrected)");
