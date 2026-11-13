@@ -387,7 +387,7 @@ test("moderator detail covers correction credits, degrades on a registry failure
     assert.equal(detail.status, 200, JSON.stringify(detail.body));
     assert.deepEqual(Object.keys(detail.body.artistRegistry).sort(), [linked, current].sort(), "proposed and baseline correction credits are both resolved");
     assert.equal(detail.body.artistRegistry[linked].name, "Radiohead");
-    assert.equal(detail.body.artistRegistryTruncated, undefined);
+    assert.equal(detail.body.artistRegistryUnchecked, undefined);
 
     mode = "fail";
     const degraded = await callRoute(state.router, "get", "/:submissionId", { params: { submissionId: correction.submissionId } });
@@ -405,8 +405,8 @@ test("moderator detail covers correction credits, degrades on a registry failure
     queries.length = 0;
     const capped = await callRoute(crowdedState.router, "get", "/:submissionId", { params: { submissionId: crowded.submissionId } });
     assert.equal(capped.status, 200);
-    assert.equal(capped.body.artistRegistryTruncated, true);
     assert.equal(queries[0].artistId.$in.length, 100);
+    assert.deepEqual(capped.body.artistRegistryUnchecked, many.slice(99), "exactly the IDs past the cap are reported unchecked");
     assert.equal(queries[0].artistId.$in[0], linked, "the current proposal is never the part that is cut");
   } finally {
     Artist.find = originalFind;

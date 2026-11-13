@@ -90,11 +90,12 @@ function DetailItem({ label, children }) {
 // What a credit's artistId links to. Moderators get the registry entry, so a
 // credit worded as one artist but linked to another is visible; without
 // registry context (the contributor's own view) only the ID is shown.
-// `registry` is { artists, truncated } from moderator detail, or null.
+// `registry` is { artists, unchecked } from moderator detail, or null.
+// IDs past the lookup cap (unchecked) are shown neutrally, not as unknown.
 function CreditIdentity({ credit, registry }) {
   if (!credit.artistId) return null;
   const entry = registry?.artists?.[credit.artistId];
-  if (!registry || (!entry && registry.truncated)) {
+  if (!registry || (!entry && registry.unchecked.has(credit.artistId))) {
     return <span className="suggestion-credit-role">Rescened artist <code>{credit.artistId}</code></span>;
   }
   if (!entry) {
@@ -319,7 +320,7 @@ function CorrectionDiffBlock({ submission, headingLevel = 3, registry = null }) 
                 <dd><pre>{diffValue(change.proposed)}</pre></dd>
               </div>
             </dl>
-            {change.field === "artists" && values(change.proposed?.artistCredits).length ? (
+            {registry && change.field === "artists" && values(change.proposed?.artistCredits).length ? (
               <div className="suggestion-detail-subsection">
                 <p className="suggestion-detail-note">Proposed credits and the registry artists they link to</p>
                 <CreditList credits={values(change.proposed.artistCredits)} registry={registry} />
@@ -501,7 +502,7 @@ export function SubmissionDetails({
   duplicateCandidates = null,
   genreReview = null,
   artistRegistry = null,
-  artistRegistryTruncated = false,
+  artistRegistryUnchecked = null,
 }) {
   if (!submission) {
     return null;
@@ -516,7 +517,7 @@ export function SubmissionDetails({
   const nestedHeadingLevel = Math.min(sectionHeadingLevel + 1, 6);
   const SectionHeadingTag = `h${sectionHeadingLevel}`;
   const metadata = submission.proposedMetadata || submission.targetAlbum || {};
-  const registry = artistRegistry ? { artists: artistRegistry, truncated: Boolean(artistRegistryTruncated) } : null;
+  const registry = artistRegistry ? { artists: artistRegistry, unchecked: new Set(values(artistRegistryUnchecked)) } : null;
 
   return (
     <article className="suggestion-detail">

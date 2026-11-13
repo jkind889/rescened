@@ -195,7 +195,7 @@ async function registryContextFor(suggestion) {
     return await artistRegistryContext(Artist, submissionCreditLists(suggestion));
   } catch (error) {
     console.error("Failed to load artist registry context for moderation", error?.message || error);
-    return { artists: null, truncated: false };
+    return { artists: null, unchecked: [] };
   }
 }
 
@@ -206,7 +206,7 @@ async function moderatorDetail(submission) {
     registryContextFor(suggestion),
   ]);
   const detail = { suggestion, duplicateCandidates: candidates, artistRegistry: registry.artists };
-  if (registry.truncated) detail.artistRegistryTruncated = true;
+  if (registry.unchecked.length) detail.artistRegistryUnchecked = registry.unchecked;
   if (asPlain(submission)?.submissionType === "genre_suggestion") detail.genreReview = await genreReview(submission);
   return detail;
 }
