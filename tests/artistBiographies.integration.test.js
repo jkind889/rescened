@@ -123,6 +123,26 @@ integration("apply writes nothing that changed after review", async () => {
   assert.equal((await record()).identity.state, "not_linked");
 });
 
+integration("an applied provider failure records backoff so the next plan moves on to other artists", async () => {
+  const failing = { musicbrainz: () => F.response({}, { status: 404 }) };
+  const first = await createBiographyPlan({ sources: fakeSources(failing), limit: 5, now: NOW, databaseName: "rescened_biographies" });
+  assert.deepEqual(first.items.map((item) => [item.artistId, item.outcome.status]), [[artist.artistId, "error"]]);
+  const applied = await applyBiographyPlan({ plan: first, sources: fakeSources(failing), now: NOW });
+  assert.deepEqual(applied.map((row) => [row.result, row.status]), [["written", "error"]]);
+  const stored = await record();
+  assert.deepEqual([stored.identity.state, stored.accepted, stored.fetch.consecutiveFailures, stored.fetch.lastErrorCode], ["unchecked", null, 1, "BIOGRAPHY_PROVIDER_HTTP"]);
+  assert.ok(stored.fetch.nextAttemptAt > NOW);
+  assert.equal((await call("GET", `/artists/${artist.artistId}/biography`)).body.biography, null, "a failure publishes nothing");
+  // While in backoff the failing artist is not selected again.
+  const second = await createBiographyPlan({ sources: fakeSources(), limit: 5, now: NOW, databaseName: "rescened_biographies" });
+  assert.deepEqual(second.items, []);
+  // A planned failure that has since recovered is a new answer and needs a new plan.
+  await ArtistBiography.deleteMany({});
+  const recovered = await applyBiographyPlan({ plan: first, sources: fakeSources(), now: NOW });
+  assert.deepEqual(recovered.map((row) => row.result), ["outcome_changed"]);
+  assert.equal(await record(), null);
+});
+
 integration("conflicts and needs-review outcomes are stored but never shown", async () => {
   await publish({ wikidata: () => F.wdEntity({ claims434: [F.p434(F.OTHER_MBID)] }) });
   assert.equal((await record()).identity.state, "conflict");
