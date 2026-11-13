@@ -248,7 +248,7 @@ test("opted-in plans report open corrections and keep every other check for user
   assert.equal(byAlbum.get(unowned.albumId).pendingCorrections, 2);
   assert.equal(byAlbum.has(counted.albumId), false, "a count mismatch is still flagged");
   assert.deepEqual(plan.flagged.map((entry) => [entry.albumId, entry.code]).sort(), [[counted.albumId, "CREDIT_COUNT_MISMATCH"], [deferredAlbum.albumId, "ENRICHMENT_UNRESOLVED"]].sort());
-  assert.deepEqual([plan.counts.linkedAlbumsWithOpenCorrections, plan.counts.openCorrectionsMadeStale], [1, 2]);
+  assert.deepEqual([plan.counts.linkedAlbumsWithPendingCorrections, plan.counts.pendingCorrectionsMadeStale], [1, 2]);
 });
 
 test("apply refuses user-owned updates without a consistent opt-in, before any write", async () => {
@@ -257,7 +257,8 @@ test("apply refuses user-owned updates without a consistent opt-in, before any w
   const noWrites = { startSession: () => assert.fail("must not open a transaction") };
   const apply = (candidate) => applyPlan({ plan: candidate, expectedSha256: candidate.planSha256, confirmTarget: "rescened_test", databaseName: "rescened_test", AlbumCatalog: {}, Artist: {}, mongoose: noWrites });
   const { options: _options, ...withoutOption } = plan;
-  for (const candidate of [sealPlan(withoutOption), sealPlan({ ...plan, counts: { ...plan.counts, userOwnedLinks: 0 } })]) {
+  const unlabeled = sealPlan({ ...plan, albumUpdates: plan.albumUpdates.map(({ creditProvenance: _p, ...update }) => update) });
+  for (const candidate of [sealPlan(withoutOption), sealPlan({ ...plan, counts: { ...plan.counts, userOwnedLinks: 0 } }), unlabeled]) {
     await assert.rejects(apply(candidate), { code: "INVALID_PLAN" });
   }
 });

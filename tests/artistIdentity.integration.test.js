@@ -562,12 +562,15 @@ async function userOwnedEnrichmentTest() {
   ]);
   // An open correction on the manual album will go stale once it is linked.
   const openCorrection = await createCorrection(await AlbumCatalog.findById(manual._id).lean(), { artists: { artistDisplayName: "Alpha (open)", artistCredits: [{ name: "Alpha", role: "main" }] } });
+  // A needs-changes correction is rebased when revised, so it is not counted.
+  const needsChanges = await createCorrection(await AlbumCatalog.findById(community._id).lean(), { artists: { artistDisplayName: "Alpha and Beta", artistCredits: [{ name: "Alpha", role: "main" }, { name: "Beta", role: "featured" }] } });
+  await AlbumSubmission.updateOne({ _id: needsChanges._id }, { $set: { status: "needs_changes" } });
   const reviewOnly = await createPlan({ validations: [source], unresolved, AlbumCatalog, AlbumSubmission, Artist, databaseName: DB_NAME });
   assert.deepEqual([reviewOnly.counts.link, reviewOnly.counts.review], [0, 3], "without the option user-owned credits are only proposed");
-  assert.equal(reviewOnly.counts.openCorrectionsMadeStale, undefined);
+  assert.equal(reviewOnly.counts.pendingCorrectionsMadeStale, undefined);
   const plan = await createPlan({ validations: [source], unresolved, linkUserOwned: true, AlbumCatalog, AlbumSubmission, Artist, databaseName: DB_NAME });
   assert.deepEqual([plan.counts.link, plan.counts.review, plan.counts.userOwnedLinks], [3, 0, 3]);
-  assert.deepEqual([plan.counts.linkedAlbumsWithOpenCorrections, plan.counts.openCorrectionsMadeStale], [1, 1]);
+  assert.deepEqual([plan.counts.linkedAlbumsWithPendingCorrections, plan.counts.pendingCorrectionsMadeStale], [1, 1]);
   assert.equal(plan.albumUpdates.find((update) => update.albumId === manual.albumId).pendingCorrections, 1);
 
   // A moderator approves a correction for one album after planning.
