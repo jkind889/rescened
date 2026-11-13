@@ -6,6 +6,7 @@ const test = require("node:test");
 const {
   EVIDENCE_KIND,
   MAX_REQUEST_IDS,
+  assertEvidenceMatchesPlanIds,
   buildEvidence,
   evidenceExitCode,
   normalizeRequestIds,
@@ -219,4 +220,82 @@ test("the catalog importer rejects enrichment evidence", (context) => {
   const target = publishEvidence(path.join(directory, "evidence.json"), build());
   assert.throws(() => readDatasetFile(target), (error) => error.code === "UNSUPPORTED_ARTIFACT" && /catalog:backfill-artists -- --enrichment/.test(error.message));
   assert.throws(() => validateDatasetObject(build()), { code: "UNSUPPORTED_ARTIFACT" });
+});
+
+test("--from-plan rejects non-plans and plans without noSource release groups", (context) => {
+  const directory = tempDir(context);
+  const file = path.join(directory, "plan.json");
+  fs.writeFileSync(file, JSON.stringify({ kind: "something-else" }));
+  assert.throws(() => readPlanNoSourceIds(file, "0".repeat(64)), { code: "INVALID_PLAN" });
+  const base = { kind: "rescened-artist-identity-backfill", planVersion: "1.0.0", target: { databaseName: "rescened_test" } };
+  const missing = sealPlan(base);
+  fs.writeFileSync(file, JSON.stringify(missing));
+  assert.throws(() => readPlanNoSourceIds(file, missing.planSha256), { code: "INVALID_PLAN" });
+  const empty = sealPlan({ ...base, noSource: [] });
+  fs.writeFileSync(file, JSON.stringify(empty));
+  assert.throws(() => readPlanNoSourceIds(file, empty.planSha256), { code: "INVALID_ID_LIST" });
+});
+
+test("observations cannot postdate generation, and titles and names must be normalized", () => {
+  assert.throws(() => build([{ ...resolved(), observedAt: "2026-11-12T12:00:00.000Z" }]), (error) => /later than generatedAt/.test(error.details.join(" ")));
+  assert.throws(() => build([{ ...unresolved(), observedAt: undefined }]), { code: "INVALID_ENRICHMENT_EVIDENCE" });
+  assert.throws(() => build([{ ...deferred(), observedAt: "yesterday" }]), { code: "INVALID_ENRICHMENT_EVIDENCE" });
+  assert.throws(() => build([{ ...resolved(), title: " Record" }]), { code: "INVALID_ENRICHMENT_EVIDENCE" });
+  assert.throws(() => build([{ ...resolved(), title: "" }]), { code: "INVALID_ENRICHMENT_EVIDENCE" });
+  const decomposed = "Beyonce\u0301";
+  assert.throws(() => build([resolved(RG1, [{ name: decomposed, joinPhrase: "", artistMbid: A1, artistName: "Beyonc\u00e9" }])]), { code: "INVALID_ENRICHMENT_EVIDENCE" });
+  assert.throws(() => build([resolved(RG1, [{ name: "Beyonc\u00e9", joinPhrase: "", artistMbid: A1, artistName: decomposed }])]), { code: "INVALID_ENRICHMENT_EVIDENCE" });
+  assert.throws(() => buildEvidence({ ids: [RG1], results: [null], generatedAt: AT }), { code: "INVALID_ENRICHMENT_EVIDENCE" });
+  assert.throws(() => buildEvidence({ ids: [RG1], results: null, generatedAt: AT }), { code: "INVALID_ENRICHMENT_EVIDENCE" });
+});
+
+test("unsuccessful outcomes carry exactly the details their reason implies", () => {
+  const ok = [
+    unresolved(RG2),
+    unresolved(RG2, { reason: "REDIRECTED", httpStatus: 302 }),
+    unresolved(RG2, { reason: "HTTP_ERROR", httpStatus: 400 }),
+    unresolved(RG2, { reason: "HTTP_ERROR", httpStatus: 501 }),
+    unresolved(RG2, { reason: "ID_MISMATCH", httpStatus: undefined, destinationReleaseGroupMbid: RG1 }),
+    unresolved(RG2, { reason: "INVALID_RESPONSE", httpStatus: undefined }),
+  ];
+  for (const row of ok) assert.equal(build([JSON.parse(JSON.stringify(row))]).counts.unresolved, 1, JSON.stringify(row));
+  const bad = [
+    unresolved(RG2, { httpStatus: undefined }),
+    unresolved(RG2, { httpStatus: 410 }),
+    unresolved(RG2, { reason: "REDIRECTED", httpStatus: 200 }),
+    unresolved(RG2, { reason: "HTTP_ERROR", httpStatus: 404 }),
+    unresolved(RG2, { reason: "HTTP_ERROR", httpStatus: 99 }),
+    unresolved(RG2, { reason: "HTTP_ERROR", httpStatus: undefined }),
+    unresolved(RG2, { reason: "ID_MISMATCH", httpStatus: undefined }),
+    unresolved(RG2, { reason: "INVALID_CREDITS" }),
+  ];
+  for (const row of bad) assert.throws(() => build([JSON.parse(JSON.stringify(row))]), { code: "INVALID_ENRICHMENT_EVIDENCE" }, JSON.stringify(row));
+  for (const lastFailure of ["HTTP_200", "HTTP_404", "TIMEOUT ", ""]) {
+    assert.throws(() => build([{ ...deferred(), lastFailure }]), { code: "INVALID_ENRICHMENT_EVIDENCE" }, lastFailure);
+  }
+  for (const lastFailure of ["TIMEOUT", "NETWORK_ERROR", "HTTP_429", "HTTP_504"]) assert.equal(build([{ ...deferred(), lastFailure }]).counts.deferred, 1);
+});
+
+test("a resealed narrower artifact validates by design, so reviewed evidence is pinned by digest and plan IDs", (context) => {
+  const directory = tempDir(context);
+  const full = buildEvidence({ ids: [RG1, RG2], results: [resolved(), unresolved()], originPlanSha256: "a".repeat(64), generatedAt: "2026-11-12T11:00:00.000Z" });
+  const narrower = buildEvidence({ ids: [RG1], results: [resolved()], originPlanSha256: "a".repeat(64), generatedAt: "2026-11-12T11:00:00.000Z" });
+  assert.equal(validateEvidence(narrower), narrower);
+  const file = publishEvidence(path.join(directory, "narrower.json"), narrower);
+  assert.throws(() => readEvidenceFile(file, full.evidenceSha256), { code: "ENRICHMENT_CHECKSUM_MISMATCH" });
+  assert.equal(readEvidenceFile(file, narrower.evidenceSha256.toUpperCase()).evidence.evidenceSha256, narrower.evidenceSha256);
+  assert.equal(assertEvidenceMatchesPlanIds(full, [RG2, RG1, RG1], "a".repeat(64)), true);
+  assert.throws(() => assertEvidenceMatchesPlanIds(narrower, [RG1, RG2], "a".repeat(64)), { code: "ENRICHMENT_PLAN_MISMATCH" });
+  assert.throws(() => assertEvidenceMatchesPlanIds(full, [RG1, RG2], "b".repeat(64)), { code: "ENRICHMENT_PLAN_MISMATCH" });
+});
+
+test("publication syncs the file and reports filesystems without hard links clearly", (context) => {
+  const directory = tempDir(context);
+  const synced = [];
+  const tracking = { ...fs, fsyncSync(descriptor) { synced.push(descriptor); return fs.fsyncSync(descriptor); } };
+  publishEvidence(path.join(directory, "synced.json"), build(), { fileSystem: tracking });
+  assert.ok(synced.length >= 1);
+  const noLinks = { ...fs, linkSync() { throw Object.assign(new Error("not supported"), { code: "ENOTSUP" }); } };
+  assert.throws(() => publishEvidence(path.join(directory, "nolink.json"), build(), { fileSystem: noLinks }), { code: "PUBLISH_UNSUPPORTED" });
+  assert.deepEqual(fs.readdirSync(directory), ["synced.json"]);
 });
