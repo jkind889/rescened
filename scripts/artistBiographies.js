@@ -116,11 +116,15 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     // every row, so committed rows are recorded even if a later row fails.
     const reportPath = writeNewJson(options.report, { status: "running", mode: options.mode, startedAt: now.toISOString() });
     const operations = { applyBiographyPlan, refreshBiographies, ...dependencies.operations };
-    const report = { status: "running", mode: options.mode, target: options.confirmTarget, planSha256: plan?.planSha256 || null, startedAt: now.toISOString(), databaseCommitted: false, uncertainWrites: 0, counts: {}, results: [] };
+    const report = { status: "running", mode: options.mode, target: options.confirmTarget, planSha256: plan?.planSha256 || null, startedAt: now.toISOString(), databaseCommitted: false, uncertainWrites: 0, counts: {}, statusCounts: {}, results: [] };
     const record = (rows) => {
       report.results = [...rows];
       report.counts = {};
       for (const row of rows) report.counts[row.result] = (report.counts[row.result] || 0) + 1;
+      // Outcome statuses, so "written" backoff records for provider errors are
+      // told apart from written biographies.
+      report.statusCounts = {};
+      for (const row of rows) if (row.status) report.statusCounts[row.status] = (report.statusCounts[row.status] || 0) + 1;
       report.databaseCommitted = rows.some((row) => row.result === "written");
       report.uncertainWrites = rows.filter((row) => row.result === "uncertain").length;
     };
@@ -157,7 +161,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
       output.log(JSON.stringify({ reportWriteFailed: true, report }, null, 2));
       throw Object.assign(new BiographyOperationError(`Writes finished but the report could not be saved: ${writeError.message}`, "REPORT_WRITE_FAILED"), { databaseCommitted: report.databaseCommitted });
     }
-    output.log(JSON.stringify({ mode: options.mode, counts: report.counts, databaseCommitted: report.databaseCommitted, report: reportPath }, null, 2));
+    output.log(JSON.stringify({ mode: options.mode, counts: report.counts, statusCounts: report.statusCounts, databaseCommitted: report.databaseCommitted, report: reportPath }, null, 2));
     return Object.keys(report.counts).some((key) => !["written", "not_applicable"].includes(key)) ? 2 : 0;
   } finally {
     if (connected) await db.disconnect();

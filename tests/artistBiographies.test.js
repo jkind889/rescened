@@ -468,6 +468,18 @@ test("apply refuses an edited plan or a wrong target before writing anything", a
   assert.deepEqual(events.map(([event]) => event), ["connect", "indexes", "disconnect"]);
   assert.equal(JSON.parse(fs.readFileSync(path.join(directory, "r4.json"), "utf8")).status, "completed");
   await assert.rejects(run(["--apply", "--plan", planPath, "--plan-sha256", plan.planSha256, "--confirm-target", "rescened_dev", "--report", path.join(directory, "r4.json")], fakeDb("rescened_dev")), /EEXIST/, "reports are never overwritten");
+
+  // A recorded provider failure is written, but the report separates it from published text.
+  const rows = [
+    { artistId: "a", result: "written", status: "accepted" },
+    { artistId: "b", result: "written", status: "error", errorCode: "BIOGRAPHY_PROVIDER_HTTP" },
+  ];
+  const withRows = (argv) => main(argv, { mongoose: fakeDb("rescened_dev"), mongoUri: "mongodb://fixture.invalid/x", BiographyModel: model, sources: {}, output: { log: () => {} }, operations: { applyBiographyPlan: async () => rows } });
+  await withRows(["--apply", "--plan", planPath, "--plan-sha256", plan.planSha256, "--confirm-target", "rescened_dev", "--report", path.join(directory, "r5.json")]);
+  const report = JSON.parse(fs.readFileSync(path.join(directory, "r5.json"), "utf8"));
+  assert.deepEqual(report.counts, { written: 2 });
+  assert.deepEqual(report.statusCounts, { accepted: 1, error: 1 });
+  assert.equal(report.results[1].errorCode, "BIOGRAPHY_PROVIDER_HTTP");
 });
 
 

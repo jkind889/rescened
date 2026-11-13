@@ -128,7 +128,7 @@ integration("an applied provider failure records backoff so the next plan moves 
   const first = await createBiographyPlan({ sources: fakeSources(failing), limit: 5, now: NOW, databaseName: "rescened_biographies" });
   assert.deepEqual(first.items.map((item) => [item.artistId, item.outcome.status]), [[artist.artistId, "error"]]);
   const applied = await applyBiographyPlan({ plan: first, sources: fakeSources(failing), now: NOW });
-  assert.deepEqual(applied.map((row) => [row.result, row.status]), [["written", "error"]]);
+  assert.deepEqual(applied.map((row) => [row.result, row.status, row.errorCode]), [["written", "error", "BIOGRAPHY_PROVIDER_HTTP"]]);
   const stored = await record();
   assert.deepEqual([stored.identity.state, stored.accepted, stored.fetch.consecutiveFailures, stored.fetch.lastErrorCode], ["unchecked", null, 1, "BIOGRAPHY_PROVIDER_HTTP"]);
   assert.ok(stored.fetch.nextAttemptAt > NOW);
