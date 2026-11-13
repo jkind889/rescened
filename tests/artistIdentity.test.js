@@ -536,7 +536,27 @@ test("apply refuses a re-sealed plan that changes more than artist identity, bef
   await assert.rejects(attempt((p) => { p.albumUpdates[0].afterCredits[0].role = "featured"; }), invalid);
   await assert.rejects(attempt((p) => { p.albumUpdates[0].afterCredits[0].artistId = "00000000-0000-4000-8000-000000000000"; }), invalid);
   await assert.rejects(attempt((p) => { p.albumUpdates[0].afterCredits.push(clone(p.albumUpdates[0].afterCredits[0])); }), invalid);
+  // Re-pointing a credit that already carries another identity to a reused registry pair.
+  const otherId = "22222222-2222-4222-8222-222222222222";
+  const otherMbid = "b84ee12a-09ef-421b-82de-0441a926375b";
+  await assert.rejects(attempt((p) => {
+    const update = p.albumUpdates[0];
+    update.beforeCredits[0] = { ...update.beforeCredits[0], artistId: "33333333-3333-4333-8333-333333333333", artistMbid: MBID_B };
+    update.afterCredits[0] = { ...update.beforeCredits[0], artistId: otherId, artistMbid: otherMbid };
+    p.reusedArtists.push({ artistId: otherId, artistMbid: otherMbid });
+  }), invalid);
+  await assert.rejects(attempt((p) => {
+    const update = p.albumUpdates[0];
+    update.beforeCredits[0] = { ...update.beforeCredits[0], artistMbid: MBID_B };
+  }), invalid, "a prior MBID other than the planned one is never replaced");
   assert.deepEqual(touched, [], "a refused plan touches no model");
+
+  // A credit that already holds the planned MBID is a legitimate link: the guard lets it through to the database step.
+  await assert.rejects(attempt((p) => {
+    const update = p.albumUpdates[0];
+    update.beforeCredits[0] = { ...update.beforeCredits[0], artistMbid: update.afterCredits[0].artistMbid };
+  }), (error) => error.code !== "INVALID_PLAN");
+  assert.ok(touched.length > 0, "the planned-MBID case reaches the database step");
 });
 
 test("the checked-in seed dataset indexes cleanly as a backfill source", () => {

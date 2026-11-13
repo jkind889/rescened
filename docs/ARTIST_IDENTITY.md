@@ -116,7 +116,7 @@ Keep plans and reports outside the repository, for example in `~/rescened-ops/ar
      --confirm-target <database> --report <new-report.json>
    ```
 
-   Apply refuses to run if the checksum differs, the plan was edited, or the connected database, the plan target, and `--confirm-target` do not all match. It also refuses, before any write, a plan whose album updates change anything besides adding an `artistId`/`artistMbid` pair that the plan registers or reuses, even if the edited plan was re-sealed with a valid checksum.
+   Apply refuses to run if the checksum differs, the plan was edited, or the connected database, the plan target, and `--confirm-target` do not all match. It also refuses, before any write, a plan whose album updates change anything besides adding an `artistId`/`artistMbid` pair that the plan registers or reuses, or that would replace an identity a credit already carries, even if the edited plan was re-sealed with a valid checksum.
 
 ### Apply semantics
 
