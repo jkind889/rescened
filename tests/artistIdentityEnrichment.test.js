@@ -531,3 +531,17 @@ test("a short pause still in force after a published run is recorded for the rer
   assert.equal(later.evidence.counts.resolved, 2);
   assert.equal(later.notBefore, undefined);
 });
+
+test("an interruption during the last row publishes nothing", async (context) => {
+  const directory = tempDir(context);
+  const time = clock();
+  const { fetchFn } = server(time, { [RG1]: releaseGroup(RG1) });
+  const controller = new AbortController();
+  await assert.rejects(runReleaseGroupEnrichment({
+    ...runOptions(time, directory, fetchFn), ids: [RG1], signal: controller.signal,
+    onProgress: () => controller.abort(),
+  }), (error) => error.code === "INTERRUPTED" && error.progress.completed === 1);
+  assert.equal(fs.existsSync(path.join(directory, "evidence.json")), false);
+  assert.equal(fs.existsSync(path.join(directory, "cache", LOCK_FILE)), false);
+  assert.ok(await readCacheEntry(path.join(directory, "cache"), RG1, time.nowMs), "the completed lookup stays cached for the rerun");
+});
