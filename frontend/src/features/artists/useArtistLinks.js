@@ -19,8 +19,17 @@ async function loadArtistLinks(ids) {
   return Array.isArray(body?.artistIds) ? body.artistIds : [];
 }
 
-// One store per page load, shared by every credit on screen.
-export const artistLinkStore = createArtistLinkStore({ load: loadArtistLinks });
+const UNAVAILABLE_KEY = "rescened.artistPagesUnavailableUntil";
+
+// One store per page load, shared by every credit on screen. "Artist pages are
+// off" is remembered for the tab so each page load does not ask again.
+export const artistLinkStore = createArtistLinkStore({
+  load: loadArtistLinks,
+  persisted: {
+    read: () => window.sessionStorage.getItem(UNAVAILABLE_KEY),
+    write: (until) => window.sessionStorage.setItem(UNAVAILABLE_KEY, String(until)),
+  },
+});
 const store = artistLinkStore;
 
 // Returns isLinked(artistId) for the credits of `albums` (one album or a list).

@@ -7,7 +7,10 @@
 // own: a failed batch is skipped for a cool-down and asked again only when a
 // page renders those credits after the cool-down. "Artist pages are off" is
 // also a cool-down, not permanent, so a proxy's passing 503 cannot disable
-// links for the rest of a long session.
+// links for the rest of a long session. That cool-down can be persisted (the
+// app uses sessionStorage) so, with artist pages off, a tab asks at most once
+// per cool-down instead of once per page load. Other artist requests, such as
+// the search page's artist matches, consult and update the same state.
 
 const ARTIST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -37,6 +40,7 @@ export function createArtistLinkStore({
   delay = LINK_BATCH_DELAY_MS,
   cooldown = LINK_FAILURE_COOLDOWN_MS,
   unavailableCooldown = LINK_UNAVAILABLE_COOLDOWN_MS,
+  persisted = null,
 } = {}) {
   const linked = new Set();
   const absent = new Set();
@@ -44,8 +48,25 @@ export function createArtistLinkStore({
   const inFlight = new Set();
   const coolingDown = new Map();
   const listeners = new Set();
-  let unavailableUntil = 0;
+  let unavailableUntil = readPersisted();
   let timer = null;
+
+  // A stored value is trusted only within one cool-down from now, so a bad or
+  // tampered entry cannot disable links for longer than a live answer would.
+  function readPersisted() {
+    try {
+      const until = Number(persisted?.read?.());
+      return Number.isFinite(until) && until > now() && until <= now() + unavailableCooldown ? until : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  function markUnavailable() {
+    unavailableUntil = now() + unavailableCooldown;
+    queued.clear();
+    try { persisted?.write?.(unavailableUntil); } catch { /* storage may be blocked */ }
+  }
   let version = 0;
 
   function notify() {
@@ -69,7 +90,7 @@ export function createArtistLinkStore({
       const found = new Set((await load(batch)).map(normalizeCreditArtistId).filter(Boolean));
       for (const id of batch) (found.has(id) ? linked : absent).add(id);
     } catch (error) {
-      if (linksUnavailable(error)) unavailableUntil = now() + unavailableCooldown;
+      if (linksUnavailable(error)) markUnavailable();
       else batch.forEach((id) => coolingDown.set(id, now() + cooldown));
     } finally {
       batch.forEach((id) => inFlight.delete(id));
@@ -106,6 +127,9 @@ export function createArtistLinkStore({
       if (changed) notify();
     },
     isLinked: (id) => linked.has(normalizeCreditArtistId(id)),
+    // Shared "artist pages are off" state for other artist requests.
+    isUnavailable: unavailable,
+    markUnavailable,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);

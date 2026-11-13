@@ -6,6 +6,8 @@ import ExternalAlbumCard from "../Components/ExternalAlbumCard";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import Cover from "../Components/Cover";
 import { artistMatchSummary } from "../features/artists/artists";
+import { linksUnavailable } from "../features/artists/artistLinkStore";
+import { artistLinkStore } from "../features/artists/useArtistLinks";
 import ArtistCredits from "../features/artists/ArtistCredits";
 import { CardLink, CardTitleLink } from "../Components/CardLink";
 import "../features/artists/ArtistPage.css";
@@ -168,10 +170,16 @@ export function SearchResults() {
   // artist pages being disabled, just leaves the section out.
   useEffect(() => {
     const controller = new AbortController();
-    if (!query || page !== 1 || genre) return undefined;
+    // Artist pages known to be off for this tab: no request, no matches shown.
+    if (!query || page !== 1 || genre || artistLinkStore.isUnavailable()) return undefined;
     const key = query;
     fetch(`${API_BASE_URL}/artists/search?${new URLSearchParams({ q: query, limit: "6" })}`, { signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : { results: [] }))
+      .then(async (response) => {
+        if (response.ok) return response.json();
+        const body = await response.json().catch(() => null);
+        if (linksUnavailable({ status: response.status, code: body?.code })) artistLinkStore.markUnavailable();
+        return { results: [] };
+      })
       .then((data) => setArtistMatches({ key, results: Array.isArray(data?.results) ? data.results : [] }))
       .catch((fetchError) => {
         if (fetchError.name !== "AbortError") setArtistMatches({ key, results: [] });

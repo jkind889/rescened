@@ -223,6 +223,51 @@ test("the link store stops asking while the API says artist pages are off", asyn
   assert.equal(calls, 2, "links ask again after the cool-down");
 });
 
+test("artist pages being off is remembered across page loads, bounded, and shared with artist search", async () => {
+  const { createArtistLinkStore } = await storeModule;
+  const clock = fakeClock();
+  const storage = new Map();
+  const persisted = { read: () => storage.get("until"), write: (until) => storage.set("until", until) };
+  let calls = 0;
+  const off = async () => { calls += 1; throw Object.assign(new Error("off"), { status: 503, code: "ARTIST_PAGES_DISABLED" }); };
+  const first = createArtistLinkStore({ load: off, now: clock.now, schedule: clock.schedule, persisted });
+  first.request([A]);
+  await clock.run();
+  assert.equal(calls, 1);
+  assert.equal(storage.get("until"), clock.now() + 5 * 60_000);
+
+  // A new page load in the same tab starts unavailable and asks nothing.
+  const second = createArtistLinkStore({ load: off, now: clock.now, schedule: clock.schedule, persisted });
+  assert.equal(second.isUnavailable(), true);
+  second.request([B]);
+  await clock.run();
+  assert.equal(calls, 1, "no request on the next page load during the cool-down");
+  clock.advance(5 * 60_000 + 1);
+  const third = createArtistLinkStore({ load: off, now: clock.now, schedule: clock.schedule, persisted });
+  assert.equal(third.isUnavailable(), false, "the stored stop expires with the cool-down");
+
+  // A tampered far-future or junk value is ignored, and blocked storage never throws.
+  storage.set("until", clock.now() + 365 * 24 * 3600 * 1000);
+  assert.equal(createArtistLinkStore({ load: off, now: clock.now, schedule: clock.schedule, persisted }).isUnavailable(), false);
+  storage.set("until", "junk");
+  assert.equal(createArtistLinkStore({ load: off, now: clock.now, schedule: clock.schedule, persisted }).isUnavailable(), false);
+  const blocked = { read: () => { throw new Error("blocked"); }, write: () => { throw new Error("blocked"); } };
+  const isolated = createArtistLinkStore({ load: off, now: clock.now, schedule: clock.schedule, persisted: blocked });
+  assert.equal(isolated.isUnavailable(), false);
+
+  // Another artist request (search) can report the stop; queued checks are dropped.
+  const shared = createArtistLinkStore({ load: async (ids) => { calls += 1; return ids; }, now: clock.now, schedule: clock.schedule, persisted });
+  shared.request([C]);
+  shared.markUnavailable();
+  await clock.run();
+  assert.equal(shared.isLinked(C), false);
+  assert.equal(shared.isUnavailable(), true);
+
+  const page = fs.readFileSync(path.join(__dirname, "../frontend/src/Pages/SearchResults.jsx"), "utf8");
+  assert.match(page, /artistLinkStore\.isUnavailable\(\)\) return undefined/, "search skips artist matches while pages are off");
+  assert.match(page, /artistLinkStore\.markUnavailable\(\)/);
+});
+
 // Anchors cannot nest. Source-level guard: no <Link> in the app may contain an
 // ArtistCredits, and provider candidates never get artist links.
 test("artist credits are never rendered inside another link, and external candidates stay plain", () => {
