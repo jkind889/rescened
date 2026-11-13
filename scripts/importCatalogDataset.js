@@ -255,7 +255,8 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     if (db.connection?.readyState !== 1) {
       const mongoUri = dependencies.mongoUri || process.env.MONGO_URI;
       if (!mongoUri) throw new CatalogImportError("MONGO_URI is required", "MISSING_MONGO_URI");
-      await db.connect(mongoUri);
+      // Connecting must not build collections or indexes: a dry run stays read-only.
+      await db.connect(mongoUri, { autoCreate: false, autoIndex: false });
       connectedHere = true;
     }
 
@@ -269,7 +270,9 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     staged.push(await artifactIO.stage(targets.quarantine, quarantine));
 
     if (options.apply) {
-      // Build the registry's unique MusicBrainz index before inserting artists.
+      // Apply only: build the catalog and registry indexes (including the unique
+      // MusicBrainz index) before inserting, since connecting does not.
+      if (typeof Model.createIndexes === "function") await Model.createIndexes();
       if (typeof ArtistModel.createIndexes === "function") await ArtistModel.createIndexes();
       await applyImport({ plan, AlbumCatalog: Model, Artist: ArtistModel, mongoose: db });
       databaseApplyCompleted = true;

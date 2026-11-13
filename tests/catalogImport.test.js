@@ -712,3 +712,42 @@ test("fatal validation reports retain DatasetValidationError quarantine details"
   assert.deepEqual(payload.quarantine, knownQuarantine);
   assert.deepEqual(payload.error.quarantined, knownQuarantine);
 });
+
+test("connecting for an import never builds collections or indexes; only apply builds them", async (context) => {
+  async function run(extraArgs) {
+    const directory = temporaryDirectory(context, "rescened-connect-options-");
+    const calls = { connect: [], indexes: [] };
+    const Model = fakeModel([]);
+    Model.createIndexes = async () => { calls.indexes.push("album"); };
+    const Artist = fakeArtistModel();
+    Artist.createIndexes = async () => { calls.indexes.push("artist"); };
+    const db = {
+      ...transactionDatabase(),
+      connection: { readyState: 0 },
+      connect: async (uri, options) => { calls.connect.push({ uri, options }); },
+      disconnect: async () => {},
+    };
+    const exitCode = await importScript.main(
+      ["--input", path.join(directory, "seed.json"), ...extraArgs],
+      {
+        output: outputCapture().output,
+        readDatasetFile: async () => validation(),
+        AlbumCatalog: Model,
+        Artist,
+        mongoose: db,
+        mongoUri: "mongodb://example.invalid/rescened_test",
+      },
+    );
+    return { exitCode, calls };
+  }
+
+  const dryRun = await run([]);
+  assert.equal(dryRun.exitCode, 0);
+  assert.deepEqual(dryRun.calls.connect[0].options, { autoCreate: false, autoIndex: false });
+  assert.deepEqual(dryRun.calls.indexes, [], "a dry run builds no index");
+
+  const apply = await run(["--apply"]);
+  assert.equal(apply.exitCode, 0);
+  assert.deepEqual(apply.calls.connect[0].options, { autoCreate: false, autoIndex: false });
+  assert.deepEqual(apply.calls.indexes.sort(), ["album", "artist"]);
+});
