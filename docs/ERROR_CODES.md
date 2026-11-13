@@ -195,7 +195,7 @@ See [artist biographies](ARTIST_BIOGRAPHIES.md).
 | `BIOGRAPHY_NOT_FOUND` | `404` | No biography record exists for that artist (moderation routes). |
 | `INVALID_BIOGRAPHY_COMMAND` | `400`/`404` | A moderation command or queue request has an unknown command (`404`), unsupported field, missing `expectedRevision` or `reason`, invalid corrected text, or bad `state`/`limit`. |
 | `BIOGRAPHY_REVISION_CONFLICT` | `409` | The record changed since `expectedRevision`; reload and retry. |
-| `BIOGRAPHY_STATE_CONFLICT` | `409` | The command does not apply to the record's current state, for example confirming without a reviewable candidate. |
+| `BIOGRAPHY_STATE_CONFLICT` | `409` | The command does not apply to the record's current state, for example confirming without a reviewable candidate, or accepting or dismissing when no changed text is staged. |
 
 The operator command (`npm run artists:biographies`) reports provider failures with `BIOGRAPHY_PROVIDER_TIMEOUT`, `BIOGRAPHY_PROVIDER_NETWORK`, `BIOGRAPHY_PROVIDER_HTTP`, `BIOGRAPHY_PROVIDER_THROTTLED`, `BIOGRAPHY_INVALID_RESPONSE`, and `BIOGRAPHY_REVISION_UNAVAILABLE`, and refuses to run with `INVALID_ARGUMENTS`, `INVALID_PLAN`, `PLAN_CHECKSUM_MISMATCH`, `TARGET_MISMATCH`, or `MISSING_MONGO_URI`. Apply and refresh results per artist are `written`, `stale`, `record_changed`, `artist_changed`, `outcome_changed`, or `not_applicable`.
 

@@ -53,7 +53,9 @@ The 250 cap follows the product request. A complete sentence or two usually fits
 | --- | --- | --- |
 | `identity` | resolver | State, reasons, QID, evidence, check time, next identity check |
 | `accepted` | resolver or moderator confirmation | The published excerpt with article title, page ID, revision ID and timestamp, URLs, QID, license, hash |
-| `candidate` | resolver | An excerpt waiting for review |
+| `candidate` | resolver | An excerpt waiting for review (a new or changed match) |
+| `pendingRevision` | refresh | Changed text from a newer revision of the published page, held for a moderator; never shown to readers |
+| `dismissedRevision` | moderator | The staged text a moderator declined (revision, text hash, reason, who, when), so refresh does not stage it again |
 | `contentCheckedAt`, `nextContentCheckAt` | resolver | Revision checks of the accepted article |
 | `fetch` | resolver | Last attempt, last error code and provider, consecutive failures, next attempt |
 | `manual` | moderator | Corrected text and the article revision it is based on |
@@ -64,6 +66,7 @@ Every write matches the record's `revision` and advances it. The resolver never 
 
 What is shown: nothing when suppressed or the match was rejected; otherwise the accepted excerpt (or the correction) only while identity is `verified` for the same item.
 
+- Refresh never publishes changed text. When a newer revision of the published page has a different excerpt, refresh stores it as `pendingRevision` and the accepted excerpt (or the correction) keeps showing with its original source revision. If the newer revision's excerpt is identical, only the source revision is moved forward, which changes nothing a reader sees. If Wikipedia later reverts to the published text, the staged revision is cleared; if a moderator dismissed that exact text, it is not staged again under a later revision. A different new text replaces the staged one.
 - A transient error keeps the accepted text and schedules a retry: 1 hour, doubling, at most 7 days.
 - A conflict, missing article, or unusable lead found later hides the text until resolved; the accepted copy stays for audit.
 - A full resolution that finds a different item or page never switches automatically: it goes to review with `MATCH_CHANGED` and stops showing the old text.
@@ -80,7 +83,7 @@ Like the other operator commands, it takes `MONGO_URI` from the environment or t
 
 - **Plan** (default) reads the database without writing and connects with automatic collection and index creation off. It resolves at most `--limit` artists (default 25, maximum 200): those never checked or whose identity check is due and not in backoff, or the listed `--artist` IDs. It writes a sealed plan (`planSha256`) that never overwrites a file. Exit code 2 means something needs review or conflicts.
 - **Apply** verifies the seal and that `--confirm-target` equals the plan's database before connecting, then that the connected database matches before building the biography indexes. It re-resolves only the planned artists and writes an outcome only if the record revision is unchanged and the new outcome has the same status, QID, revision, and text hash as reviewed. Otherwise it reports `record_changed` or `outcome_changed`; make a new plan. A planned provider `error` is applied only if the provider still fails: it records the fetch failure and backoff (1 hour, doubling to at most 7 days) and changes no text, identity, or moderation state, so later plans skip that artist until its backoff ends instead of selecting it again. Such a row is reported as `written` with `status: "error"` and its `errorCode`; the report's `statusCounts` separates these backoff records from written biographies. The report path is reserved before any write.
-- **Refresh** applies the same target checks, then processes verified records whose content check (weekly) or identity check (every 30 days) is due and not in backoff. Content checks read the page by its stable ID and fetch a pinned revision only when it changed. Refresh can update the text of the same item and page, or hide it on conflict; it never accepts a new match. If the stored page ID now leads to a different page (for example a redirect after a merge), the record goes to review with `MATCH_CHANGED` and `PAGE_CHANGED` and the old text stops showing.
+- **Refresh** applies the same target checks, then processes verified records whose content check (weekly) or identity check (every 30 days) is due and not in backoff. Content checks read the page by its stable ID and fetch a pinned revision only when it changed. Refresh never publishes changed text and never accepts a new match: changed text from the same item and page is staged for a moderator (see [Storage](#storage)), and a conflict hides the text. This applies to both the weekly content check and the monthly identity revalidation. Report rows carry the refresh `action` (for example `content:revision_staged`), summarized in `actionCounts`. Only a reviewed `--apply` plan or a moderator can change published text. If the stored page ID now leads to a different page (for example a redirect after a merge), the record goes to review with `MATCH_CHANGED` and `PAGE_CHANGED` and the old text stops showing.
 
 Provider etiquette: an identifying user agent with contact; serial requests (1.1 s between MusicBrainz request starts, 1 s between Wikimedia ones); `maxlag=5` on Wikimedia requests; an 8 s timeout covering the body; at most 2 MiB of decoded body; at most two retries for timeouts, network errors, 408/425/429/5xx, and `maxlag`, honoring `Retry-After` up to 30 s and otherwise stopping with `BIOGRAPHY_PROVIDER_THROTTLED`. Permanent errors are not retried.
 
@@ -90,16 +93,18 @@ The intervals and cap are defaults in `DEFAULT_SETTINGS` (`lib/artists/biographi
 
 Moderators (Clerk session in `MODERATOR_USER_IDS`) use `/moderation/artist-biographies`. Reads need `ARTIST_BIOGRAPHIES_ENABLED`; commands also need `COMMUNITY_MODERATION_ENABLED` and use the moderation mutation rate limit.
 
-- `GET /?state=needs_review|conflict|verified|unsuitable|no_article|not_linked|unchecked&limit=` lists records.
+- `GET /?state=needs_review|revision_pending|conflict|verified|unsuitable|no_article|not_linked|unchecked&limit=` lists records. `revision_pending` lists biographies with staged changed text, whatever their identity state; each row has a `pendingRevision` flag.
 - `GET /:artistId` returns the record with evidence, history, and what the page would show.
 - `POST /:artistId/<command>` with `{ expectedRevision, ... }`:
   - `suppress` (`reason`) and `unsuppress`;
   - `reject-match` (`reason`) hides the item until `clear-verdict`; refresh keeps it hidden;
   - `confirm-match` publishes a reviewable candidate and remembers the item;
   - `clear-verdict` removes the verdict; clearing a confirmation returns the excerpt to review immediately;
-  - `correct-text` (`text`, 20–250 plain characters, optional `note`) shows corrected wording, labeled edited, with the source revision it was based on; `clear-correction` removes it.
+  - `correct-text` (`text`, 20–250 plain characters, optional `note`) shows corrected wording, labeled edited, with the source revision it was based on; `clear-correction` removes it;
+  - `accept-revision` publishes the staged `pendingRevision` text with its own revision and license attribution, recorded as accepted by that moderator. It needs a verified identity for the same item and page. Suppression, verdicts, and a correction stay as they are (the correction keeps its own source revision until cleared). Because `expectedRevision` must match, a refresh that staged newer text after the moderator loaded the record makes the accept fail with a conflict instead of publishing text they did not see;
+  - `dismiss-revision` (`reason`) keeps the current text, clears the staged revision, and remembers that text so it is not staged again.
 
-A stale `expectedRevision` returns `409 BIOGRAPHY_REVISION_CONFLICT`. The artist page shows a collapsed "Biography moderation" panel to moderators.
+A stale `expectedRevision` returns `409 BIOGRAPHY_REVISION_CONFLICT`. The artist page shows a collapsed "Biography moderation" panel to moderators. A staged revision appears there under the published excerpt, with "Publish new text" and "Keep current text" (which needs a reason).
 
 ## Rollout
 

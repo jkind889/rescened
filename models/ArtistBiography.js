@@ -5,7 +5,11 @@ const { ARTIST_ID_PATTERN } = require("../lib/artists/identity");
 // now). Separate parts, each written only by its owner:
 //   identity   - the resolver's MusicBrainz -> Wikidata -> Wikipedia verdict
 //   accepted   - the published excerpt and its exact source revision
-//   candidate  - an excerpt waiting for moderator review
+//   candidate  - an excerpt waiting for moderator review (a new or changed match)
+//   pendingRevision - changed text from a newer revision of the published
+//                page, staged by refresh; published only by a moderator
+//   dismissedRevision - the staged text a moderator declined, so refresh
+//                does not stage the same text again
 //   fetch      - operational state for the last provider attempt
 //   manual     - a moderator's corrected text (never touched by refresh)
 //   moderation - suppression and match verdicts (never touched by refresh)
@@ -52,6 +56,17 @@ const artistBiographySchema = new mongoose.Schema({
   },
   accepted: { type: excerptSchema, default: null },
   candidate: { type: excerptSchema, default: null },
+  pendingRevision: { type: excerptSchema, default: null },
+  dismissedRevision: {
+    type: new mongoose.Schema({
+      revisionId: { type: Number, required: true },
+      textHash: { type: String, required: true },
+      reason: { type: String, default: "" },
+      dismissedBy: { type: String, required: true },
+      dismissedAt: { type: Date, required: true },
+    }, { _id: false }),
+    default: null,
+  },
   contentCheckedAt: { type: Date, default: null },
   nextContentCheckAt: { type: Date, default: null },
   fetch: {

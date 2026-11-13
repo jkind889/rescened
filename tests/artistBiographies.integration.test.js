@@ -171,6 +171,81 @@ integration("refresh keeps text on transient errors, follows new revisions, and 
   assert.equal((await call("GET", `/artists/${artist.artistId}/biography`)).body.biography, null);
 });
 
+integration("refresh stages changed Wikipedia text for review; readers keep the reviewed excerpt until a moderator decides", async () => {
+  await publish();
+  const path = `/moderation/artist-biographies/${artist.artistId}`;
+  const original = (await call("GET", `/artists/${artist.artistId}/biography`)).body.biography;
+  const at = (days) => new Date(NOW.getTime() + days * 24 * 3600 * 1000);
+  const revision = (revid, html) => ({ page: () => F.wpPage({ lastrevid: revid }), parse: (url) => F.wpParse({ revid: Number(url.searchParams.get("oldid")), html }) });
+  const vandal = F.LEAD_HTML.replace("are an English", "are a terrible");
+
+  // A moderator correction and a suppression are both in place before refresh.
+  let detail = (await call("GET", path, { user: "user_mod" })).body.biography;
+  const corrected = await call("POST", `${path}/correct-text`, { user: "user_mod", body: { expectedRevision: detail.revision, text: "Fixture Band are an English rock band from Abingdon.", note: "Shorter" } });
+  assert.equal(corrected.status, 200, JSON.stringify(corrected.body));
+
+  const staged = await refreshBiographies({ sources: fakeSources(revision(F.REVISION + 1, vandal)), now: at(8) });
+  assert.deepEqual(staged.map((row) => [row.mode, row.status, row.result, row.action]), [["content", "accepted", "written", "content:revision_staged"]]);
+  let stored = await record();
+  assert.equal(stored.accepted.article.revisionId, F.REVISION, "the reviewed excerpt stays published");
+  assert.equal(stored.pendingRevision.article.revisionId, F.REVISION + 1);
+  assert.match(stored.pendingRevision.text, /terrible/);
+  let shown = (await call("GET", `/artists/${artist.artistId}/biography`)).body.biography;
+  assert.deepEqual([shown.text, shown.edited, shown.article.revisionId], ["Fixture Band are an English rock band from Abingdon.", true, F.REVISION], "readers never see unreviewed text");
+  assert.equal(JSON.stringify(shown).includes("terrible"), false);
+
+  // Moderators find it in the queue and see both texts.
+  const queue = (await call("GET", "/moderation/artist-biographies?state=revision_pending", { user: "user_mod" })).body.biographies;
+  assert.deepEqual(queue.map((row) => [row.artistId, row.pendingRevision, row.shown]), [[artist.artistId, true, true]]);
+  detail = (await call("GET", path, { user: "user_mod" })).body.biography;
+  assert.equal(detail.pendingRevision.article.revisionId, F.REVISION + 1);
+
+  // Dismissing needs a reason; the same text is not staged again later.
+  assert.equal((await call("POST", `${path}/dismiss-revision`, { user: "user_mod", body: { expectedRevision: detail.revision } })).status, 400);
+  const dismissed = await call("POST", `${path}/dismiss-revision`, { user: "user_mod", body: { expectedRevision: detail.revision, reason: "Vandalism" } });
+  assert.equal(dismissed.status, 200, JSON.stringify(dismissed.body));
+  assert.deepEqual([dismissed.body.biography.pendingRevision, dismissed.body.biography.dismissedRevision.reason], [null, "Vandalism"]);
+  const again = await refreshBiographies({ sources: fakeSources(revision(F.REVISION + 2, vandal)), now: at(16) });
+  assert.deepEqual(again.map((row) => row.action), [null]);
+  assert.equal((await record()).pendingRevision, null, "dismissed text stays dismissed under a newer revision");
+
+  // A genuinely new lead is staged; a stale accept is refused; a current accept publishes it.
+  const better = F.LEAD_HTML.replace("are an English", "are a celebrated English");
+  await refreshBiographies({ sources: fakeSources(revision(F.REVISION + 3, better)), now: at(24) });
+  detail = (await call("GET", path, { user: "user_mod" })).body.biography;
+  assert.equal(detail.pendingRevision.article.revisionId, F.REVISION + 3);
+  const stale = await call("POST", `${path}/accept-revision`, { user: "user_mod", body: { expectedRevision: detail.revision - 1 } });
+  assert.deepEqual([stale.status, stale.body.code], [409, "BIOGRAPHY_REVISION_CONFLICT"]);
+  const suppressed = await call("POST", `${path}/suppress`, { user: "user_mod", body: { expectedRevision: detail.revision, reason: "Checking" } });
+  assert.equal(suppressed.status, 200);
+  const accepted = await call("POST", `${path}/accept-revision`, { user: "user_mod", body: { expectedRevision: suppressed.body.biography.revision } });
+  assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
+  stored = await record();
+  assert.deepEqual([stored.accepted.article.revisionId, stored.accepted.acceptedBy, stored.pendingRevision, stored.moderation.suppressed, Boolean(stored.manual)], [F.REVISION + 3, "user_mod", null, true, true], "accepting keeps suppression and the correction");
+  assert.match(stored.accepted.text, /celebrated/);
+  assert.equal((await call("GET", `/artists/${artist.artistId}/biography`)).body.biography, null, "still suppressed");
+  const cleared = await call("POST", `${path}/clear-correction`, { user: "user_mod", body: { expectedRevision: stored.revision } });
+  await call("POST", `${path}/unsuppress`, { user: "user_mod", body: { expectedRevision: cleared.body.biography.revision } });
+  shown = (await call("GET", `/artists/${artist.artistId}/biography`)).body.biography;
+  assert.deepEqual([shown.article.revisionId, shown.edited], [F.REVISION + 3, false]);
+  assert.match(shown.text, /celebrated/);
+  assert.notEqual(shown.text, original.text);
+  assert.deepEqual(stored.history.slice(-2).map((event) => [event.actorType, event.action]), [["moderator", "suppress"], ["moderator", "accept_revision"]]);
+  assert.equal((await call("POST", `${path}/accept-revision`, { user: "user_mod", body: { expectedRevision: (await record()).revision } })).status, 409, "nothing left to accept");
+});
+
+integration("monthly identity revalidation also stages changed text instead of publishing it", async () => {
+  await publish();
+  const stored = await record();
+  await ArtistBiography.updateOne({ artistId: artist.artistId }, { $set: { "identity.nextCheckAt": new Date(NOW.getTime() - 1000) } });
+  const changed = { page: () => F.wpPage({ lastrevid: F.REVISION + 4 }), parse: (url) => F.wpParse({ revid: Number(url.searchParams.get("oldid")), html: F.LEAD_HTML.replace("are an English", "are a disputed") }) };
+  const rows = await refreshBiographies({ sources: fakeSources(changed), now: NOW });
+  assert.deepEqual(rows.map((row) => [row.mode, row.action]), [["resolve", "resolve:revision_staged"]]);
+  const after = await record();
+  assert.deepEqual([after.accepted.textHash, after.accepted.article.revisionId, after.identity.state], [stored.accepted.textHash, F.REVISION, "verified"]);
+  assert.match(after.pendingRevision.text, /disputed/);
+});
+
 integration("a refresh that raced a moderator command is discarded and the command survives", async () => {
   await publish();
   const stale = await record();

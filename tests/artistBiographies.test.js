@@ -765,3 +765,71 @@ test('temporary, same-ID, unrelated, malformed and insecure redirects are provid
     assert.deepEqual(sleeps, []);
   }
 });
+
+// --- refresh guard: changed text is staged, never auto-published ------------
+
+function revisionOf(accepted, { revisionId, text }) {
+  return {
+    ...accepted,
+    ...(text ? { text, textHash: textHash(text) } : {}),
+    article: { ...accepted.article, revisionId, revisionUrl: `https://en.wikipedia.org/w/index.php?oldid=${revisionId}` },
+    retrievedAt: NOW,
+  };
+}
+
+test("refresh stages changed text from a newer revision and keeps showing the accepted excerpt", async () => {
+  const { outcome } = await resolve();
+  const record = { ...acceptedRecord(outcome), identity: { ...acceptedRecord(outcome).identity, state: "verified", basis: "automatic" } };
+  const vandalised = revisionOf(record.accepted, { revisionId: F.REVISION + 1, text: "Fixture Band are the worst band in the world, says nobody." });
+
+  for (const mode of ["content", "resolve"]) {
+    const { set, event } = outcomeUpdate(record, { status: "accepted", qid: F.QID, candidate: vandalised, evidence: outcome.evidence, reasons: [] }, { mode, now: NOW });
+    assert.equal("accepted" in set, false, `${mode}: published text is not replaced`);
+    assert.equal(set.pendingRevision.textHash, vandalised.textHash);
+    assert.equal(event.action, `${mode}:revision_staged`);
+    assert.deepEqual([event.details.revisionId, event.details.previousRevisionId], [F.REVISION + 1, F.REVISION]);
+    const shown = displayBiography({ ...record, pendingRevision: set.pendingRevision });
+    assert.deepEqual([shown.text, shown.article.revisionId], [record.accepted.text, F.REVISION], `${mode}: readers still see the reviewed text and its source`);
+  }
+
+  // A reviewed plan (apply) may publish it; that also clears staged state.
+  const reviewed = outcomeUpdate({ ...record, pendingRevision: vandalised }, { status: "accepted", qid: F.QID, candidate: vandalised, evidence: outcome.evidence, reasons: [] }, { mode: "resolve", now: NOW, reviewed: true });
+  assert.deepEqual([reviewed.set.accepted.textHash, reviewed.set.pendingRevision, reviewed.set.dismissedRevision], [vandalised.textHash, null, null]);
+});
+
+test("identical text only moves the source revision; reverts clear, and dismissed or already staged text is not restaged", async () => {
+  const { outcome } = await resolve();
+  const base = acceptedRecord(outcome);
+  const record = { ...base, identity: { ...base.identity, state: "verified", basis: "automatic" } };
+  const sameText = revisionOf(record.accepted, { revisionId: F.REVISION + 2 });
+  const edit = revisionOf(record.accepted, { revisionId: F.REVISION + 3, text: "Fixture Band are an English rock band, edited lead." });
+  const accept = (candidate) => ({ status: "accepted", qid: F.QID, candidate });
+
+  const pointer = outcomeUpdate(record, accept(sameText), { mode: "content", now: NOW });
+  assert.deepEqual([pointer.set.accepted.text, pointer.set.accepted.article.revisionId, pointer.set.accepted.acceptedAt], [record.accepted.text, F.REVISION + 2, record.accepted.acceptedAt]);
+  assert.equal(pointer.event.action, "content:revision_unchanged_text");
+
+  const reverted = outcomeUpdate({ ...record, pendingRevision: edit }, accept(sameText), { mode: "content", now: NOW });
+  assert.equal(reverted.set.pendingRevision, null, "an edit that was reverted on Wikipedia is no longer pending");
+
+  const dismissed = outcomeUpdate({ ...record, dismissedRevision: { revisionId: F.REVISION + 3, textHash: edit.textHash, dismissedBy: "user_mod", dismissedAt: NOW } }, accept(revisionOf(edit, { revisionId: F.REVISION + 4 })), { mode: "content", now: NOW });
+  assert.deepEqual(["pendingRevision" in dismissed.set, "accepted" in dismissed.set, dismissed.event], [false, false, null], "dismissed text is not staged again under a later revision");
+
+  const alreadyStaged = outcomeUpdate({ ...record, pendingRevision: edit }, accept(revisionOf(edit, { revisionId: F.REVISION + 5 })), { mode: "content", now: NOW });
+  assert.deepEqual(["pendingRevision" in alreadyStaged.set, alreadyStaged.event], [false, null]);
+
+  const newer = revisionOf(record.accepted, { revisionId: F.REVISION + 6, text: "Fixture Band are an English rock band, edited again." });
+  const replaced = outcomeUpdate({ ...record, pendingRevision: edit }, accept(newer), { mode: "content", now: NOW });
+  assert.deepEqual([replaced.set.pendingRevision.textHash, replaced.event.details.replacedPendingRevisionId], [newer.textHash, F.REVISION + 3]);
+
+  // Leaving the published page clears a staged revision of it.
+  const conflict = outcomeUpdate({ ...record, pendingRevision: edit }, { status: "conflict", reasons: ["WIKIBASE_ITEM_MISMATCH"], qid: F.QID }, { mode: "content", now: NOW });
+  assert.equal(conflict.set.pendingRevision, null);
+});
+
+test("revision commands need the right fields: dismiss needs a reason, accept takes none", () => {
+  assert.deepEqual(normalizeCommand("dismiss_revision", { expectedRevision: 3, reason: " Vandalism " }), { action: "dismiss_revision", expectedRevision: 3, reason: "Vandalism" });
+  assert.throws(() => normalizeCommand("dismiss_revision", { expectedRevision: 3 }), /reason is required/);
+  assert.deepEqual(normalizeCommand("accept_revision", { expectedRevision: 3 }), { action: "accept_revision", expectedRevision: 3 });
+  assert.throws(() => normalizeCommand("accept_revision", { expectedRevision: 3, text: "x" }), /Unsupported field text/);
+});
