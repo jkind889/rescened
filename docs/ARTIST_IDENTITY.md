@@ -1,6 +1,6 @@
 # Artist identity (phase 1)
 
-Last reviewed: 2026-11-11
+Last reviewed: 2026-11-12
 
 Phase 1 gives artists stable public Rescened IDs and keeps MusicBrainz artist IDs on album credits. A flagged [artist pages prototype](#artist-pages-prototype) builds on it with local artist pages, credit links, and multilingual search aliases, and a separately flagged [MusicBrainz discography](#musicbrainz-discography-prototype). A separately flagged, cached [biography](ARTIST_BIOGRAPHIES.md) can add a short Wikipedia excerpt. The page header shows a cycle of the artist's stored release cover art (see [Header cover art](#header-cover-art)); there are no artist photos and no merges. Listening stats still group top artists by display name.
 
@@ -86,7 +86,7 @@ Linking adds only `artistId` and `artistMbid`. Every existing credit key and val
 | `artistRegistrations` | Full registry documents to insert, one per new MBID, with pre-assigned `artistId` values. |
 | `reusedArtists` | Existing registry artists the plan relies on. |
 | `review` | `USER_OWNED_CREDITS`: matches that a reviewed catalog correction would need to link. Includes the proposed MBIDs. |
-| `flagged` | `MULTIPLE_RELEASE_GROUPS`, `SOURCE_CONFLICT` (input datasets disagree), `INVALID_SOURCE_CREDIT`, `CREDIT_COUNT_MISMATCH`, `CREDIT_NAME_MISMATCH`, `EXISTING_IDENTITY_CONFLICT`. |
+| `flagged` | `MULTIPLE_RELEASE_GROUPS`, `SOURCE_CONFLICT` (input datasets disagree), `INVALID_SOURCE_CREDIT`, `CREDIT_COUNT_MISMATCH`, `CREDIT_NAME_MISMATCH`, `EXISTING_IDENTITY_CONFLICT`, and, for [enrichment](#enrichment-from-musicbrainz-release-groups) plans, `ENRICHMENT_UNRESOLVED`. |
 | `unchanged` | Already linked to the same identities. |
 | `noSource` | A release-group reference with no row in any input dataset. |
 
@@ -117,6 +117,59 @@ Keep plans and reports outside the repository, for example in `~/rescened-ops/ar
    ```
 
    Apply refuses to run if the checksum differs, the plan was edited, or the connected database, the plan target, and `--confirm-target` do not all match. It also refuses, before any write, a plan whose album updates change anything besides adding an `artistId`/`artistMbid` pair that the plan registers or reuses, or that would replace an identity a credit already carries, even if the edited plan was re-sealed with a valid checksum.
+
+### Enrichment from MusicBrainz release groups
+
+Albums whose release group appears in no reviewed import dataset land in `noSource`. For those albums, an operator-only fetcher can collect the missing artist credits by exact release-group MBID, without connecting to MongoDB. The backfill then plans from that evidence, using the same matching rules, ownership protection, and apply as any other source. This tooling is not wired into any user-facing path, and nothing runs automatically.
+
+**1. Fetch evidence** (makes MusicBrainz requests; run it only when explicitly authorized):
+
+```sh
+npm run catalog:enrich-identities -- \
+  --from-plan ~/rescened-ops/artist-identity/<database>-<date>.plan.json --plan-sha256 <planSha256> \
+  --cache-dir ~/rescened-ops/artist-identity/musicbrainz-release-group-cache \
+  --out ~/rescened-ops/artist-identity/<date>.credits-evidence.json
+```
+
+`--ids-file <ids.json>` takes a JSON array of release-group MBIDs instead. IDs are validated, lowercased, sorted, and deduplicated before any request, with at most 5,000 unique IDs per run. `--from-plan` checks the plan's seal and `--plan-sha256`, then uses its `noSource` release groups.
+
+- **Requests.** Each ID fetches only `release-group/<mbid>?inc=artist-credits&fmt=json`; there is no search by name or title. Every request in the process shares one gate (at least 1.1 seconds between request starts). Requests use an identifying user agent, an eight-second timeout that covers the response body, and a 256 KiB streamed size limit.
+- **Retries.** Network errors, timeouts, and HTTP 408/425/429/500/502/503/504 get at most three attempts. `Retry-After` is honored in both formats. A pause over 30 seconds stops the run. Any pause still in force when a run ends is written to the cache as a cooldown, and later runs with that `--cache-dir` refuse to start before it expires.
+- **No retries.** Malformed or oversized responses, identity mismatches, redirects, and other client errors are not retried. Redirects are never followed; the result records only a validated destination release-group MBID for review.
+- **Stops.** The run stops if five consecutive IDs exhaust their retries, if the time budget (`--budget-minutes`, default 30) runs out, or if it is interrupted. A stopped run keeps its cache and publishes no evidence.
+- **Resuming.** Rerun the same command. Successful results are cached per ID for seven days, in private files written atomically and validated by version, identity, timestamp, shape, and size. Unsuccessful IDs are fetched again. An exclusive lock prevents concurrent runs on one cache; a lock is removed only when its owning process on the same host no longer exists.
+- **Coordination.** The gate does not coordinate separate processes, and MusicBrainz rate-limits by source IP. Run one fetch at a time, after other operators such as the biography fetch have finished, and account for other clients on the same network address.
+
+Exit `0` means every ID resolved. `2` means evidence was written with unresolved or deferred IDs. `1` means nothing was written.
+
+The evidence (`rescened-musicbrainz-release-group-credits`, schema `1.0.0`) holds exactly one result per requested ID:
+
+- `resolved` results carry the release-group MBID, observation time, title, and ordered credits (`name`, `joinPhrase`, `artistMbid`, `artistName`). Credits use the catalog importer's normalization, and each one must have a valid canonical artist name.
+- `unresolved` results carry a reason: `NOT_FOUND`, `REDIRECTED`, `ID_MISMATCH`, `INVALID_RESPONSE`, `INVALID_CREDITS`, or `HTTP_ERROR`.
+- `deferred` results (`TRANSIENT_FAILURE`) record the number of attempts and the last failure.
+
+The artifact records the request digest, any originating plan digest, MusicBrainz as the source with its CC0 license, counts, and failure reasons, all under `evidenceSha256`. It is published atomically and never overwrites an existing file. It contains no ListenBrainz rankings or album metadata, and `catalog:import` and `catalog:validate` refuse it (`UNSUPPORTED_ARTIFACT`).
+
+**2. Review the evidence**, especially every unresolved and deferred category. The seal proves integrity, not authorship; anyone can reseal an edited file. The plan step therefore pins the exact digest you reviewed.
+
+**3. Plan from the evidence**, separately for each database:
+
+```sh
+npm run catalog:backfill-artists -- \
+  --enrichment ~/rescened-ops/artist-identity/<date>.credits-evidence.json \
+  --enrichment-sha256 <evidenceSha256> \
+  --out ~/rescened-ops/artist-identity/<database>-<date>.enrichment.plan.json
+```
+
+`--enrichment` replaces `--input`; the two cannot be combined, and `--resolve-artist-names` is unnecessary because the evidence already carries verified names. The evidence and its pinned digest are validated before any database connection.
+
+- **Unsuccessful lookups.** An album whose release group was unresolved or deferred is flagged `ENRICHMENT_UNRESOLVED`, with the specific reason, any HTTP status, and any redirect destination.
+- **Provenance.** The plan's `inputs` entry records the evidence kind, `evidenceSha256`, and the unresolved and deferred counts. Album updates list their `sourceObservations`. New registry artists take the verified canonical name, and their provenance records the observation time and evidence digest. Existing registry names are never changed.
+- **Name conflicts.** If two resolved release groups report different canonical names for one artist MBID (for example, an artist renamed during a long fetch), the affected albums are flagged `SOURCE_CONFLICT`.
+- **noSource coverage.** An enrichment-only plan reports every album outside its evidence as `noSource`, including albums already linked by an earlier backfill. `noSource` describes the plan's source coverage, not missing identities.
+- **Apply.** It is unchanged. Plan version `1.0.0`, the stored-revision and raw-credit checks, per-album transactions, carrying revisions forward, idempotent reruns, and partial-commit reporting all apply as described below.
+
+Generate a fresh plan per database from the same evidence. Registry artist IDs differ between databases, so never reuse a dev plan elsewhere. Apply to shared dev or production still needs explicit authorization for the named target and the exact reviewed plan.
 
 ### Apply semantics
 
@@ -244,6 +297,9 @@ MusicBrainz core data is CC0. The section credits MusicBrainz and links to the a
 
 ## Verification
 
+- `tests/artistEnrichmentEvidence.test.js` covers the evidence contract: ID normalization and limits, plan-derived IDs, sealing and tamper detection, exact result accounting, per-reason outcome rules, canonical-name and normalization checks, digest pinning, atomic no-overwrite publication, and importer refusal.
+- `tests/artistIdentityEnrichment.test.js` covers the release-group fetcher with injected fetch, clock, and gate: endpoint and headers, shared pacing, retry limits, both `Retry-After` formats, persisted cooldowns, redirects, malformed or oversized bodies, body timeouts, interruption, the breaker, the budget, cache validation and resume, locking, and CLI exit codes. A trimmed CC0 MusicBrainz fixture is the only provider payload.
+- `tests/artistIdentityEnrichmentPlan.test.js` covers `--enrichment` argument rules, planning from evidence (verified names, legacy join phrases, community protection, `ENRICHMENT_UNRESOLVED`, existing registry names), and CLI validation before connecting.
 - `tests/artistNames.test.js` covers exact-ID lookup, rate limits, bounded retries/timeouts, response validation, private-cache reuse/resume, and credited-name preservation. All provider responses are fixtures.
 - `tests/artistIdentity.test.js` covers the identity helpers, model invariants, submission validation, importer planning, backfill classification and sealing, the checked-in seed dataset as a source, and the frontend credit helpers.
 - `tests/artistPages.test.js` covers the collaboration badge (duplicate same-ID credits, distinct and homonymous artists, unresolved credits), reviewed-alias validation, search-key folding, query parsing, the search pipeline expansion, the feature flag, and the frontend credit and release helpers.
@@ -253,7 +309,7 @@ MusicBrainz core data is CC0. The section credits MusicBrainz and links to the a
 - `tests/artistCoverCycle.browser.test.js` is opt-in (`RUN_FRONTEND_BROWSER_TESTS=true` with Playwright). With images stubbed and time controlled, it checks advancing and wrapping, stopping on hover, keyboard focus, a hidden tab, and Pause, reduced motion, the fade, and broken, single, and missing covers.
 - `tests/artistLinks.test.js` covers link-query validation, the flag on `/artists/links`, credited-ID collection, display-line segmentation (wording kept, whole-name matching, homonyms, name-only credits), the link store (batching, caching, cool-down without self-retry, the disabled stop), and a source guard that no `ArtistCredits` sits inside another link and external candidates stay plain. `tests/artistLinks.component.test.js` renders the real credits, card, ranked list, and review queue to static markup (it skips without `npm --prefix frontend ci`) and asserts the links, their text, and that no anchor nests.
 - `tests/artistPages.integration.test.js` covers artist headers, keyset release paging and type filters (including untyped rows and equal-title ties), multi-credited releases, homonyms, the search candidate cap, alias and credited-name search, identity search expansion with the flag on and off, album-detail link resolution, stored main-credit header cover selection, and `/artists/links` (unknown IDs, duplicates, homonym IDs, bounds, the flag). It fails if any request leaves the test server.
-- `tests/artistIdentity.integration.test.js` covers the transactional paths on a replica set: import registration and idempotency, approval resolution and conflicts, and backfill planning without writes, target refusal, guarded apply, mapping carry-forward, rerun, and registry drift.
+- `tests/artistIdentity.integration.test.js` covers the transactional paths on a replica set: import registration and idempotency, approval resolution and conflicts, and backfill planning without writes, target refusal, guarded apply, mapping carry-forward, rerun, and registry drift. Two enrichment scenarios plan from evidence and apply (new and reused artists, provenance, unchanged credit wording, community protection, carrying revisions forward, rerun), and show that a correction approved between planning and apply is a conflict.
 
 ## Known limitations
 

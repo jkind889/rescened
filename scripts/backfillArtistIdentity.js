@@ -8,6 +8,7 @@ const mongoose = require("mongoose");
 const AlbumCatalog = require("../models/AlbumCatalog");
 const Artist = require("../models/Artist");
 const { readDatasetFile } = require("../lib/catalogImport/dataset");
+const { evidenceBackfillSource, readEvidenceFile } = require("../lib/artists/enrichmentEvidence");
 const {
   ArtistBackfillError,
   applyPlan,
@@ -18,6 +19,7 @@ const {
 
 const USAGE = `Usage:
   npm run catalog:backfill-artists -- --input <dataset.json> [--input <dataset.json> ...] --out <plan.json>
+  npm run catalog:backfill-artists -- --enrichment <evidence.json> --enrichment-sha256 <sha> --out <plan.json>
   npm run catalog:backfill-artists -- --apply --plan <plan.json> --plan-sha256 <sha> --confirm-target <database> --report <report.json>
 
 Plan mode (the default, also --dry-run) reads validated catalog import
@@ -27,6 +29,9 @@ each album in its own guarded transaction.
 
 Options:
   --input <path>            Validated catalog import dataset (repeatable; plan mode)
+  --enrichment <path>       Sealed MusicBrainz credit evidence from catalog:enrich-identities
+                            (plan mode; instead of --input)
+  --enrichment-sha256 <sha> evidenceSha256 of the reviewed evidence (required with --enrichment)
   --out <path>              New plan file (plan mode; never overwritten)
   --resolve-artist-names     Verify every new registry name by MusicBrainz MBID
   --artist-name-cache <dir>  Private resumable cache (required with name lookup)
@@ -95,11 +100,22 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     if (options.mode === "plan") {
       const outPath = path.resolve(options.out);
       if (fs.existsSync(outPath)) throw new ArtistBackfillError(`Plan file already exists: ${outPath}`, "ARTIFACT_EXISTS");
-      // Validate every dataset completely before opening a database connection.
-      const validations = options.inputs.map((input) => (dependencies.readDatasetFile || readDatasetFile)(input));
+      // Validate every dataset, or the pinned evidence, completely before
+      // opening a database connection.
+      let validations;
+      let unresolved;
+      if (options.enrichment) {
+        const evidence = (dependencies.readEvidenceFile || readEvidenceFile)(options.enrichment, options.enrichmentSha256);
+        const source = evidenceBackfillSource(evidence);
+        validations = [source.validation];
+        unresolved = source.unresolved;
+      } else {
+        validations = options.inputs.map((input) => (dependencies.readDatasetFile || readDatasetFile)(input));
+      }
       connectedHere = await connect(db, dependencies);
       let plan = await createPlan({
         validations,
+        unresolved,
         AlbumCatalog: AlbumModel,
         Artist: ArtistModel,
         databaseName: db.connection.name,
