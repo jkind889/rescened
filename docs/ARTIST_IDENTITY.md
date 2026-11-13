@@ -29,7 +29,7 @@ Mongo `_id` stays internal. The only public registry endpoints are the flagged [
 
 Both keys are left out, not blank, until an identity is established. A catalog credit with an `artistMbid` must also carry its registry `artistId`; the model rejects an MBID on its own. A name never links a credit: name-only credits stay unlinked until an import, an approved suggestion, or the backfill supplies an MBID or an existing `artistId`.
 
-Catalog responses pass these keys through on `artistCredits`, so album-bearing responses expose `artistId` and, where known, `artistMbid` beside each credit name. Join phrases are not stored on credits. `artistDisplayName` still holds the full credited string.
+Catalog responses pass these keys through on `artistCredits`, so album-bearing responses expose `artistId` and, where known, `artistMbid` beside each credit name. MusicBrainz artist MBIDs are public identifiers, not secrets: album responses, artist headers (`musicBrainzUrl`), external MusicBrainz candidates, and moderator detail all show them. They are never used as a Rescened ID; `artistId` is the only public artist identity Rescened issues, and Mongo `_id` stays internal. Artist page release cards return the compact `{ name, role, artistId }` credit shape; that is a payload choice, not a privacy rule. Join phrases are not stored on credits. `artistDisplayName` still holds the full credited string.
 
 ## Write paths
 
@@ -130,7 +130,7 @@ Keep plans and reports outside the repository, for example in `~/rescened-ops/ar
 
 ## Artist pages (prototype)
 
-`ARTIST_PAGES_ENABLED=true` (server-side, default off) enables everything in this section. While it is off, `/artists` returns `503 ARTIST_PAGES_DISABLED`, album responses omit `artistPages`, and catalog search behaves as before. Every read uses the local `Artist` registry and `AlbumCatalog`; no request contacts a provider. Error codes are in [ERROR_CODES.md](ERROR_CODES.md#artist-pages).
+`ARTIST_PAGES_ENABLED=true` (server-side, default off) enables everything in this section. While it is off, `/artists` returns `503 ARTIST_PAGES_DISABLED`, album responses omit `artistPages`, catalog search does not expand by identity, and no artist name links anywhere. The flag gates these reads only. Credit identities are not flag-gated: imports, approvals, the backfill, and suggestion or correction forms (including a MusicBrainz prefill) record `artistId`/`artistMbid` and register artists regardless, and album responses carry them. With the flag off, the frontend sends at most one artist request per tab every five minutes (see [Artist links across the app](#artist-links-across-the-app)). Every read uses the local `Artist` registry and `AlbumCatalog`; no request contacts a provider. Error codes are in [ERROR_CODES.md](ERROR_CODES.md#artist-pages).
 
 Before enabling it in production, run verified-name backfill planning (see [Verified registry names](#verified-registry-names)). Otherwise headings show provisional credit-derived names.
 
@@ -151,7 +151,7 @@ Artist names link to `/artist/:artistId` wherever the app shows a local catalog 
 
 1. The album response carries a credit with an `artistId`. Name-only credits never link, and a display name is never split or matched, so homonyms stay separate.
 2. The API confirmed that `artistId` has a registry artist. Album detail does this with `artistPages.artistIds`. Every other surface asks `GET /artists/links` once for the credits on screen (batched within about 25 ms, up to 100 per request) and caches the answers for the page session.
-3. Artist pages are enabled. While the flag is off, or on an API without the route (`503 ARTIST_PAGES_DISABLED`, or an uncoded 404/503), the first check ends link lookups for five minutes and every credit stays plain text; a later page render asks again after that, so a passing proxy `503` cannot disable links for a whole visit. A failed or rate-limited check leaves its credits unlinked and is not retried for 60 seconds. Nothing retries on its own.
+3. Artist pages are enabled. While the flag is off, or on an API without the route (`503 ARTIST_PAGES_DISABLED`, or an uncoded 404/503), the first check ends link lookups for five minutes and every credit stays plain text. That stop is remembered in the tab's `sessionStorage`, so later page loads in the tab do not ask again during those five minutes; the search page's artist matches read and set the same stop. A stored value is trusted only up to five minutes ahead, and blocked storage falls back to the in-memory stop. A later page render asks again after that, so a passing proxy `503` cannot disable links for a whole visit. A failed or rate-limited check leaves its credits unlinked and is not retried for 60 seconds. Nothing retries on its own.
 
 Until a check finishes, and whenever it fails, the line is exactly the stored display name. When some credits link, the line keeps the display name's own wording and punctuation ("A & B feat. C") if every credit appears in it, in order, as a whole name; otherwise the credits are listed by name, comma-separated, in stored order. Credits without an ID inside a mixed line stay plain text.
 
@@ -206,7 +206,7 @@ The full results page shows matching artists above album results on page one, wi
 
 `AlbumCatalog` gains a sparse index on `artistCredits.artistId`, which serves the header, release, and album-detail reads. Artist search scans registry names, and the catalog's credit names, with regular expressions, as catalog search already does. It orders the capped candidate lists by exact, prefix, then substring match, so a common short query cannot crowd out an exactly named artist. With the flag on, every catalog search page also runs a case-insensitive anchored regex over registry names; `Artist.name` has no index, so this scans the registry. Measure both before relying on them for a large catalog.
 
-On page one, the results page calls both `/search/search` and `/artists/search`, so it spends two points of the shared local-search rate limit. While the flag is off, it still sends the artist search request and ignores the `503`. Credit links add at most one `/artists/links` request per batch of newly shown credits, from a separate bucket; while the flag is off, one `503` per page load ends them. The header route `GET /artists/:artistId` has only the global rate limit, like `GET /genres/:slug`.
+On page one, the results page calls both `/search/search` and `/artists/search`, so it spends two points of the shared local-search rate limit. Credit links add at most one `/artists/links` request per batch of newly shown credits, from a separate bucket. While the flag is off, the first disabled answer from either request stops both for the tab for five minutes, so a tab sends at most one of them per five minutes. The header route `GET /artists/:artistId` uses the shared local-search rate limit (90 per minute per IP), like the releases and biography routes; an artist page view costs about three points (header, biography, first releases page) plus one per further page.
 
 ## MusicBrainz discography (prototype)
 
