@@ -25,13 +25,14 @@ const record = (revision, suppressed) => ({ artistId: '${ARTIST}', revision, ide
   accepted: { text: 'Synthetic band excerpt for the moderation test.', shortened: true, license: { name: 'CC BY-SA 4.0', url: 'https://creativecommons.org/licenses/by-sa/4.0/' }, article: { title: 'Synthetic', url: 'https://example.invalid/a', revisionId: 5, revisionUrl: 'https://example.invalid/r' } },
   pendingRevision: revision === 1 ? { text: 'Unreviewed changed lead from a newer revision.', shortened: false, license: { name: 'CC BY-SA 4.0', url: 'https://creativecommons.org/licenses/by-sa/4.0/' }, article: { title: 'Synthetic', url: 'https://example.invalid/a', revisionId: 6, revisionUrl: 'https://example.invalid/r6' } } : null,
   candidate: null, manual: null, fetch: {}, history: [] });
-window.__aborts = 0; window.__pending = [];
+window.__aborts = 0; window.__pending = []; window.__posts = [];
 window.__release = () => { const next = window.__pending.shift(); if (next) next(); };
 window.fetch = (input, init = {}) => {
   const url = String(input);
   const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
   if (url.endsWith('/access')) return Promise.resolve(json({ moderator: true }));
   if ((init.method || 'GET') === 'GET') return Promise.resolve(json({ biography: record(1, false) }));
+  window.__posts.push({ url, body: JSON.parse(init.body || '{}') });
   return new Promise((resolve, reject) => {
     init.signal?.addEventListener('abort', () => { window.__aborts += 1; reject(new DOMException('aborted', 'AbortError')); });
     window.__pending.push(() => resolve(json({ biography: record(2, true) })));
@@ -92,6 +93,15 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><ArtistBiog
     await page.getByText('Published excerpt:').waitFor();
     assert.equal(await page.getByLabel('Reason (for suppress, reject, or keeping current text)').inputValue(), '');
     assert.equal(await page.getByText('Saved.').count(), 0);
+
+    // Publishing the staged text sends accept-revision for the revision the moderator is looking at.
+    await page.getByRole('button', { name: 'Publish new text' }).click();
+    const sent = await page.evaluate(() => window.__posts.at(-1));
+    assert.ok(sent.url.endsWith('/accept-revision'), sent.url);
+    assert.deepEqual(sent.body, { expectedRevision: 1 });
+    await page.evaluate(() => window.__release());
+    await page.getByText('Saved.').waitFor();
+    assert.equal(await page.getByText("Wikipedia's lead changed").count(), 0, 'the staged text is gone once published');
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();
