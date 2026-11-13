@@ -401,3 +401,115 @@ test("CLI validates options and IDs before any request and maps outcomes to exit
   assert.equal(await cli.main(["--ids-file", idsFile, "--cache-dir", path.join(directory, "cache"), "--out", path.join(directory, "all.json")], { output, process: fakeProcess, runOptions: runOptionsForCli }), 0);
   assert.equal(await cli.main(["--ids-file", idsFile, ...base], { output, process: fakeProcess, runOptions: runOptionsForCli }), 1, "existing evidence is never overwritten");
 });
+
+test("an absurd Retry-After stops the run with a clamped cooldown instead of retrying", async () => {
+  const time = clock();
+  let count = 0;
+  const fetcher = createReleaseGroupCreditFetcher({ fetchFn: async () => { count += 1; return json({}, { status: 503, headers: { "Retry-After": "1e15" } }); }, nowMs: time.nowMs, sleepFn: time.sleepFn, rateGate: time.gate });
+  await assert.rejects(fetcher.fetchOne(RG1), (error) => error.code === "RETRY_AFTER_EXCEEDED" && error.notBefore === new Date(8.64e15).toISOString());
+  assert.equal(count, 1);
+});
+
+test("a short Retry-After still in force is persisted when the breaker stops the run", async (context) => {
+  const directory = tempDir(context);
+  const time = clock();
+  const all = ids(5);
+  const { fetchFn } = server(time, Object.fromEntries(all.map((id) => [id, () => json({}, { status: 503, headers: { "Retry-After": "25" } })])));
+  await assert.rejects(runReleaseGroupEnrichment({ ...runOptions(time, directory, fetchFn), ids: all }), (error) => error.code === "TRANSIENT_BREAKER" && Boolean(error.notBefore));
+  const cooldown = JSON.parse(fs.readFileSync(path.join(directory, "cache", COOLDOWN_FILE), "utf8"));
+  assert.equal(cooldown.reason, "RETRY_AFTER_PENDING");
+  assert.ok(Date.parse(cooldown.notBefore) > time.nowMs());
+  const healthy = server(time, { [all[0]]: releaseGroup(all[0]) });
+  await assert.rejects(runReleaseGroupEnrichment({ ...runOptions(time, directory, healthy.fetchFn), ids: [all[0]] }), { code: "COOLDOWN_ACTIVE" });
+  assert.equal(healthy.calls.length, 0);
+});
+
+test("interrupting during a backoff wait stops promptly", async () => {
+  const controller = new AbortController();
+  const fetcher = createReleaseGroupCreditFetcher({
+    fetchFn: async () => json({}, { status: 503, headers: { "Retry-After": "25" } }),
+    rateGate: async () => {}, signal: controller.signal,
+  });
+  const started = Date.now();
+  const pending = fetcher.fetchOne(RG1);
+  setTimeout(() => controller.abort(), 20);
+  await assert.rejects(pending, { code: "INTERRUPTED" });
+  assert.ok(Date.now() - started < 2000);
+});
+
+test("the run normalizes IDs before any request and rejects invalid ones", async (context) => {
+  const directory = tempDir(context);
+  const time = clock();
+  const { fetchFn, calls } = server(time, { [RG1]: releaseGroup(RG1) });
+  const result = await runReleaseGroupEnrichment({ ...runOptions(time, directory, fetchFn), ids: [RG1.toUpperCase(), RG1] });
+  assert.equal(result.evidence.counts.requested, 1);
+  assert.equal(calls.length, 1);
+  await assert.rejects(runReleaseGroupEnrichment({ ...runOptions(time, directory, fetchFn), outPath: path.join(directory, "x.json"), ids: ["../escape"] }), { code: "INVALID_ID_LIST" });
+  assert.equal(calls.length, 1);
+});
+
+test("non-HTTP statuses and non-text credit fields are recorded per ID, not fatal", async () => {
+  const time = clock();
+  const odd = createReleaseGroupCreditFetcher({ fetchFn: async () => ({ status: 600, ok: false, headers: new Headers(), body: null }), nowMs: time.nowMs, sleepFn: time.sleepFn, rateGate: time.gate });
+  const { row } = await odd.fetchOne(RG1);
+  assert.equal(row.reason, "INVALID_RESPONSE");
+  assert.equal(row.httpStatus, undefined);
+  const at = new Date(NOW).toISOString();
+  assert.equal(normalizeReleaseGroupPayload(releaseGroup(RG1, [{ name: {}, joinphrase: "", artist: { id: A1, name: "Alpha" } }]), RG1, at).reason, "INVALID_CREDITS");
+  assert.equal(normalizeReleaseGroupPayload(releaseGroup(RG1, [{ name: "Alpha", joinphrase: 7, artist: { id: A1, name: "Alpha" } }]), RG1, at).reason, "INVALID_CREDITS");
+  assert.equal(normalizeReleaseGroupPayload(releaseGroup(RG1, [null]), RG1, at).reason, "INVALID_CREDITS");
+});
+
+test("symlinked cache entries are ignored and a symlinked cache directory is refused", async (context) => {
+  const directory = tempDir(context);
+  const time = clock();
+  const real = path.join(directory, "real");
+  fs.mkdirSync(real);
+  await writeCacheEntry(real, normalizeReleaseGroupPayload(releaseGroup(RG1), RG1, new Date(NOW).toISOString()));
+  const cache = path.join(directory, "cache");
+  fs.mkdirSync(cache);
+  fs.symlinkSync(path.join(real, `${RG1}.json`), path.join(cache, `${RG1}.json`));
+  assert.equal(await readCacheEntry(cache, RG1, () => NOW), null);
+  const linkedDir = path.join(directory, "linked");
+  fs.symlinkSync(real, linkedDir);
+  const { fetchFn, calls } = server(time, { [RG1]: releaseGroup(RG1) });
+  await assert.rejects(runReleaseGroupEnrichment({ ...runOptions(time, directory, fetchFn), cacheDir: linkedDir, ids: [RG1] }), { code: "INVALID_ARGUMENTS" });
+  assert.equal(calls.length, 0);
+});
+
+test("CLI exits 2 for deferred-only evidence, 1 for a mismatched plan digest, and handles signals", async (context) => {
+  const directory = tempDir(context);
+  const handlers = {};
+  let exited = null;
+  const fakeProcess = {
+    on(name, handler) { handlers[name] = handler; },
+    off(name, handler) { if (handlers[name] === handler) delete handlers[name]; },
+    exit(code) { exited = code; },
+  };
+  const output = { log() {}, error() {} };
+  const idsFile = path.join(directory, "ids.json");
+  fs.writeFileSync(idsFile, JSON.stringify([RG1]));
+  const time = clock();
+  const run = { fetchFn: async () => json({}, { status: 503 }), nowMs: time.nowMs, sleepFn: time.sleepFn, rateGate: time.gate, isProcessAlive: () => true };
+  assert.equal(await cli.main(["--ids-file", idsFile, "--cache-dir", path.join(directory, "cache"), "--out", path.join(directory, "deferred.json")], { output, process: fakeProcess, runOptions: run }), 2);
+  assert.deepEqual(Object.keys(handlers), [], "signal handlers are removed after the run");
+
+  const { sealPlan } = require("../lib/artists/backfill");
+  const plan = sealPlan({ kind: "rescened-artist-identity-backfill", planVersion: "1.0.0", target: { databaseName: "t" }, noSource: [{ releaseGroupMbid: RG1 }] });
+  const planFile = path.join(directory, "plan.json");
+  fs.writeFileSync(planFile, JSON.stringify(plan));
+  assert.equal(await cli.main(["--from-plan", planFile, "--plan-sha256", "0".repeat(64), "--cache-dir", path.join(directory, "cache"), "--out", path.join(directory, "p.json")], { output, process: fakeProcess }), 1);
+
+  let signalOf = null;
+  const blocking = async (options) => {
+    signalOf = options.signal;
+    handlers.SIGINT();
+    assert.equal(options.signal.aborted, true);
+    assert.equal(exited, null);
+    handlers.SIGTERM();
+    assert.equal(exited, 130);
+    throw Object.assign(new Error("The run was interrupted"), { code: "INTERRUPTED" });
+  };
+  assert.equal(await cli.main(["--ids-file", idsFile, "--cache-dir", path.join(directory, "cache"), "--out", path.join(directory, "sig.json")], { output, process: fakeProcess, runReleaseGroupEnrichment: blocking }), 1);
+  assert.ok(signalOf);
+});

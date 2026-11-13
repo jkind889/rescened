@@ -23,7 +23,12 @@ Options:
 
 Exit codes: 0 every ID resolved; 2 evidence written with unresolved or
 deferred IDs; 1 nothing written (invalid input, interruption, budget,
-MusicBrainz throttle, or repeated transient failures).`;
+MusicBrainz throttle, or repeated transient failures).
+
+A MusicBrainz pause is recorded in the cache directory and enforced only
+for runs that use the same --cache-dir; reuse it rather than starting a new
+one. Run one fetch at a time per network address. Pressing Ctrl-C twice
+exits immediately; the next run then removes the dead process's lock.`;
 
 function parseArgs(argv = []) {
   const options = { idsFile: "", fromPlan: "", planSha256: "", cacheDir: "", out: "", budgetMinutes: undefined, help: false };
@@ -109,6 +114,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
   } catch (error) {
     output.error(`${error.code || "ENRICHMENT_FAILED"}: ${error.message}`);
     if (error.notBefore) output.error(`Do not rerun before ${error.notBefore}.`);
+    if (error.cooldownWriteError) output.error(`Could not record the cooldown (${error.cooldownWriteError}); wait before rerunning.`);
     if (error.progress) output.error(`Progress kept in the cache: ${JSON.stringify(error.progress)}`);
     if (Array.isArray(error.details) && error.details.length) output.error(JSON.stringify(error.details, null, 2));
     return 1;
