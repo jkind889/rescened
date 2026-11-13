@@ -864,3 +864,27 @@ test("identity revalidation of a moderator-confirmed biography stages changed te
   const { set, event } = outcomeUpdate(record, { status: "needs_review", qid: F.QID, reasons: ["P31_UNFAMILIAR"], candidate: changed, evidence: outcome.evidence }, { mode: "resolve", now: NOW });
   assert.deepEqual([set["identity.state"], set["identity.basis"], "accepted" in set, set.pendingRevision.textHash, event.action], ["verified", "moderator", false, changed.textHash, "resolve:revision_staged"]);
 });
+
+test("a hidden biography that verifies again re-shows its last accepted text and stages changed text", async () => {
+  const { outcome } = await resolve();
+  const base = acceptedRecord(outcome);
+  const changed = revisionOf(base.accepted, { revisionId: F.REVISION + 8, text: "Fixture Band are an English rock band, reworded while hidden." });
+  for (const state of ["conflict", "unsuitable", "needs_review"]) {
+    const hidden = { ...base, identity: { ...base.identity, state }, dismissedRevision: null };
+    const { set, event } = outcomeUpdate(hidden, { status: "accepted", qid: F.QID, candidate: changed, evidence: outcome.evidence, reasons: [] }, { mode: "resolve", now: NOW });
+    assert.deepEqual([set["identity.state"], "accepted" in set, set.pendingRevision.textHash, event.details.reverified, event.details.previousState], ["verified", false, changed.textHash, true, state]);
+    assert.equal(displayBiography({ ...hidden, identity: { ...hidden.identity, state: "verified" }, pendingRevision: set.pendingRevision }).text, base.accepted.text, `${state}: the last accepted text returns, not the new one`);
+    // A dismissal survives too.
+    const dismissed = outcomeUpdate({ ...hidden, dismissedRevision: { revisionId: 1, textHash: changed.textHash, dismissedBy: "m", dismissedAt: NOW } }, { status: "accepted", qid: F.QID, candidate: changed, evidence: outcome.evidence, reasons: [] }, { mode: "resolve", now: NOW });
+    assert.deepEqual(["accepted" in dismissed.set, "pendingRevision" in dismissed.set, "dismissedRevision" in dismissed.set, dismissed.event.action], [false, false, false, "resolve:reverified"]);
+  }
+});
+
+test("refresh does not stage text for a match a moderator rejected", async () => {
+  const { outcome } = await resolve();
+  const base = acceptedRecord(outcome);
+  const record = { ...base, identity: { ...base.identity, state: "verified" }, moderation: { suppressed: false, verdict: "match_rejected", verdictQid: F.QID } };
+  const changed = revisionOf(base.accepted, { revisionId: F.REVISION + 9, text: "Fixture Band are an English rock band, with a rejected match." });
+  const { set, event } = outcomeUpdate(record, { status: "accepted", qid: F.QID, candidate: changed }, { mode: "content", now: NOW });
+  assert.deepEqual(["pendingRevision" in set, "accepted" in set, event], [false, false, null]);
+});

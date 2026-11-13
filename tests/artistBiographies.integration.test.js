@@ -281,6 +281,21 @@ integration("a plan apply cannot replace published text or override a dismissal,
   assert.deepEqual([conflict.status, conflict.body.code], [409, "BIOGRAPHY_REVISION_CONFLICT"]);
   stored = await record();
   assert.deepEqual([stored.accepted.article.revisionId, stored.pendingRevision.article.revisionId], [F.REVISION, F.REVISION + 3], "nothing the moderator did not see was published");
+
+  // Hidden after a conflict, then verified again by a plan: the last accepted text returns and the new text is staged.
+  await ArtistBiography.updateOne({ artistId: artist.artistId }, { $set: { "identity.state": "conflict", pendingRevision: null } });
+  const hiddenPlan = await createBiographyPlan({ sources: fakeSources(vandal), artistIds: [artist.artistId], now: at(30), databaseName: "rescened_biographies" });
+  assert.deepEqual([hiddenPlan.items[0].published.shown, hiddenPlan.items[0].stagesChangedText, hiddenPlan.items[0].matchesDismissedText], [false, false, true], "the dismissed text is reported, not staged");
+  const better = revision(F.REVISION + 4, F.LEAD_HTML.replace("are an English", "are a renowned"));
+  const betterPlan = await createBiographyPlan({ sources: fakeSources(better), artistIds: [artist.artistId], now: at(30), databaseName: "rescened_biographies" });
+  assert.equal(betterPlan.items[0].stagesChangedText, true);
+  const reapplied = await applyBiographyPlan({ plan: betterPlan, sources: fakeSources(better), now: at(30) });
+  assert.deepEqual(reapplied.map((row) => row.action), ["resolve:revision_staged"]);
+  stored = await record();
+  assert.deepEqual([stored.identity.state, stored.accepted.article.revisionId, stored.dismissedRevision.reason], ["verified", F.REVISION, "Vandalism"]);
+  assert.match(stored.pendingRevision.text, /renowned/);
+  const shownAgain = (await call("GET", `/artists/${artist.artistId}/biography`)).body.biography;
+  assert.equal(shownAgain.article.revisionId, F.REVISION, "readers get the last accepted text back");
 });
 
 integration("a refresh that raced a moderator command is discarded and the command survives", async () => {
