@@ -81,6 +81,9 @@ test("--from-plan IDs come only from a verified sealed plan's noSource list", (c
   fs.writeFileSync(file, JSON.stringify(plan));
   assert.deepEqual(readPlanNoSourceIds(file, plan.planSha256), { ids: [RG1, RG2], originPlanSha256: plan.planSha256 });
   assert.throws(() => readPlanNoSourceIds(file, "0".repeat(64)), { code: "PLAN_CHECKSUM_MISMATCH" });
+  const enrichmentPlan = sealPlan({ ...plan, inputs: [{ kind: EVIDENCE_KIND, datasetId: "x" }] });
+  fs.writeFileSync(file, JSON.stringify(enrichmentPlan));
+  assert.throws(() => readPlanNoSourceIds(file, enrichmentPlan.planSha256), { code: "INVALID_PLAN" });
   fs.writeFileSync(file, JSON.stringify({ ...plan, noSource: [{ releaseGroupMbid: RG3 }] }));
   assert.throws(() => readPlanNoSourceIds(file, plan.planSha256), { code: "PLAN_CHECKSUM_MISMATCH" });
 });
