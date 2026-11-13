@@ -97,7 +97,7 @@ router.get("/:artistId/releases", searchRateLimit, async (req, res) => {
   }
 });
 
-router.get("/:artistId", async (req, res) => {
+router.get("/:artistId", searchRateLimit, async (req, res) => {
   try {
     return res.json(await artistDetail(req.params.artistId));
   } catch (error) {

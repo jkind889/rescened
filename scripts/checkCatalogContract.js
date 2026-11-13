@@ -28,6 +28,7 @@ const roots = [
   "scripts/mergeGenres.js",
   "scripts/backfillMissingAlbumCovers.js",
   "scripts/backfillArtistIdentity.js",
+  "scripts/artistBiographies.js",
 ];
 const allowed = ["spotifyProfileUrl", "Spotify Profile", "open.spotify.com/user/"];
 const forbidden = ["spotifyId", "SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "api.spotify.com", "accounts.spotify.com", "getSpotifyAccessToken", "normalizeSpotify"];

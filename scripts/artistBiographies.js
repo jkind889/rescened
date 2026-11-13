@@ -90,6 +90,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
   let connected = false;
   try {
     if (options.mode === "plan") {
+      if (fs.existsSync(path.resolve(options.out))) throw new BiographyOperationError(`Plan file already exists: ${path.resolve(options.out)}`, "ARTIFACT_EXISTS");
       await connect(db, dependencies.mongoUri || process.env.MONGO_URI);
       connected = true;
       const plan = await createBiographyPlan({
