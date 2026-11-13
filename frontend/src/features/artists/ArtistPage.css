@@ -14,38 +14,6 @@
   margin-top: 1rem;
 }
 
-.artist-page-names {
-  overflow-wrap: anywhere;
-}
-
-.artist-page-credited {
-  color: var(--app-muted);
-  font-size: .85rem;
-  margin: 0;
-}
-
-.artist-page-meta {
-  align-items: center;
-  color: var(--app-muted);
-  display: flex;
-  flex-wrap: wrap;
-  font-size: .85rem;
-  gap: .4rem .8rem;
-  margin: 0;
-}
-
-.artist-page-meta a {
-  border: 1px solid var(--app-line-strong);
-  color: var(--app-text);
-  padding: .2rem .5rem;
-  text-decoration: none;
-}
-
-.artist-page-meta a:hover,
-.artist-page-meta a:focus-visible {
-  border-color: var(--app-accent);
-}
-
 .artist-releases {
   margin-top: 1.5rem;
 }
@@ -245,11 +213,6 @@
   text-decoration-color: var(--app-accent);
 }
 
-.artist-cover-note {
-  color: var(--app-muted);
-  font-size: .7rem;
-}
-
 .artist-cover-controls {
   align-items: center;
   display: flex;
@@ -288,7 +251,7 @@
   margin-left: auto;
 }
 
-/* Narrow screens: the cover sits above the text instead of beside it. */
+/* Narrow screens: the cover sits below the title and About instead of beside them. */
 @media (max-width: 640px) {
   .artist-page-header:has(> .artist-cover-cycle) {
     grid-template-columns: minmax(0, 1fr);
@@ -302,7 +265,6 @@
     grid-column: 1;
     grid-row: 2;
     max-width: 10rem;
-
   }
 }
 

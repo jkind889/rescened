@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom";
 import LikeButton from "./LikeButton";
 import ShareButton from "./ShareButton";
 import CommentCountLink from "../features/comments/CommentCountLink";

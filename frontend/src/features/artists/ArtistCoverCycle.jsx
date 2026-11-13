@@ -33,7 +33,9 @@ function readHidden() {
 
 // The artist header's picture: release cover art already stored in the
 // Rescened catalog, cycling through the artist's main releases. It is release
-// art, not a portrait, and is labeled that way. Nothing is fetched from a
+// art, not a portrait: each cover's visible caption links to its release, and
+// a group of covers has a "Cover art from releases by ..." carousel label for
+// screen readers (there is no separate explanatory note). Nothing is fetched from a
 // provider, and nothing is invented: with no usable cover the component
 // renders nothing, and a cover that fails to load is dropped from the cycle.
 //

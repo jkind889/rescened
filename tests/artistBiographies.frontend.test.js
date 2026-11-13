@@ -53,6 +53,7 @@ test("artist header keeps About beside the cover without secondary identity text
   assert.match(header, /artist-page-heading-copy/);
   assert.ok(header.indexOf('<ArtistBiography ') > header.indexOf('<h1'));
   assert.match(header, /<ArtistCoverCycle/);
+  assert.ok(header.indexOf('<ArtistCoverCycle') > header.indexOf('<ArtistBiography '), 'text comes first in the DOM so tab and reading order match the narrow layout');
   for (const absent of ['Also known as', 'Credited as', 'artist-page-meta', 'community-page-kicker']) assert.equal(header.includes(absent), false);
   assert.ok(page.includes('This is not a complete discography.'));
   const css = fs.readFileSync(path.join(__dirname, '../frontend/src/features/artists/ArtistPage.css'), 'utf8');

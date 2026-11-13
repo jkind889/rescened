@@ -158,13 +158,14 @@ export function ArtistPage() {
         />
       ) : null}
       <header className="community-page-header artist-page-header">
-        {headerCovers ? <ArtistCoverCycle artistName={artist.name} covers={headerCovers} key={artist.artistId} /> : null}
         <div className="artist-page-heading-copy">
           <h1 className="community-page-title">{artist?.name || "Loading…"}</h1>
           {artist && biographyAdvertised(data) ? (
             <ArtistBiography key={`${artist.artistId}-${biographyVersion}`} artistId={artist.artistId} />
           ) : null}
         </div>
+        {/* After the text in the DOM so keyboard and screen-reader order matches the narrow layout; the grid places it beside the text. */}
+        {headerCovers ? <ArtistCoverCycle artistName={artist.name} covers={headerCovers} key={artist.artistId} /> : null}
       </header>
 
       {artist && biographyAdvertised(data) ? (

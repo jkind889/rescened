@@ -1,6 +1,5 @@
 import { API_BASE_URL } from "../../config/api";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { useAuth } from "@clerk/react";
 import { getApiErrorMessage } from "../../utils/apiErrors";
 import "./diary.css";
