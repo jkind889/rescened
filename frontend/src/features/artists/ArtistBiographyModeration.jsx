@@ -145,6 +145,19 @@ function ModerationPanel({ artistId, onChanged }) {
               <BiographyAttribution article={record.accepted.article} license={record.accepted.license} shortened={record.accepted.shortened} edited={false} />
             </div>
           ) : null}
+          {record.pendingRevision ? (
+            <div className="artist-biography-candidate artist-biography-pending">
+              <p className="genre-form-muted">
+                Wikipedia's lead changed. This text is not shown until a moderator publishes it{record.manual ? "; the moderator correction stays in place either way" : ""}:
+              </p>
+              <blockquote lang="en">{record.pendingRevision.text}</blockquote>
+              <BiographyAttribution article={record.pendingRevision.article} license={record.pendingRevision.license} shortened={record.pendingRevision.shortened} edited={false} />
+              <div className="artist-biography-actions">
+                <button className="community-secondary-button" disabled={busy} onClick={() => run("accept-revision")} type="button">Publish new text</button>
+                <button className="community-secondary-button" disabled={busy || needsReason} onClick={() => run("dismiss-revision", { reason })} type="button">Keep current text</button>
+              </div>
+            </div>
+          ) : null}
           {record.candidate ? (
             <div className="artist-biography-candidate">
               <p className="genre-form-muted">Candidate waiting for review:</p>
@@ -153,7 +166,7 @@ function ModerationPanel({ artistId, onChanged }) {
             </div>
           ) : null}
           <label className="artist-biography-field">
-            Reason (for suppress or reject)
+            Reason (for suppress, reject, or keeping current text)
             <input maxLength={500} onChange={(event) => setReason(event.target.value)} type="text" value={reason} />
           </label>
           <div className="artist-biography-actions">

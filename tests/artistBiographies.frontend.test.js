@@ -42,7 +42,9 @@ test("moderator panel results are dropped after sign-out, user switch, or a newe
     assert.equal(panel.split(guarded).length - 1, 2, `${guarded} guards both load and command results`);
   }
   assert.ok(panel.includes("setText(correctionDraftFor(data.biography));\n      setReason(\"\");\n      setMessage(\"Saved.\");"), "a successful command resyncs the correction box");
-  assert.equal(panel.split("<BiographyAttribution").length - 1, 2, "published and candidate excerpts both carry full attribution");
+  assert.equal(panel.split("<BiographyAttribution").length - 1, 3, "published, staged-revision, and candidate excerpts all carry full attribution");
+  assert.match(panel, /run\("accept-revision"\)/);
+  assert.match(panel, /disabled=\{busy \|\| needsReason\} onClick=\{\(\) => run\("dismiss-revision", \{ reason \}\)\}/, "keeping the current text needs a reason");
 });
 
 test("artist header keeps About beside the cover without secondary identity text", () => {

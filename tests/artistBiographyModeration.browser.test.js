@@ -23,6 +23,7 @@ export function useAuth() { const snapshot = useSyncExternalStore((listener) => 
 const stub = `
 const record = (revision, suppressed) => ({ artistId: '${ARTIST}', revision, identity: { state: 'verified', qid: 'Q1', reasons: [] }, moderation: { suppressed, suppressedReason: suppressed ? 'r' : '' }, display: !suppressed,
   accepted: { text: 'Synthetic band excerpt for the moderation test.', shortened: true, license: { name: 'CC BY-SA 4.0', url: 'https://creativecommons.org/licenses/by-sa/4.0/' }, article: { title: 'Synthetic', url: 'https://example.invalid/a', revisionId: 5, revisionUrl: 'https://example.invalid/r' } },
+  pendingRevision: revision === 1 ? { text: 'Unreviewed changed lead from a newer revision.', shortened: false, license: { name: 'CC BY-SA 4.0', url: 'https://creativecommons.org/licenses/by-sa/4.0/' }, article: { title: 'Synthetic', url: 'https://example.invalid/a', revisionId: 6, revisionUrl: 'https://example.invalid/r6' } } : null,
   candidate: null, manual: null, fetch: {}, history: [] });
 window.__aborts = 0; window.__pending = [];
 window.__release = () => { const next = window.__pending.shift(); if (next) next(); };
@@ -67,8 +68,14 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><ArtistBiog
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
     await page.getByText('Biography moderation').click();
     await page.getByText('Published excerpt:').waitFor();
-    assert.equal(await page.locator('a[rel~="license"]').count(), 1, 'the excerpt carries its license link');
-    await page.getByLabel('Reason (for suppress or reject)').fill('Sensitive reason text');
+    // A staged revision is shown to moderators with its own attribution, and keeping the current text needs a reason.
+    await page.getByText("Wikipedia's lead changed").waitFor();
+    await page.getByText('Unreviewed changed lead from a newer revision.').waitFor();
+    assert.equal(await page.locator('a[rel~="license"]').count(), 2, 'published and staged excerpts each carry their license link');
+    assert.equal(await page.getByRole('button', { name: 'Keep current text' }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: 'Publish new text' }).isEnabled(), true);
+    await page.getByLabel('Reason (for suppress, reject, or keeping current text)').fill('Sensitive reason text');
+    assert.equal(await page.getByRole('button', { name: 'Keep current text' }).isEnabled(), true);
     await page.getByRole('button', { name: 'Suppress' }).click();
 
     // Sign out while the command is pending, then let the response arrive.
@@ -83,7 +90,7 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><ArtistBiog
     await page.evaluate(() => window.__setAuth({ isSignedIn: true, userId: 'user_other' }));
     await page.getByText('Biography moderation').click();
     await page.getByText('Published excerpt:').waitFor();
-    assert.equal(await page.getByLabel('Reason (for suppress or reject)').inputValue(), '');
+    assert.equal(await page.getByLabel('Reason (for suppress, reject, or keeping current text)').inputValue(), '');
     assert.equal(await page.getByText('Saved.').count(), 0);
     assert.deepEqual(errors, []);
   } finally {
