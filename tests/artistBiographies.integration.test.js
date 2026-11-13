@@ -246,6 +246,43 @@ integration("monthly identity revalidation also stages changed text instead of p
   assert.match(after.pendingRevision.text, /disputed/);
 });
 
+integration("a plan apply cannot replace published text or override a dismissal, and a refresh after loading makes an accept conflict", async () => {
+  await publish();
+  const path = `/moderation/artist-biographies/${artist.artistId}`;
+  const at = (days) => new Date(NOW.getTime() + days * 24 * 3600 * 1000);
+  const revision = (revid, html) => ({ page: () => F.wpPage({ lastrevid: revid }), parse: (url) => F.wpParse({ revid: Number(url.searchParams.get("oldid")), html }) });
+  const vandal = revision(F.REVISION + 1, F.LEAD_HTML.replace("are an English", "are a terrible"));
+
+  // A routine plan includes this artist; applying it stages the changed text instead of publishing it.
+  const plan = await createBiographyPlan({ sources: fakeSources(vandal), artistIds: [artist.artistId], now: at(1), databaseName: "rescened_biographies" });
+  assert.deepEqual([plan.items[0].outcome.status, plan.items[0].published.revisionId, plan.items[0].stagesChangedText, plan.items[0].matchesDismissedText], ["accepted", F.REVISION, true, false]);
+  const applied = await applyBiographyPlan({ plan, sources: fakeSources(vandal), now: at(1) });
+  assert.deepEqual(applied.map((row) => [row.result, row.action]), [["written", "resolve:revision_staged"]]);
+  let stored = await record();
+  assert.equal(stored.accepted.article.revisionId, F.REVISION);
+  assert.match(stored.pendingRevision.text, /terrible/);
+
+  // Dismissed text stays out even when a later plan resolves to it.
+  const dismissed = await call("POST", `${path}/dismiss-revision`, { user: "user_mod", body: { expectedRevision: stored.revision, reason: "Vandalism" } });
+  assert.equal(dismissed.status, 200, JSON.stringify(dismissed.body));
+  const later = await createBiographyPlan({ sources: fakeSources(vandal), artistIds: [artist.artistId], now: at(2), databaseName: "rescened_biographies" });
+  assert.deepEqual([later.items[0].stagesChangedText, later.items[0].matchesDismissedText], [false, true]);
+  await applyBiographyPlan({ plan: later, sources: fakeSources(vandal), now: at(2) });
+  stored = await record();
+  assert.deepEqual([stored.accepted.article.revisionId, stored.pendingRevision, stored.dismissedRevision.reason], [F.REVISION, null, "Vandalism"]);
+  assert.equal(JSON.stringify((await call("GET", `/artists/${artist.artistId}/biography`)).body).includes("terrible"), false);
+
+  // A moderator loads staged text A; refresh then stages text B; accepting with the loaded revision conflicts.
+  await refreshBiographies({ sources: fakeSources(revision(F.REVISION + 2, F.LEAD_HTML.replace("are an English", "are a first"))), now: at(9) });
+  const loaded = (await call("GET", path, { user: "user_mod" })).body.biography;
+  assert.match(loaded.pendingRevision.text, /a first/);
+  await refreshBiographies({ sources: fakeSources(revision(F.REVISION + 3, F.LEAD_HTML.replace("are an English", "are a second"))), now: at(17) });
+  const conflict = await call("POST", `${path}/accept-revision`, { user: "user_mod", body: { expectedRevision: loaded.revision } });
+  assert.deepEqual([conflict.status, conflict.body.code], [409, "BIOGRAPHY_REVISION_CONFLICT"]);
+  stored = await record();
+  assert.deepEqual([stored.accepted.article.revisionId, stored.pendingRevision.article.revisionId], [F.REVISION, F.REVISION + 3], "nothing the moderator did not see was published");
+});
+
 integration("a refresh that raced a moderator command is discarded and the command survives", async () => {
   await publish();
   const stale = await record();

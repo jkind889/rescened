@@ -792,9 +792,31 @@ test("refresh stages changed text from a newer revision and keeps showing the ac
     assert.deepEqual([shown.text, shown.article.revisionId], [record.accepted.text, F.REVISION], `${mode}: readers still see the reviewed text and its source`);
   }
 
-  // A reviewed plan (apply) may publish it; that also clears staged state.
-  const reviewed = outcomeUpdate({ ...record, pendingRevision: vandalised }, { status: "accepted", qid: F.QID, candidate: vandalised, evidence: outcome.evidence, reasons: [] }, { mode: "resolve", now: NOW, reviewed: true });
-  assert.deepEqual([reviewed.set.accepted.textHash, reviewed.set.pendingRevision, reviewed.set.dismissedRevision], [vandalised.textHash, null, null]);
+  // A plan apply uses the same path: it cannot replace published text either,
+  // even text a moderator dismissed.
+  const dismissedRecord = { ...record, dismissedRevision: { revisionId: F.REVISION + 1, textHash: vandalised.textHash, dismissedBy: "user_mod", dismissedAt: NOW } };
+  const overDismissal = outcomeUpdate(dismissedRecord, { status: "accepted", qid: F.QID, candidate: vandalised, evidence: outcome.evidence, reasons: [] }, { mode: "resolve", now: NOW });
+  assert.deepEqual(["accepted" in overDismissal.set, "pendingRevision" in overDismissal.set, overDismissal.set["identity.state"]], [false, false, "verified"]);
+
+  // A record that is not published yet (here back in review) can still be published by a plan.
+  const unpublished = { ...record, identity: { ...record.identity, state: "needs_review" }, accepted: null, pendingRevision: vandalised };
+  const first = outcomeUpdate(unpublished, { status: "accepted", qid: F.QID, candidate: vandalised, evidence: outcome.evidence, reasons: [] }, { mode: "resolve", now: NOW });
+  assert.deepEqual([first.set.accepted.textHash, first.set.pendingRevision, first.set.dismissedRevision], [vandalised.textHash, null, null]);
+});
+
+test("returning to dismissed text clears an older staged text; identical text refreshes extraction metadata", async () => {
+  const { outcome } = await resolve();
+  const base = acceptedRecord(outcome);
+  const record = { ...base, identity: { ...base.identity, state: "verified", basis: "automatic" } };
+  const x = revisionOf(record.accepted, { revisionId: F.REVISION + 1, text: "Fixture Band are a band a moderator declined this wording for." });
+  const y = revisionOf(record.accepted, { revisionId: F.REVISION + 2, text: "Fixture Band are a band with a later wording that was staged." });
+  const backToX = outcomeUpdate({ ...record, pendingRevision: y, dismissedRevision: { revisionId: F.REVISION + 1, textHash: x.textHash, dismissedBy: "user_mod", dismissedAt: NOW } }, { status: "accepted", qid: F.QID, candidate: revisionOf(x, { revisionId: F.REVISION + 3 }) }, { mode: "content", now: NOW });
+  assert.equal(backToX.set.pendingRevision, null, "the staged text is no longer what Wikipedia says");
+  assert.equal("accepted" in backToX.set, false);
+
+  const sameTextLongerLead = { ...revisionOf(record.accepted, { revisionId: F.REVISION + 4 }), shortened: true, cut: "sentence", extractionVersion: "en-lead-sentences-v2" };
+  const moved = outcomeUpdate({ ...record, accepted: { ...record.accepted, shortened: false } }, { status: "accepted", qid: F.QID, candidate: sameTextLongerLead }, { mode: "content", now: NOW });
+  assert.deepEqual([moved.set.accepted.text, moved.set.accepted.shortened, moved.set.accepted.extractionVersion, moved.set.accepted.article.revisionId], [record.accepted.text, true, "en-lead-sentences-v2", F.REVISION + 4]);
 });
 
 test("identical text only moves the source revision; reverts clear, and dismissed or already staged text is not restaged", async () => {
@@ -832,4 +854,13 @@ test("revision commands need the right fields: dismiss needs a reason, accept ta
   assert.throws(() => normalizeCommand("dismiss_revision", { expectedRevision: 3 }), /reason is required/);
   assert.deepEqual(normalizeCommand("accept_revision", { expectedRevision: 3 }), { action: "accept_revision", expectedRevision: 3 });
   assert.throws(() => normalizeCommand("accept_revision", { expectedRevision: 3, text: "x" }), /Unsupported field text/);
+});
+
+test("identity revalidation of a moderator-confirmed biography stages changed text too", async () => {
+  const { outcome } = await resolve();
+  const base = acceptedRecord(outcome);
+  const record = { ...base, identity: { ...base.identity, state: "verified", basis: "moderator" }, moderation: { suppressed: false, verdict: "match_confirmed", verdictQid: F.QID } };
+  const changed = revisionOf(record.accepted, { revisionId: F.REVISION + 7, text: "Fixture Band are an English rock band, newly worded lead." });
+  const { set, event } = outcomeUpdate(record, { status: "needs_review", qid: F.QID, reasons: ["P31_UNFAMILIAR"], candidate: changed, evidence: outcome.evidence }, { mode: "resolve", now: NOW });
+  assert.deepEqual([set["identity.state"], set["identity.basis"], "accepted" in set, set.pendingRevision.textHash, event.action], ["verified", "moderator", false, changed.textHash, "resolve:revision_staged"]);
 });
