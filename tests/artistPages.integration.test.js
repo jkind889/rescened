@@ -335,6 +335,32 @@ integration("the header offers stored covers only from main-credited releases an
   }
 });
 
+integration("many newer guest credits cannot crowd an artist's main releases out of the cover candidates", async () => {
+  const created = await artist("coverCrowded", "Zzyzx Crowded");
+  await artist("coverHost", "Zzyzx Host");
+  const created_keys = [];
+  try {
+    await album("crowdedMain", "Only Main Release", [credit("Zzyzx Crowded", "coverCrowded")], { releaseYear: 1990, cover: "https://coverartarchive.org/release/00000000-0000-4000-8000-0000000000aa/front-500" });
+    created_keys.push("crowdedMain");
+    // More guest appearances than the candidate cap, all newer and all with covers.
+    await AlbumCatalog.insertMany(Array.from({ length: 65 }, (_, index) => ({
+      albumId: crypto.randomUUID(),
+      title: `Guest ${index}`,
+      artistDisplayName: "Zzyzx Host",
+      artistCredits: [credit("Zzyzx Host", "coverHost"), credit("Zzyzx Crowded", "coverCrowded", "featured")],
+      releaseYear: 2000 + (index % 25),
+      cover: `https://coverartarchive.org/release/${String(index).padStart(8, "0")}-0000-4000-8000-0000000000bb/front-500`,
+    })));
+    const detail = await request(`/artists/${created.artistId}`);
+    assert.equal(detail.status, 200, JSON.stringify(detail.body));
+    assert.deepEqual(detail.body.covers.map((entry) => entry.title), ["Only Main Release"]);
+  } finally {
+    await AlbumCatalog.deleteMany({ artistDisplayName: "Zzyzx Host" });
+    await AlbumCatalog.deleteMany({ albumId: { $in: created_keys.map((key) => albums[key]?.albumId).filter(Boolean) } });
+    await Artist.deleteMany({ artistId: { $in: [artists.coverCrowded.artistId, artists.coverHost.artistId] } });
+  }
+});
+
 integration("artist link checks name only registry artists, by identity, with the flag and input bounds enforced", async () => {
   const ghost = crypto.randomUUID();
   const ids = [artists.jay.artistId.toUpperCase(), ghost, artists.vSinger.artistId, artists.jay.artistId];
