@@ -1,6 +1,17 @@
 .artist-page-header {
   display: grid;
   gap: .5rem;
+  padding-bottom: 1rem;
+}
+
+.artist-page-heading-copy {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.artist-page-heading-copy .artist-biography {
+  margin-top: 1rem;
 }
 
 .artist-page-names {
@@ -176,7 +187,7 @@
 
 .artist-page-header > .artist-cover-cycle {
   grid-column: 2;
-  grid-row: 1 / span 6;
+  grid-row: 1;
 }
 
 .artist-cover-cycle {
@@ -283,11 +294,15 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .artist-page-heading-copy {
+    grid-row: 1;
+  }
+
   .artist-page-header > .artist-cover-cycle {
     grid-column: 1;
-    grid-row: auto;
+    grid-row: 2;
     max-width: 10rem;
-    order: -1;
+
   }
 }
 

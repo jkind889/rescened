@@ -44,3 +44,17 @@ test("moderator panel results are dropped after sign-out, user switch, or a newe
   assert.ok(panel.includes("setText(correctionDraftFor(data.biography));\n      setReason(\"\");\n      setMessage(\"Saved.\");"), "a successful command resyncs the correction box");
   assert.equal(panel.split("<BiographyAttribution").length - 1, 2, "published and candidate excerpts both carry full attribution");
 });
+
+test("artist header keeps About beside the cover without secondary identity text", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const page = fs.readFileSync(path.join(__dirname, "../frontend/src/Pages/ArtistPage.jsx"), "utf8");
+  const header = page.slice(page.indexOf('<header className="community-page-header artist-page-header">'), page.indexOf('</header>', page.indexOf('<header className="community-page-header artist-page-header">')));
+  assert.match(header, /artist-page-heading-copy/);
+  assert.ok(header.indexOf('<ArtistBiography ') > header.indexOf('<h1'));
+  assert.match(header, /<ArtistCoverCycle/);
+  for (const absent of ['Also known as', 'Credited as', 'artist-page-meta', 'community-page-kicker']) assert.equal(header.includes(absent), false);
+  assert.ok(page.includes('This is not a complete discography.'));
+  const css = fs.readFileSync(path.join(__dirname, '../frontend/src/features/artists/ArtistPage.css'), 'utf8');
+  assert.equal(css.includes('grid-row: 1 / span 6'), false);
+});

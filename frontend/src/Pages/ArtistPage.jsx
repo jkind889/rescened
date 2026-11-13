@@ -159,39 +159,16 @@ export function ArtistPage() {
       ) : null}
       <header className="community-page-header artist-page-header">
         {headerCovers ? <ArtistCoverCycle artistName={artist.name} covers={headerCovers} key={artist.artistId} /> : null}
-        <p className="community-page-kicker">Artist</p>
-        <h1 className="community-page-title">{artist?.name || "Loading…"}</h1>
-        {artist?.aliases?.length ? (
-          <p className="community-page-description artist-page-names">
-            Also known as{" "}
-            {artist.aliases.map((alias, index) => (
-              <Fragment key={alias.name}>
-                {index > 0 ? ", " : null}
-                <span lang={alias.locale || undefined}>{alias.name}</span>
-              </Fragment>
-            ))}
-          </p>
-        ) : null}
-        {artist?.creditedAs?.length ? (
-          <p className="artist-page-names artist-page-credited">
-            Credited as {artist.creditedAs.join(", ")}
-          </p>
-        ) : null}
-        {artist ? (
-          <p className="artist-page-meta">
-            <span>{releaseCountLabel(counts?.all)}</span>
-            {artist.musicBrainzUrl ? (
-              <a href={artist.musicBrainzUrl} rel="noopener noreferrer" target="_blank">MusicBrainz</a>
-            ) : null}
-          </p>
-        ) : null}
+        <div className="artist-page-heading-copy">
+          <h1 className="community-page-title">{artist?.name || "Loading…"}</h1>
+          {artist && biographyAdvertised(data) ? (
+            <ArtistBiography key={`${artist.artistId}-${biographyVersion}`} artistId={artist.artistId} />
+          ) : null}
+        </div>
       </header>
 
       {artist && biographyAdvertised(data) ? (
-        <>
-          <ArtistBiography key={`${artist.artistId}-${biographyVersion}`} artistId={artist.artistId} />
-          <ArtistBiographyModeration key={artist.artistId} artistId={artist.artistId} onChanged={() => setBiographyVersion((value) => value + 1)} />
-        </>
+        <ArtistBiographyModeration key={artist.artistId} artistId={artist.artistId} onChanged={() => setBiographyVersion((value) => value + 1)} />
       ) : null}
 
       <section className="artist-releases" aria-labelledby="artist-releases-heading">
