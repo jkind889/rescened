@@ -37,7 +37,7 @@ Catalog responses pass these keys through on `artistCredits`, so album-bearing r
 
 `npm run catalog:import` resolves every dataset credit's `artistMbid` through the registry during preflight. Newly fetched datasets retain the underlying MusicBrainz `artist.name` as optional `artistName`, separately from the credited `name`. New registrations use that verified name with `nameSource: "musicbrainz-artist"`; old datasets without it retain provisional `nameSource: "artist-credit"`. Conflicting canonical names for one MBID stop import preflight. A known MBID reuses its `artistId` without silently renaming it. An unknown MBID gets one planned registration (`artistSource: "import"`), shared by every row that credits it. Registrations are inserted first, in the same transaction as the catalog writes, so a concurrent registration of the same MBID rolls the whole import back. Only artists credited by inserted or refreshed rows are registered. Quarantined rows and preserved credits do not register artists.
 
-The import report includes `artistRegistry: { registered, reused }`. Re-importing the same dataset is idempotent. Before `--apply`, the CLI builds the registry's unique MusicBrainz index.
+The import report includes `artistRegistry: { registered, reused }`. Re-importing the same dataset is idempotent. The CLI connects with automatic collection and index creation off, so a dry run creates no collection or index. `--apply` builds the catalog and registry indexes, including the registry's unique MusicBrainz index, before it writes.
 
 **Rollout order matters.** The first import after this change would refresh every previously imported row, because its credits gain identities. An import refresh advances `catalogRevision` without carrying reviewed baselines or active Last.fm mappings forward, so those would go stale, and pending corrections would fail with `CATALOG_CHANGED`. To avoid that, run the [backfill](#backfill) first, against the same datasets. The backfill carries baselines and mappings forward. The import merge also keeps the backfill's `fieldProvenance.artistIdentity` while credit identities are unchanged, so a later re-import of the same dataset reports those albums as `unchanged`.
 
@@ -116,7 +116,7 @@ Keep plans and reports outside the repository, for example in `~/rescened-ops/ar
      --confirm-target <database> --report <new-report.json>
    ```
 
-   Apply refuses to run if the checksum differs, the plan was edited, or the connected database, the plan target, and `--confirm-target` do not all match.
+   Apply refuses to run if the checksum differs, the plan was edited, or the connected database, the plan target, and `--confirm-target` do not all match. It also refuses, before any write, a plan whose album updates change anything besides adding an `artistId`/`artistMbid` pair that the plan registers or reuses, even if the edited plan was re-sealed with a valid checksum.
 
 ### Apply semantics
 
