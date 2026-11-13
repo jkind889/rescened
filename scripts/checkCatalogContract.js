@@ -28,6 +28,7 @@ const roots = [
   "scripts/mergeGenres.js",
   "scripts/backfillMissingAlbumCovers.js",
   "scripts/backfillArtistIdentity.js",
+  "scripts/enrichArtistIdentities.js",
   "scripts/artistBiographies.js",
 ];
 const allowed = ["spotifyProfileUrl", "Spotify Profile", "open.spotify.com/user/"];

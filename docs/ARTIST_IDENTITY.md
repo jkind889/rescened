@@ -1,6 +1,6 @@
 # Artist identity (phase 1)
 
-Last reviewed: 2026-11-11
+Last reviewed: 2026-11-12
 
 Phase 1 gives artists stable public Rescened IDs and keeps MusicBrainz artist IDs on album credits. A flagged [artist pages prototype](#artist-pages-prototype) builds on it with local artist pages, credit links, and multilingual search aliases, and a separately flagged [MusicBrainz discography](#musicbrainz-discography-prototype). A separately flagged, cached [biography](ARTIST_BIOGRAPHIES.md) can add a short Wikipedia excerpt. The page header shows a cycle of the artist's stored release cover art (see [Header cover art](#header-cover-art)); there are no artist photos and no merges. Listening stats still group top artists by display name.
 
@@ -74,7 +74,9 @@ An album is considered only through its single `musicbrainz` / `release-group` r
 - The album has the same number of credits as the dataset row.
 - Each credit name exactly equals the dataset credit name at the same position after Unicode NFC normalization and trimming. The legacy-migration form, with the join phrase folded into the name (for example, `V with`), is also accepted. There is no case-folding or fuzzy matching.
 - No credit already carries a different MBID or `artistId`.
-- Credit provenance is automated. Credits whose `fieldProvenance.artistCredits.source` is `community` or `manual` are never rewritten. A non-import album with no credit provenance is treated as user-owned.
+- Credit provenance is automated, unless the plan opts in to user-owned credits. Credits whose `fieldProvenance.artistCredits.source` is `community` or `manual`, and non-import albums with no credit provenance, are user-owned. By default they go to `review`. With `--link-user-owned` (plan mode only, recorded as `options.linkUserOwnedCredits` in the sealed plan), exact matches among them are linked the same additive way. Each such update is marked `userOwnedCredits` with its `creditProvenance`, and `counts.userOwnedLinks` totals them. Every other rule above still applies. Their wording is never rewritten.
+
+Apply refuses any plan that marks user-owned updates without that sealed option, or whose count disagrees. It copies the option into the apply report and marks each such outcome. It also records `userOwnedCredits` and `creditProvenance` in the album's `fieldProvenance.artistIdentity`, while `fieldProvenance.artistCredits` keeps its original owner.
 
 Linking adds only `artistId` and `artistMbid`. Every existing credit key and value, including name, role, and order, is preserved. `fieldProvenance.artistCredits` is unchanged. A separate `fieldProvenance.artistIdentity` entry records the plan checksum, datasets, release group, and time.
 
@@ -85,10 +87,10 @@ Linking adds only `artistId` and `artistMbid`. Every existing credit key and val
 | `albumUpdates` | Exact matches to link, with `beforeCredits`, `afterCredits`, and the expected catalog revision. |
 | `artistRegistrations` | Full registry documents to insert, one per new MBID, with pre-assigned `artistId` values. |
 | `reusedArtists` | Existing registry artists the plan relies on. |
-| `review` | `USER_OWNED_CREDITS`: matches that a reviewed catalog correction would need to link. Includes the proposed MBIDs. |
-| `flagged` | `MULTIPLE_RELEASE_GROUPS`, `SOURCE_CONFLICT` (input datasets disagree), `INVALID_SOURCE_CREDIT`, `CREDIT_COUNT_MISMATCH`, `CREDIT_NAME_MISMATCH`, `EXISTING_IDENTITY_CONFLICT`. |
+| `review` | `USER_OWNED_CREDITS`: exact matches on contributor- or moderator-owned credits, with the proposed MBIDs. They link only through a reviewed correction or a plan made with `--link-user-owned`. |
+| `flagged` | `MULTIPLE_RELEASE_GROUPS`, `SOURCE_CONFLICT` (input datasets disagree), `INVALID_SOURCE_CREDIT`, `CREDIT_COUNT_MISMATCH`, `CREDIT_NAME_MISMATCH`, `EXISTING_IDENTITY_CONFLICT`, and, for [enrichment](#enrichment-from-musicbrainz-release-groups) plans, `ENRICHMENT_UNRESOLVED`. |
 | `unchanged` | Already linked to the same identities. |
-| `noSource` | A release-group reference with no row in any input dataset. |
+| `noSource` | A release-group reference with no row in any input dataset (for enrichment plans, no result in the evidence). |
 
 `counts.withoutReleaseGroup` counts albums that have no MusicBrainz release-group reference, such as most community suggestions. Plan mode exits `2` when anything is flagged or needs review, and `0` otherwise.
 
@@ -118,13 +120,66 @@ Keep plans and reports outside the repository, for example in `~/rescened-ops/ar
 
    Apply refuses to run if the checksum differs, the plan was edited, or the connected database, the plan target, and `--confirm-target` do not all match. It also refuses, before any write, a plan whose album updates change anything besides adding an `artistId`/`artistMbid` pair that the plan registers or reuses, or that would replace an identity a credit already carries, even if the edited plan was re-sealed with a valid checksum.
 
+### Enrichment from MusicBrainz release groups
+
+Albums whose release group appears in no reviewed import dataset land in `noSource`. For those albums, an operator-only fetcher can collect the missing artist credits by exact release-group MBID, without connecting to MongoDB. The backfill then plans from that evidence, using the same matching rules, ownership protection, and apply as any other source. This tooling is not wired into any user-facing path, and nothing runs automatically.
+
+**1. Fetch evidence** (makes MusicBrainz requests; run it only when explicitly authorized):
+
+```sh
+npm run catalog:enrich-identities -- \
+  --from-plan ~/rescened-ops/artist-identity/<database>-<date>.plan.json --plan-sha256 <planSha256> \
+  --cache-dir ~/rescened-ops/artist-identity/musicbrainz-release-group-cache \
+  --out ~/rescened-ops/artist-identity/<date>.credits-evidence.json
+```
+
+Pass the import-dataset plan to `--from-plan`; an enrichment plan is rejected, because its `noSource` also lists every album linked from other sources. `--ids-file <ids.json>` takes a JSON array of release-group MBIDs instead. IDs are validated, lowercased, sorted, and deduplicated before any request, with at most 5,000 unique IDs per run. `--from-plan` checks the plan's seal and `--plan-sha256`, then uses its `noSource` release groups.
+
+- **Requests.** Each ID fetches only `release-group/<mbid>?inc=artist-credits&fmt=json`; there is no search by name or title. Every request in the process shares one gate (at least 1.1 seconds between request starts). Requests use an identifying user agent, an eight-second timeout that covers the response body, and a 256 KiB streamed size limit.
+- **Retries.** Network errors, timeouts, and HTTP 408/425/429/500/502/503/504 get at most three attempts. `Retry-After` is honored in both formats. A pause over 30 seconds stops the run. Any pause still in force when a run ends is written to the cache as a cooldown, and later runs with that `--cache-dir` refuse to start before it expires.
+- **No retries.** Malformed or oversized responses, identity mismatches, redirects, and other client errors are not retried. Redirects are never followed; the result records only a validated destination release-group MBID for review.
+- **Stops.** The run stops if five consecutive IDs exhaust their retries, if the time budget (`--budget-minutes`, default 30) runs out, or if it is interrupted. A stopped run keeps its cache and publishes no evidence.
+- **Resuming.** Rerun the same command. Only successful results are cached, so each rerun looks up every unresolved ID again; if many IDs stay unresolved, raise `--budget-minutes` or narrow the run with `--ids-file`. Successful results are cached per ID for seven days, in private files written atomically and validated by version, identity, timestamp, shape, and size. An exclusive lock prevents concurrent runs on one cache; a lock is removed only when its owning process on the same host no longer exists.
+- **Coordination.** The gate does not coordinate separate processes, and MusicBrainz rate-limits by source IP. Run one fetch at a time, after other operators such as the biography fetch have finished, and account for other clients on the same network address.
+
+Exit `0` means every ID resolved. `2` means evidence was written with unresolved or deferred IDs. `1` means nothing was written.
+
+The evidence (`rescened-musicbrainz-release-group-credits`, schema `1.0.0`) holds exactly one result per requested ID:
+
+- `resolved` results carry the release-group MBID, observation time, title, and ordered credits (`name`, `joinPhrase`, `artistMbid`, `artistName`). Credits use the catalog importer's normalization, and each one must have a valid canonical artist name.
+- `unresolved` results carry a reason: `NOT_FOUND`, `REDIRECTED`, `ID_MISMATCH`, `INVALID_RESPONSE`, `INVALID_CREDITS`, or `HTTP_ERROR`.
+- `deferred` results (`TRANSIENT_FAILURE`) record the number of attempts and the last failure.
+
+The artifact records the request digest, any originating plan digest, MusicBrainz as the source with its CC0 license, counts, and failure reasons, all under `evidenceSha256`. It is published atomically and never overwrites an existing file. It contains no ListenBrainz rankings or album metadata, and `catalog:import` and `catalog:validate` refuse it (`UNSUPPORTED_ARTIFACT`).
+
+**2. Review the evidence**, especially every unresolved and deferred category. The seal proves integrity, not authorship; anyone can reseal an edited file. The plan step therefore pins the exact digest you reviewed.
+
+**3. Plan from the evidence**, separately for each database:
+
+```sh
+npm run catalog:backfill-artists -- \
+  --enrichment ~/rescened-ops/artist-identity/<date>.credits-evidence.json \
+  --enrichment-sha256 <evidenceSha256> \
+  --out ~/rescened-ops/artist-identity/<database>-<date>.enrichment.plan.json
+```
+
+`--enrichment` replaces `--input`; the two cannot be combined, and `--resolve-artist-names` is rejected because the evidence already carries verified names. The evidence and its pinned digest are validated before any database connection.
+
+- **Unsuccessful lookups.** An album whose release group was unresolved or deferred is flagged `ENRICHMENT_UNRESOLVED`, with the specific reason, any HTTP status, and any redirect destination. The details add `userOwned` for community or manual credits and `alreadyIdentified` when every credit already carries an identity. Flagged albums do not reappear in `noSource`. To retry deferred IDs, rerun the original fetch, reusing its cache, or list them in an `--ids-file`, then plan from the new evidence.
+- **Provenance.** The plan's `inputs` entry records the evidence kind, `evidenceSha256`, and the unresolved and deferred counts. Album updates list their `sourceObservations`. New registry artists take the verified canonical name, and their provenance records the observation time and evidence digest. Existing registry names are never changed.
+- **Name conflicts.** If two resolved release groups report different canonical names for one artist MBID (for example, an artist renamed during a long fetch), the affected albums are flagged `SOURCE_CONFLICT`.
+- **noSource coverage.** An enrichment-only plan reports every album outside its evidence as `noSource`, including albums already linked by an earlier backfill. `noSource` describes the plan's source coverage, not missing identities.
+- **Apply.** It is unchanged. Plan version `1.0.0`, the stored-revision and raw-credit checks, per-album transactions, carrying revisions forward, idempotent reruns, and partial-commit reporting all apply as described below.
+
+Generate a fresh plan per database from the same evidence. Registry artist IDs differ between databases, so never reuse a dev plan elsewhere. Apply to shared dev or production still needs explicit authorization for the named target and the exact reviewed plan.
+
 ### Apply semantics
 
 - **Report first.** Before connecting, apply reserves the report path. If it cannot write the final report after commits, it prints the report and `databaseCommitted` to the console.
 - **Registry first.** It validates the sealed plan and confirmed target before connecting, then verifies the connected database before building the registry's unique index. One transaction then inserts the planned artists and confirms that each reused artist still exists. If the registry now maps a planned MBID to a different `artistId`, the apply stops with `ARTIST_REGISTRY_CHANGED` before any album changes. In that case, create a new plan.
 - **One transaction per album.** Inside its transaction, each album is read through the raw collection and compared with its planned stored revision and exact `beforeCredits`. This avoids Mongoose casting, which would trim legacy names such as `Alpha & ` or add default roles. It sets the new credits, advances `catalogRevision` by one, and carries the album's reviewed baseline and active Last.fm mappings to the new revision, as the cover backfill does.
 - **Album outcomes.** A changed album is reported as `conflict` and left untouched. An album that already has the planned credits at the planned revision is `already_applied`. Rerunning the same plan is therefore safe.
-- **Pending corrections.** Pending corrections created before an album was linked become stale (`CATALOG_CHANGED`), because its revision advances.
+- **Pending corrections.** Pending corrections created before an album was linked become stale (`CATALOG_CHANGED`), because its revision advances. This is more likely for user-owned albums linked with `--link-user-owned`. Such a plan therefore records each update's pending corrections as `pendingCorrections`, with `counts.linkedAlbumsWithPendingCorrections` and `counts.pendingCorrectionsMadeStale`, so they can be reviewed before apply. A needs-changes correction is rebased on the current album when it is revised, so linking does not make it stale. A correction approved after planning makes that album a `conflict`, and the correction's credits are kept.
 - **Unused registrations.** Planned artists are registered before album updates. An album that then conflicts can leave its new artists unused in the registry. This is harmless, and a new plan reuses them.
 - **Partial commits.** Registry and album transactions commit independently. A failed run writes its report with `databaseCommitted` and `completed`, so a partial commit is never mistaken for a rollback. Apply exits `2` if any album conflicted.
 
@@ -244,6 +299,9 @@ MusicBrainz core data is CC0. The section credits MusicBrainz and links to the a
 
 ## Verification
 
+- `tests/artistEnrichmentEvidence.test.js` covers the evidence contract: ID normalization and limits, plan-derived IDs, sealing and tamper detection, exact result accounting, per-reason outcome rules, canonical-name and normalization checks, digest pinning, atomic no-overwrite publication, and importer refusal.
+- `tests/artistIdentityEnrichment.test.js` covers the release-group fetcher with injected fetch, clock, and gate: endpoint and headers, shared pacing, retry limits, both `Retry-After` formats, persisted cooldowns, redirects, malformed or oversized bodies, body timeouts, interruption, the breaker, the budget, cache validation and resume, locking, and CLI exit codes. A trimmed CC0 MusicBrainz fixture is the only provider payload.
+- `tests/artistIdentityEnrichmentPlan.test.js` covers `--enrichment` and `--link-user-owned` argument rules, opted-in linking of user-owned credits with every other safeguard in place, planning from evidence (verified names, legacy join phrases, community protection, `ENRICHMENT_UNRESOLVED`, existing registry names), and CLI validation before connecting.
 - `tests/artistNames.test.js` covers exact-ID lookup, rate limits, bounded retries/timeouts, response validation, private-cache reuse/resume, and credited-name preservation. All provider responses are fixtures.
 - `tests/artistIdentity.test.js` covers the identity helpers, model invariants, submission validation, importer planning, backfill classification and sealing, the checked-in seed dataset as a source, and the frontend credit helpers.
 - `tests/artistPages.test.js` covers the collaboration badge (duplicate same-ID credits, distinct and homonymous artists, unresolved credits), reviewed-alias validation, search-key folding, query parsing, the search pipeline expansion, the feature flag, and the frontend credit and release helpers.
@@ -253,7 +311,7 @@ MusicBrainz core data is CC0. The section credits MusicBrainz and links to the a
 - `tests/artistCoverCycle.browser.test.js` is opt-in (`RUN_FRONTEND_BROWSER_TESTS=true` with Playwright). With images stubbed and time controlled, it checks advancing and wrapping, stopping on hover, keyboard focus, a hidden tab, and Pause, reduced motion, the fade, and broken, single, and missing covers.
 - `tests/artistLinks.test.js` covers link-query validation, the flag on `/artists/links`, credited-ID collection, display-line segmentation (wording kept, whole-name matching, homonyms, name-only credits), the link store (batching, caching, cool-down without self-retry, the disabled stop), and a source guard that no `ArtistCredits` sits inside another link and external candidates stay plain. `tests/artistLinks.component.test.js` renders the real credits, card, ranked list, and review queue to static markup (it skips without `npm --prefix frontend ci`) and asserts the links, their text, and that no anchor nests.
 - `tests/artistPages.integration.test.js` covers artist headers, keyset release paging and type filters (including untyped rows and equal-title ties), multi-credited releases, homonyms, the search candidate cap, alias and credited-name search, identity search expansion with the flag on and off, album-detail link resolution, stored main-credit header cover selection, and `/artists/links` (unknown IDs, duplicates, homonym IDs, bounds, the flag). It fails if any request leaves the test server.
-- `tests/artistIdentity.integration.test.js` covers the transactional paths on a replica set: import registration and idempotency, approval resolution and conflicts, and backfill planning without writes, target refusal, guarded apply, mapping carry-forward, rerun, and registry drift.
+- `tests/artistIdentity.integration.test.js` covers the transactional paths on a replica set: import registration and idempotency, approval resolution and conflicts, and backfill planning without writes, target refusal, guarded apply, mapping carry-forward, rerun, and registry drift. Two enrichment scenarios plan from evidence and apply (new and reused artists, provenance, unchanged credit wording, community protection, carrying revisions forward, rerun), and show that a correction approved between planning and apply is a conflict. A third scenario links community and manual credits under `--link-user-owned`: it keeps their credit provenance and wording, lets a later correction win, and checks that a rerun is idempotent.
 
 ## Known limitations
 
@@ -262,7 +320,7 @@ MusicBrainz core data is CC0. The section credits MusicBrainz and links to the a
 - Credits without an MBID stay unlinked. There is no name matching, and the suggestion and correction forms have no artist search or picker. Contributors can propose identity only through a MusicBrainz prefill or by keeping an existing credit's name.
 - The correction form's comma-separated credit field still splits names that contain commas, such as "Tyler, The Creator". This is a pre-existing problem. Those pieces no longer match the current credit, so the correction submits them without identity.
 - Moderator details show a credit's `artistId` and MusicBrainz link. They do not show the registry artist's own name.
-- User-owned credits are not backfilled. Link them through reviewed corrections.
+- User-owned credits are linked only when a plan is made with `--link-user-owned`. Otherwise, link them through reviewed corrections.
 - Legacy migration and the importer's provider adapters still drop join phrases from credits.
 - Listening stats and activity still use credit names. Catalog search expands by identity only for exact registry names and reviewed aliases, and only while artist pages are enabled.
 - Reviewed aliases are a checked-in table, not stored registry data. There is no alias editor or MusicBrainz alias import yet.

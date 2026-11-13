@@ -10,6 +10,7 @@ const Artist = require("../models/Artist");
 const { AlbumMapping, Job } = require("../models/Listening");
 const { artistMbidOf, newArtistDocument } = require("../lib/artists/identity");
 const { applyPlan, buildPlan, createPlan } = require("../lib/artists/backfill");
+const { buildEvidence, evidenceBackfillSource } = require("../lib/artists/enrichmentEvidence");
 const { applyImport, buildCatalogInput, preflightImport } = require("../lib/catalogImport/persistence");
 const { approveAlbumSubmission } = require("../routes/utils/approval");
 const {
@@ -397,6 +398,215 @@ async function canonicalImportNameTest() {
   assert.equal(album.artistCredits[0].artistName, undefined, "canonical metadata is not copied into album credits");
 }
 
+
+function enrichmentSource(results, generatedAt = "2026-11-12T11:00:00.000Z") {
+  const evidence = buildEvidence({ ids: results.map((row) => row.releaseGroupMbid), results, generatedAt });
+  return { evidence, ...evidenceBackfillSource({ evidence, sourcePath: "/ops/evidence.json", sha256: "f".repeat(64) }) };
+}
+
+function evidenceRow(releaseGroupMbid, credits) {
+  return { releaseGroupMbid, status: "resolved", observedAt: "2026-11-12T10:00:00.000Z", title: "Evidence", credits };
+}
+
+async function enrichmentPlanApplyTest() {
+  await Promise.all([AlbumCatalog.deleteMany({}), Artist.deleteMany({}), AlbumMapping.deleteMany({}), Job.deleteMany({})]);
+  const groups = Array.from({ length: 4 }, () => crypto.randomUUID());
+  const existingDelta = await Artist.create(newArtistDocument({ name: "Delta (registry)", artistMbid: MBID_D, source: "import" }));
+  const link = await AlbumCatalog.create({
+    albumId: crypto.randomUUID(), title: "Enriched Link", artistDisplayName: "Alpha with Delta",
+    artistCredits: [{ name: "Alpha", role: "main" }, { name: "Delta", role: "featured" }],
+    externalReferences: [rgRef(groups[0])], fieldProvenance: { artistCredits: { source: "musicbrainz" } },
+    catalogSource: "import", catalogRevision: 6,
+  });
+  const rawLegacyId = crypto.randomUUID();
+  await AlbumCatalog.collection.insertOne({
+    albumId: rawLegacyId, title: "Enriched Raw Legacy", artistDisplayName: "Cast with Beta",
+    artistCredits: [{ name: "Cast with " }, { role: "main", name: "Beta" }],
+    externalReferences: [rgRef(groups[1])], catalogSource: "import", catalogRevision: 2,
+  });
+  const community = await AlbumCatalog.create({
+    albumId: crypto.randomUUID(), title: "Enriched Community", artistDisplayName: "Alpha",
+    artistCredits: [{ name: "Alpha", role: "main" }], externalReferences: [rgRef(groups[2])],
+    fieldProvenance: { artistCredits: { source: "community", submissionId: "s" } }, catalogSource: "community",
+  });
+  const missing = await AlbumCatalog.create({
+    albumId: crypto.randomUUID(), title: "Enriched Missing", artistDisplayName: "Gamma",
+    artistCredits: [{ name: "Gamma", role: "main" }], externalReferences: [rgRef(groups[3])], catalogSource: "import",
+  });
+  await AlbumMapping.create({
+    mappingId: crypto.randomUUID(), key: "lastfm:alpha:enriched-link", artist: "Alpha", album: "Enriched Link",
+    artistKey: "alpha", albumKey: "enriched link", albumId: link.albumId, catalogRevision: 6, reviewer: "moderator", reason: "seed",
+  });
+
+  const { evidence, validation: source, unresolved } = enrichmentSource([
+    evidenceRow(groups[0], [
+      { name: "Alpha", joinPhrase: " with ", artistMbid: MBID_A, artistName: "Alpha Canonical" },
+      { name: "Delta", joinPhrase: "", artistMbid: MBID_D, artistName: "Delta" },
+    ]),
+    evidenceRow(groups[1], [
+      { name: "Cast", joinPhrase: " with ", artistMbid: MBID_C, artistName: "The Cast" },
+      { name: "Beta", joinPhrase: "", artistMbid: MBID_B, artistName: "Beta" },
+    ]),
+    evidenceRow(groups[2], [{ name: "Alpha", joinPhrase: "", artistMbid: MBID_A, artistName: "Alpha Canonical" }]),
+    { releaseGroupMbid: groups[3], status: "unresolved", observedAt: "2026-11-12T10:00:00.000Z", reason: "NOT_FOUND", httpStatus: 404 },
+  ]);
+  const catalogBefore = await AlbumCatalog.find({}).sort({ albumId: 1 }).lean();
+  const plan = await createPlan({ validations: [source], unresolved, AlbumCatalog, Artist, databaseName: DB_NAME });
+  assert.deepEqual(await AlbumCatalog.find({}).sort({ albumId: 1 }).lean(), catalogBefore, "planning never writes the catalog");
+  assert.equal(await Artist.countDocuments({}), 1, "planning never writes the registry");
+  assert.deepEqual([plan.counts.link, plan.counts.review, plan.counts.flagged, plan.counts.artistRegistrations, plan.counts.reusedArtists], [2, 1, 1, 3, 1]);
+  assert.equal(plan.review[0].albumId, community.albumId);
+  assert.deepEqual([plan.flagged[0].albumId, plan.flagged[0].code, plan.flagged[0].details.reason], [missing.albumId, "ENRICHMENT_UNRESOLVED", "NOT_FOUND"]);
+  assert.equal(plan.inputs[0].evidenceSha256, evidence.evidenceSha256);
+
+  const report = await applyPlan({ plan, expectedSha256: plan.planSha256, confirmTarget: DB_NAME, databaseName: DB_NAME, AlbumCatalog, Artist, mongoose });
+  assert.equal(report.completed, true);
+  assert.deepEqual(report.registry, { registered: 3, alreadyRegistered: 0 });
+  assert.equal(report.counts.applied, 2);
+  assert.equal(report.counts.mappingsCarried, 1);
+
+  const alpha = await Artist.findOne({ "externalReferences.externalId": MBID_A }).lean();
+  const cast = await Artist.findOne({ "externalReferences.externalId": MBID_C }).lean();
+  const beta = await Artist.findOne({ "externalReferences.externalId": MBID_B }).lean();
+  assert.equal(alpha.name, "Alpha Canonical", "new registry artists take the verified canonical name");
+  assert.equal(alpha.fieldProvenance.name.nameSource, "musicbrainz-artist");
+  assert.equal(alpha.fieldProvenance.name.evidenceSha256, evidence.evidenceSha256);
+  assert.equal(alpha.fieldProvenance.externalReferences.datasetId, evidence.datasetId);
+  assert.equal(cast.name, "The Cast");
+  assert.equal((await Artist.findOne({ artistId: existingDelta.artistId }).lean()).name, "Delta (registry)", "existing registry names are unchanged");
+
+  const linked = await AlbumCatalog.findById(link._id).lean();
+  assert.deepEqual(linked.artistCredits, [
+    { name: "Alpha", role: "main", artistId: alpha.artistId, artistMbid: MBID_A },
+    { name: "Delta", role: "featured", artistId: existingDelta.artistId, artistMbid: MBID_D },
+  ], "credit wording, roles, and order are unchanged");
+  assert.equal(linked.catalogRevision, 7);
+  assert.equal(linked.fieldProvenance.artistCredits.source, "musicbrainz");
+  assert.deepEqual(linked.fieldProvenance.artistIdentity.datasetIds, [evidence.datasetId]);
+  assert.equal(linked.fieldProvenance.artistIdentity.planSha256, plan.planSha256);
+  assert.equal((await AlbumMapping.findOne({ albumId: link.albumId }).lean()).catalogRevision, 7, "active mappings follow the album");
+
+  const rawAfter = await AlbumCatalog.collection.findOne({ albumId: rawLegacyId });
+  assert.deepEqual(rawAfter.artistCredits, [
+    { name: "Cast with ", artistId: cast.artistId, artistMbid: MBID_C },
+    { role: "main", name: "Beta", artistId: beta.artistId, artistMbid: MBID_B },
+  ], "legacy folded join phrases stay byte-exact");
+  assert.deepEqual((await AlbumCatalog.findById(community._id).lean()).artistCredits, [{ name: "Alpha", role: "main" }], "community credits are protected");
+  assert.deepEqual((await AlbumCatalog.findById(missing._id).lean()).artistCredits, [{ name: "Gamma", role: "main" }]);
+
+  const rerun = await applyPlan({ plan, expectedSha256: plan.planSha256, confirmTarget: DB_NAME, databaseName: DB_NAME, AlbumCatalog, Artist, mongoose });
+  assert.deepEqual(rerun.registry, { registered: 0, alreadyRegistered: 3 });
+  assert.deepEqual([rerun.counts.applied, rerun.counts.alreadyApplied, rerun.counts.conflict], [0, 2, 0]);
+  assert.equal((await AlbumCatalog.findById(link._id).lean()).catalogRevision, 7, "a rerun does not advance revisions again");
+
+  const fresh = await createPlan({ validations: [source], unresolved, AlbumCatalog, Artist, databaseName: DB_NAME });
+  assert.deepEqual([fresh.counts.link, fresh.counts.unchanged, fresh.counts.artistRegistrations], [0, 2, 0], "a fresh plan from the same evidence finds nothing left to link");
+}
+
+async function correctionBetweenPlanAndApplyTest() {
+  await Promise.all([AlbumCatalog.deleteMany({}), Artist.deleteMany({}), AlbumSubmission.deleteMany({})]);
+  const group = crypto.randomUUID();
+  const album = await AlbumCatalog.create({
+    albumId: crypto.randomUUID(), title: "Corrected Before Apply", artistDisplayName: "Alpha",
+    artistCredits: [{ name: "Alpha", role: "main" }], externalReferences: [rgRef(group)],
+    fieldProvenance: { artistCredits: { source: "musicbrainz" } }, catalogSource: "import", catalogRevision: 1,
+  });
+  const { validation: source, unresolved } = enrichmentSource([evidenceRow(group, [{ name: "Alpha", joinPhrase: "", artistMbid: MBID_A, artistName: "Alpha" }])]);
+  const plan = await createPlan({ validations: [source], unresolved, AlbumCatalog, Artist, databaseName: DB_NAME });
+  assert.equal(plan.counts.link, 1);
+
+  // A moderator approves a display-name correction after the plan was reviewed.
+  const current = await AlbumCatalog.findById(album._id).lean();
+  const correction = await createCorrection(current, { artists: { artistDisplayName: "Alpha (corrected)", artistCredits: current.artistCredits } });
+  await approveAlbumSubmission({ submissionId: correction.submissionId, actorUserId: "moderator", applyFields: ["artists"], reason: "Display name" });
+  const corrected = await AlbumCatalog.findById(album._id).lean();
+  assert.equal(corrected.catalogRevision, 2);
+
+  const report = await applyPlan({ plan, expectedSha256: plan.planSha256, confirmTarget: DB_NAME, databaseName: DB_NAME, AlbumCatalog, Artist, mongoose });
+  assert.equal(report.counts.conflict, 1);
+  assert.equal(report.counts.applied, 0);
+  assert.equal(report.albums[0].reason, "album changed after the plan was created");
+  const after = await AlbumCatalog.findById(album._id).lean();
+  assert.deepEqual(after.artistCredits, corrected.artistCredits, "the corrected album is not overwritten");
+  assert.equal(after.artistDisplayName, "Alpha (corrected)");
+  assert.equal(after.catalogRevision, 2);
+}
+
+
+async function userOwnedEnrichmentTest() {
+  await Promise.all([AlbumCatalog.deleteMany({}), Artist.deleteMany({}), AlbumSubmission.deleteMany({})]);
+  const groups = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+  const communityProvenance = { source: "community", submissionId: "community-submission", approvedByUserId: "moderator" };
+  const community = await AlbumCatalog.create({
+    albumId: crypto.randomUUID(), title: "Owned Community", artistDisplayName: "Alpha & Beta",
+    artistCredits: [{ name: "Alpha", role: "main" }, { name: "Beta", role: "featured" }], externalReferences: [rgRef(groups[0])],
+    fieldProvenance: { artistCredits: communityProvenance }, catalogSource: "community", catalogRevision: 3,
+  });
+  const manual = await AlbumCatalog.create({
+    albumId: crypto.randomUUID(), title: "Owned Manual", artistDisplayName: "Alpha",
+    artistCredits: [{ name: "Alpha", role: "main" }], externalReferences: [rgRef(groups[1])],
+    fieldProvenance: { artistCredits: { source: "manual", editedBy: "moderator" } }, catalogSource: "manual", catalogRevision: 1,
+  });
+  const corrected = await AlbumCatalog.create({
+    albumId: crypto.randomUUID(), title: "Owned Then Corrected", artistDisplayName: "Beta",
+    artistCredits: [{ name: "Beta", role: "main" }], externalReferences: [rgRef(groups[2])],
+    fieldProvenance: { artistCredits: { source: "community" } }, catalogSource: "community", catalogRevision: 1,
+  });
+  const { validation: source, unresolved } = enrichmentSource([
+    evidenceRow(groups[0], [
+      { name: "Alpha", joinPhrase: " & ", artistMbid: MBID_A, artistName: "Alpha" },
+      { name: "Beta", joinPhrase: "", artistMbid: MBID_B, artistName: "Beta" },
+    ]),
+    evidenceRow(groups[1], [{ name: "Alpha", joinPhrase: "", artistMbid: MBID_A, artistName: "Alpha" }]),
+    evidenceRow(groups[2], [{ name: "Beta", joinPhrase: "", artistMbid: MBID_B, artistName: "Beta" }]),
+  ]);
+  // An open correction on the manual album will go stale once it is linked.
+  const openCorrection = await createCorrection(await AlbumCatalog.findById(manual._id).lean(), { artists: { artistDisplayName: "Alpha (open)", artistCredits: [{ name: "Alpha", role: "main" }] } });
+  // A needs-changes correction is rebased when revised, so it is not counted.
+  const needsChanges = await createCorrection(await AlbumCatalog.findById(community._id).lean(), { artists: { artistDisplayName: "Alpha and Beta", artistCredits: [{ name: "Alpha", role: "main" }, { name: "Beta", role: "featured" }] } });
+  await AlbumSubmission.updateOne({ _id: needsChanges._id }, { $set: { status: "needs_changes" } });
+  const reviewOnly = await createPlan({ validations: [source], unresolved, AlbumCatalog, AlbumSubmission, Artist, databaseName: DB_NAME });
+  assert.deepEqual([reviewOnly.counts.link, reviewOnly.counts.review], [0, 3], "without the option user-owned credits are only proposed");
+  assert.equal(reviewOnly.counts.pendingCorrectionsMadeStale, undefined);
+  const plan = await createPlan({ validations: [source], unresolved, linkUserOwned: true, AlbumCatalog, AlbumSubmission, Artist, databaseName: DB_NAME });
+  assert.deepEqual([plan.counts.link, plan.counts.review, plan.counts.userOwnedLinks], [3, 0, 3]);
+  assert.deepEqual([plan.counts.linkedAlbumsWithPendingCorrections, plan.counts.pendingCorrectionsMadeStale], [1, 1]);
+  assert.equal(plan.albumUpdates.find((update) => update.albumId === manual.albumId).pendingCorrections, 1);
+
+  // A moderator approves a correction for one album after planning.
+  const current = await AlbumCatalog.findById(corrected._id).lean();
+  const correction = await createCorrection(current, { artists: { artistDisplayName: "Beta (corrected)", artistCredits: current.artistCredits } });
+  await approveAlbumSubmission({ submissionId: correction.submissionId, actorUserId: "moderator", applyFields: ["artists"], reason: "Display name" });
+
+  const report = await applyPlan({ plan, expectedSha256: plan.planSha256, confirmTarget: DB_NAME, databaseName: DB_NAME, AlbumCatalog, Artist, mongoose });
+  assert.deepEqual([report.counts.applied, report.counts.conflict], [2, 1]);
+  assert.deepEqual(report.options, { linkUserOwnedCredits: true });
+  assert.ok(report.albums.filter((outcome) => outcome.status === "applied").every((outcome) => outcome.userOwnedCredits === true));
+  const alpha = await Artist.findOne({ "externalReferences.externalId": MBID_A }).lean();
+  const beta = await Artist.findOne({ "externalReferences.externalId": MBID_B }).lean();
+  const linked = await AlbumCatalog.findById(community._id).lean();
+  assert.deepEqual(linked.artistCredits, [
+    { name: "Alpha", role: "main", artistId: alpha.artistId, artistMbid: MBID_A },
+    { name: "Beta", role: "featured", artistId: beta.artistId, artistMbid: MBID_B },
+  ], "wording, roles, and order are kept");
+  assert.deepEqual(linked.fieldProvenance.artistCredits, communityProvenance, "the original credit provenance is unchanged");
+  assert.equal(linked.fieldProvenance.artistIdentity.planSha256, plan.planSha256);
+  assert.equal(linked.fieldProvenance.artistIdentity.userOwnedCredits, true);
+  assert.equal(linked.fieldProvenance.artistIdentity.creditProvenance, "community");
+  assert.equal(linked.catalogRevision, 4);
+  assert.equal(linked.artistDisplayName, "Alpha & Beta");
+  const manualAfter = await AlbumCatalog.findById(manual._id).lean();
+  assert.equal(manualAfter.fieldProvenance.artistCredits.source, "manual");
+  assert.equal(manualAfter.artistCredits[0].artistId, alpha.artistId);
+  assert.equal((await AlbumSubmission.findOne({ submissionId: openCorrection.submissionId }).lean()).status, "pending", "linking never changes a submission; it only advances the album revision");
+  const correctedAfter = await AlbumCatalog.findById(corrected._id).lean();
+  assert.deepEqual(correctedAfter.artistCredits, [{ name: "Beta", role: "main" }], "a correction approved after planning wins");
+  assert.equal(correctedAfter.artistDisplayName, "Beta (corrected)");
+
+  const rerun = await applyPlan({ plan, expectedSha256: plan.planSha256, confirmTarget: DB_NAME, databaseName: DB_NAME, AlbumCatalog, Artist, mongoose });
+  assert.deepEqual([rerun.counts.applied, rerun.counts.alreadyApplied, rerun.counts.conflict], [0, 2, 1]);
+}
+
 const TESTS = [
   ["imported canonical names stay separate from album credited display", canonicalImportNameTest],
   ["artist backfill CLI dry-run and refused apply never initialize database collections", cliReadOnlyGuardsTest],
@@ -404,6 +614,9 @@ const TESTS = [
   ["approval resolves proposed artist identities inside the publication transaction", approvalResolvesIdentityTest],
   ["artist backfill plans without writing and applies only guarded, exact links", backfillPlanApplyTest],
   ["re-importing a dataset after the backfill leaves linked albums unchanged", reimportAfterBackfillTest],
+  ["enrichment evidence plans and applies guarded links with verified names and protected credits", enrichmentPlanApplyTest],
+  ["a catalog correction approved between enrichment planning and apply is a conflict", correctionBetweenPlanAndApplyTest],
+  ["opted-in plans link user-owned credits additively and keep their provenance", userOwnedEnrichmentTest],
 ];
 
 if (integrationEnabled) {
