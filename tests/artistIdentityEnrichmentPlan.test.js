@@ -47,7 +47,7 @@ function album(n, credits, { source = "import", revision = 3 } = {}) {
   };
 }
 
-function planFrom(albums, artists = []) {
+function planFrom(albums, artists = [], extra = {}) {
   const source = evidenceBackfillSource({ evidence: evidence(), sourcePath: "/ops/evidence.json", sha256: "f".repeat(64) });
   const artistsByMbid = new Map(artists.map((artist) => [artistMbidOf(artist), artist]));
   const artistsById = new Map(artists.map((artist) => [artist.artistId, artist]));
@@ -55,7 +55,7 @@ function planFrom(albums, artists = []) {
   const ids = ["11111111-2222-4333-8444-555555555555", "22222222-3333-4444-8555-666666666666", "33333333-4444-4555-8666-777777777777"];
   return buildPlan({
     albums, validations: [source.validation], unresolved: source.unresolved, artistsByMbid, artistsById,
-    databaseName: "rescened_test", now: new Date(GENERATED), newArtistId: () => ids[next++],
+    databaseName: "rescened_test", now: new Date(GENERATED), newArtistId: () => ids[next++], ...extra,
   });
 }
 
@@ -172,4 +172,67 @@ test("the backfill CLI validates pinned evidence before connecting and writes an
   const plan = JSON.parse(fs.readFileSync(planPath, "utf8"));
   assert.equal(plan.counts.link, 1);
   assert.equal(plan.inputs[0].evidenceSha256, evidence().evidenceSha256);
+});
+
+test("--link-user-owned is an explicit, plan-only choice", () => {
+  assert.equal(parseBackfillArgs(["--input", "d.json", "--out", "p.json"]).linkUserOwned, false);
+  assert.equal(parseBackfillArgs(["--input", "d.json", "--out", "p.json", "--link-user-owned"]).linkUserOwned, true);
+  assert.equal(parseBackfillArgs(["--enrichment", "e.json", "--enrichment-sha256", "a".repeat(64), "--out", "p.json", "--link-user-owned"]).linkUserOwned, true);
+  assert.throws(() => parseBackfillArgs(["--input", "d.json", "--out", "p.json", "--link-user-owned", "--link-user-owned"]), { code: "INVALID_ARGUMENTS" });
+  assert.throws(() => parseBackfillArgs(["--apply", "--link-user-owned", "--plan", "p", "--plan-sha256", "a".repeat(64), "--confirm-target", "db", "--report", "r"]), { code: "INVALID_ARGUMENTS" });
+});
+
+test("linking user-owned credits adds only identity and keeps every other safeguard", () => {
+  const credits = (name) => [{ name, role: "main" }];
+  const community = album(3, credits("Alpha"), { source: "community" });
+  const manual = album(7, [{ name: "Alpha", role: "featured" }], { source: "manual" });
+  const redirected = album(4, credits("Delta"), { source: "community" });
+  const conflicting = album(6, [{ name: "Gamma", role: "main", artistId: "66666666-7777-4888-8999-aaaaaaaaaaaa" }], { source: "community" });
+  const renamed = album(2, [{ name: "Alpha with ", role: "main" }, { name: "Gamma (live)", role: "main" }], { source: "community" });
+  const imported = album(1, [{ name: "Alpha", role: "main" }, { name: "B.", role: "featured" }]);
+  const albums = [community, manual, redirected, conflicting, renamed, imported];
+
+  const reviewOnly = planFrom(albums);
+  assert.equal(reviewOnly.options, undefined, "plans without the option keep their established shape");
+  assert.equal(reviewOnly.counts.userOwnedLinks, undefined);
+  assert.deepEqual(reviewOnly.review.map((entry) => entry.albumId).sort(), [community.albumId, manual.albumId].sort());
+
+  const plan = planFrom(albums, [], { linkUserOwned: true });
+  assert.equal(verifySealedPlan(plan, plan.planSha256), plan.planSha256);
+  assert.deepEqual(plan.options, { linkUserOwnedCredits: true });
+  assert.equal(plan.review.length, 0);
+  assert.equal(plan.counts.userOwnedLinks, 2);
+  const byAlbum = new Map(plan.albumUpdates.map((update) => [update.albumId, update]));
+  assert.deepEqual(new Set(byAlbum.keys()), new Set([community.albumId, manual.albumId, imported.albumId]));
+  const linkedCommunity = byAlbum.get(community.albumId);
+  assert.equal(linkedCommunity.userOwnedCredits, true);
+  assert.equal(linkedCommunity.creditProvenance, "community");
+  assert.equal(byAlbum.get(manual.albumId).creditProvenance, "manual");
+  assert.equal(byAlbum.get(imported.albumId).userOwnedCredits, undefined);
+  assert.deepEqual(linkedCommunity.beforeCredits, credits("Alpha"));
+  assert.deepEqual(linkedCommunity.afterCredits.map(({ name, role, artistMbid }) => ({ name, role, artistMbid })), [{ name: "Alpha", role: "main", artistMbid: A1 }]);
+  assert.deepEqual(Object.keys(byAlbum.get(manual.albumId).afterCredits[0]), ["name", "role", "artistId", "artistMbid"]);
+  const flagged = new Map(plan.flagged.map((entry) => [entry.albumId, entry.code]));
+  assert.equal(flagged.get(redirected.albumId), "ENRICHMENT_UNRESOLVED", "unresolved lookups stay flagged");
+  assert.equal(flagged.get(conflicting.albumId), "EXISTING_IDENTITY_CONFLICT", "existing identities are never replaced");
+  assert.equal(flagged.get(renamed.albumId), "CREDIT_NAME_MISMATCH", "exact names are still required");
+});
+
+test("the backfill CLI passes --link-user-owned into the sealed plan", async (context) => {
+  const { main } = require("../scripts/backfillArtistIdentity");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "user-owned-plan-"));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = publishEvidence(path.join(directory, "evidence.json"), evidence());
+  const output = { log() {}, error() {} };
+  const connected = {
+    output,
+    mongoose: { connection: { readyState: 1, name: "rescened_dev" } },
+    AlbumCatalog: { find: () => ({ select: () => Promise.resolve([album(3, [{ name: "Alpha", role: "main" }], { source: "community" })]) }) },
+    Artist: { find: () => Promise.resolve([]) },
+    now: new Date(GENERATED),
+  };
+  const planPath = path.join(directory, "plan.json");
+  assert.equal(await main(["--enrichment", file, "--enrichment-sha256", evidence().evidenceSha256, "--out", planPath, "--link-user-owned"], connected), 0);
+  const plan = JSON.parse(fs.readFileSync(planPath, "utf8"));
+  assert.deepEqual([plan.counts.link, plan.counts.review, plan.counts.userOwnedLinks], [1, 0, 1]);
 });

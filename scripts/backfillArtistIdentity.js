@@ -34,6 +34,8 @@ Options:
                             (plan mode; instead of --input)
   --enrichment-sha256 <sha> evidenceSha256 of the reviewed evidence (required with --enrichment)
   --out <path>              New plan file (plan mode; never overwritten)
+  --link-user-owned         Also link exact matches whose credits are community- or
+                            moderator-owned (adds only artistId/artistMbid; plan mode)
   --resolve-artist-names     Verify every new registry name by MusicBrainz MBID
   --artist-name-cache <dir>  Private resumable cache (required with name lookup)
   --apply                   Apply a reviewed, sealed plan
@@ -117,6 +119,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
       let plan = await createPlan({
         validations,
         unresolved,
+        linkUserOwned: options.linkUserOwned,
         AlbumCatalog: AlbumModel,
         Artist: ArtistModel,
         databaseName: db.connection.name,
