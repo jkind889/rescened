@@ -55,7 +55,8 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><Harness />
     server = await createServer({ configFile: false, root: directory, envDir: false, plugins: [react()],
       define: { 'import.meta.env.VITE_API_URL': JSON.stringify('http://fixture.invalid') },
       resolve: { alias: { react: path.dirname(requireFrontend.resolve('react/package.json')), 'react-dom': path.dirname(requireFrontend.resolve('react-dom/package.json')), 'react-router-dom': path.dirname(requireFrontend.resolve('react-router-dom/package.json')) } },
-      server: { host: '127.0.0.1', port: 0, fs: { allow: [directory, frontend, await fs.realpath(path.join(frontend, 'node_modules'))] } },
+      // No HMR or file watcher: a late watcher event can re-run the entry module and trigger a duplicate createRoot warning.
+      server: { host: '127.0.0.1', port: 0, hmr: false, watch: null, fs: { allow: [directory, frontend, await fs.realpath(path.join(frontend, 'node_modules'))] } },
     });
     await server.listen();
     const url = `http://127.0.0.1:${server.httpServer.address().port}`;
