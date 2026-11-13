@@ -5,8 +5,36 @@ dist/
 .migration/
 .env
 .DS_Store
-.agents/
-data/
+# Track reviewed project skills, not local agent state or run artifacts.
+.agents/**
+!.agents/skills/
+!.agents/skills/rescened-catalog-rollout/
+!.agents/skills/rescened-catalog-rollout/SKILL.md
+!.agents/skills/rescened-commit-review/
+!.agents/skills/rescened-commit-review/SKILL.md
+!.agents/skills/rescened-cover-backfill/
+!.agents/skills/rescened-cover-backfill/SKILL.md
+!.agents/skills/rescened-migration-operator/
+!.agents/skills/rescened-migration-operator/SKILL.md
+!.agents/skills/rescened-moderation-change-review/
+!.agents/skills/rescened-moderation-change-review/SKILL.md
+!.agents/skills/rescened-provider-integration/
+!.agents/skills/rescened-provider-integration/SKILL.md
+!.agents/skills/rescened-verify/
+!.agents/skills/rescened-verify/SKILL.md
+data/*
+# Listening-study: allow only the public, reviewed inputs below. Everything else here
+# (captures, private evidence, the local reviewed mapping registry) stays ignored.
+!data/listening-study/
+data/listening-study/*
+!data/listening-study/references.json
+!data/listening-study/references.json.sha256
+!data/listening-study/reviewed-aliases.json
+!data/listening-study/rules.sha256
+!data/listening-study/sample.json
+!data/listening-study/sample.json.sha256
+# Keep ignoring nested data/ directories (data/* above only matches at the repo root).
+*/**/data/
 
 # Local dotenv variants may contain credentials. Commit examples only.
 .env.*

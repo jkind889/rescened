@@ -1,6 +1,8 @@
 const test = require('node:test');
+// Hermetic: always use a generated synthetic registry, never a local reviewed file.
+process.env.LISTENING_STUDY_MAPPINGS_FILE = require('./fixtures/listeningStudy/syntheticMappings').writeSyntheticMappings();
 const assert = require('node:assert/strict');
-const { createNameResolver, evaluateMappedEvents, mappingReport } = require('../lib/listeningStudy/albumNameMappings');
+const { loadManifest, createNameResolver, evaluateMappedEvents, mappingReport } = require('../lib/listeningStudy/albumNameMappings');
 const { createStudy } = require('../lib/listeningStudy/study');
 const { normalizeRecent } = require('../lib/listeningStudy/core');
 const { recent, tracks } = require('./fixtures/listeningStudy/synthetic');
@@ -81,8 +83,41 @@ test('offline mapping CLI preserves frozen artifacts and counts reviewed plain-t
 });
 
 test('duplicate registry target definitions cannot silently choose the first track aliases', () => {
-  const manifest = require('../data/listening-study/album-name-mappings.json');
+  const manifest = loadManifest();
   manifest.mappings.push(structuredClone(manifest.mappings[0]));
   try { assert.throws(() => mappingReport(createStudy()), /Duplicate target definitions/); }
   finally { manifest.mappings.pop(); }
+});
+
+test('synthetic registry is labeled, fresh against tracked references, and surfaced in reports', () => {
+  const { buildSyntheticMappings } = require('./fixtures/listeningStudy/syntheticMappings');
+  const manifest = loadManifest();
+  assert.equal(manifest.synthetic, true); assert.match(manifest.mappings[0].reviewer, /no human review/);
+  assert.deepEqual(manifest, JSON.parse(JSON.stringify(buildSyntheticMappings())));
+  const study = createStudy(); study.references['born-to-die:standard'] = structuredClone(require('../data/listening-study/references.json')['born-to-die:standard']);
+  const report = mappingReport(study);
+  assert.equal(report.registrySynthetic, true);
+  assert.match(require('../lib/listeningStudy/albumNameMappings').mappingMarkdown(report), /SYNTHETIC TEST REGISTRY/);
+});
+
+test('missing local registry fails with a clear error, not a module-resolution crash', () => {
+  const { spawnSync } = require('node:child_process'); const path = require('node:path');
+  const code = "process.env.LISTENING_STUDY_MAPPINGS_FILE='/nonexistent/none.json';try{require('./lib/listeningStudy/albumNameMappings').loadManifest()}catch(e){console.log(e.message)}";
+  const out = spawnSync(process.execPath, ['-e', code], { cwd: path.join(__dirname, '..'), encoding: 'utf8' }).stdout;
+  assert.match(out, /not found .*not tracked.*LISTENING_STUDY_MAPPINGS_FILE/);
+});
+
+test('listening-study data ignore rules allow only the public inputs', (t) => {
+  const { spawnSync } = require('node:child_process'); const path = require('node:path');
+  const root = path.join(__dirname, '..');
+  if (spawnSync('git', ['rev-parse', '--git-dir'], { cwd: root }).status !== 0) return t.skip('not a git checkout');
+  // --no-index evaluates the patterns alone; exit 0 = ignored, 1 = not ignored.
+  const ignored = (file) => spawnSync('git', ['check-ignore', '-q', '--no-index', file], { cwd: root }).status === 0;
+  for (const file of ['references.json', 'references.json.sha256', 'reviewed-aliases.json', 'rules.sha256', 'sample.json', 'sample.json.sha256']) {
+    assert.equal(ignored(`data/listening-study/${file}`), false, file);
+  }
+  for (const nested of ['frontend/data/x.json', 'lib/data/x.json', 'data/x.json']) assert.equal(ignored(nested), true, nested);
+  for (const file of ['album-name-mappings.json', 'private-capture.json', 'logbook/session.json', 'references.json.bak']) {
+    assert.equal(ignored(`data/listening-study/${file}`), true, file);
+  }
 });
