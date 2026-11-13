@@ -4,6 +4,9 @@
 // and Wikipedia requests. Writes happen only with --apply (an exact sealed
 // plan) or --refresh, both of which require --confirm-target.
 
+// Reads MONGO_URI from the root .env, like the other operator commands.
+require("dotenv").config({ quiet: true });
+
 const fs = require("node:fs");
 const path = require("node:path");
 const mongoose = require("mongoose");
