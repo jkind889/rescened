@@ -8158,6 +8158,10 @@ html:has(.community-page) .site-header {
   color: var(--app-muted);
 }
 
+.suggestion-credit-warning {
+  color: #e6bd78;
+}
+
 .suggestion-cover-source {
   display: flex;
   align-items: center;

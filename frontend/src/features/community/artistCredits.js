@@ -22,6 +22,17 @@ export function creditPayload(name, role, identity) {
   return credit;
 }
 
+// Moderator review: whether a credit's wording differs from the registry name
+// of the artist its artistId links to. Differences can be legitimate
+// ("credited as"), so this only draws attention; it never blocks.
+function foldName(value) {
+  return String(value || "").normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+export function registryNameDiffers(creditName, registryName) {
+  return Boolean(foldName(registryName)) && foldName(creditName) !== foldName(registryName);
+}
+
 export function musicBrainzArtistUrl(identity) {
   return identity?.artistMbid && MBID.test(identity.artistMbid)
     ? `https://musicbrainz.org/artist/${identity.artistMbid.toLowerCase()}`

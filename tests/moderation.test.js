@@ -324,6 +324,35 @@ test("moderator detail exposes the published album for approved duplicate candid
   assert.equal(result.body.duplicateCandidates.submissions[0].approvedAlbumId, catalog.albumId);
 });
 
+test("moderator detail names the registry artist behind each credited artistId", async () => {
+  const Artist = require("../models/Artist");
+  const originalFind = Artist.find;
+  const linked = crypto.randomUUID();
+  const unknown = crypto.randomUUID();
+  const mbid = "a74b1b7f-71a5-4011-9441-d0b5e4122711";
+  const queries = [];
+  Artist.find = (filter) => {
+    queries.push(filter);
+    const rows = [{ artistId: linked, name: "Radiohead", externalReferences: [{ provider: "musicbrainz", entityType: "artist", externalId: mbid }], fieldProvenance: { secret: true } }];
+    const chain = { select: () => chain, lean: () => chain, exec: async () => rows.filter((row) => filter.artistId.$in.includes(row.artistId)) };
+    return chain;
+  };
+  try {
+    const document = makeSubmission({
+      proposedMetadata: { ...validMetadata(), artistCredits: [{ name: "Someone Else", role: "main", artistId: linked }, { name: "Ghost", role: "main", artistId: unknown }] },
+      revisions: [{ revision: 1, submissionType: "new_album", proposedMetadata: { ...validMetadata(), artistCredits: [{ name: "Radiohead", role: "main", artistId: linked }] } }],
+    });
+    const state = installMocks({ documents: [document] });
+    const result = await callRoute(state.router, "get", "/:submissionId", { params: { submissionId: document.submissionId } });
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body.artistRegistry, { [linked]: { artistId: linked, name: "Radiohead", artistMbid: mbid } });
+    assert.equal(queries.length, 1, "one registry query covers every credit list");
+    assert.deepEqual([...queries[0].artistId.$in].sort(), [linked, unknown].sort());
+  } finally {
+    Artist.find = originalFind;
+  }
+});
+
 test("moderator commands enforce reasons, target validation, and conditional transitions", async () => {
   const target = makeSubmission({ status: "approved", approvedAlbumCatalogId: new mongoose.Types.ObjectId() });
   const document = makeSubmission();

@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { describeGenreApplication } from "../../features/community/genres.js";
-import { musicBrainzArtistUrl } from "../../features/community/artistCredits.js";
+import { musicBrainzArtistUrl, registryNameDiffers } from "../../features/community/artistCredits.js";
 import "./GenreSuggestion.css";
 import {
   formatCommunityAction,
@@ -87,7 +87,29 @@ function DetailItem({ label, children }) {
   );
 }
 
-function MetadataBlock({ metadata = {}, compact = false, headingLevel = 4 }) {
+// What a credit's artistId links to. Moderators get the registry entry, so a
+// credit worded as one artist but linked to another is visible; without
+// registry context (the contributor's own view) only the ID is shown.
+function CreditIdentity({ credit, artistRegistry }) {
+  if (!credit.artistId) return null;
+  if (!artistRegistry) {
+    return <span className="suggestion-credit-role">Rescened artist <code>{credit.artistId}</code></span>;
+  }
+  const entry = artistRegistry[credit.artistId];
+  if (!entry) {
+    return <span className="suggestion-credit-warning">Unknown Rescened artist <code>{credit.artistId}</code></span>;
+  }
+  return (
+    <>
+      <span className="suggestion-credit-role">Links to <strong>{entry.name || "an unnamed registry artist"}</strong></span>
+      {registryNameDiffers(credit.name, entry.name) ? (
+        <span className="suggestion-credit-warning">Credited name differs from the registry name</span>
+      ) : null}
+    </>
+  );
+}
+
+function MetadataBlock({ metadata = {}, compact = false, headingLevel = 4, artistRegistry = null }) {
   const artistCredits = values(metadata.artistCredits);
   const tracks = values(metadata.tracks);
   const SubheadingTag = `h${Math.min(Math.max(headingLevel, 1), 6)}`;
@@ -114,11 +136,9 @@ function MetadataBlock({ metadata = {}, compact = false, headingLevel = 4 }) {
               <li className="suggestion-credit-item" key={`${credit.name || "artist"}-${credit.role || "main"}-${index}`}>
                 <span className="suggestion-credit-name">{credit.name || "Unnamed artist"}</span>
                 <span className="suggestion-credit-role">{credit.role || "main"}</span>
-                {credit.artistId ? (
-                  <span className="suggestion-credit-role">Rescened artist <code>{credit.artistId}</code></span>
-                ) : null}
-                {musicBrainzArtistUrl(credit) ? (
-                  <a className="suggestion-external-link" href={musicBrainzArtistUrl(credit)} target="_blank" rel="noreferrer">
+                <CreditIdentity artistRegistry={artistRegistry} credit={credit} />
+                {musicBrainzArtistUrl(credit) || musicBrainzArtistUrl(artistRegistry?.[credit.artistId]) ? (
+                  <a className="suggestion-external-link" href={musicBrainzArtistUrl(credit) || musicBrainzArtistUrl(artistRegistry?.[credit.artistId])} target="_blank" rel="noreferrer">
                     MusicBrainz artist
                   </a>
                 ) : null}
@@ -364,7 +384,7 @@ function DuplicateCandidates({ candidates, headingLevel = 3 }) {
   );
 }
 
-function RevisionHistory({ revisions, headingLevel = 3 }) {
+function RevisionHistory({ revisions, headingLevel = 3, artistRegistry = null }) {
   const items = values(revisions).slice().reverse();
   const level = Math.min(Math.max(headingLevel, 1), 6);
   const HeadingTag = `h${level}`;
@@ -392,7 +412,7 @@ function RevisionHistory({ revisions, headingLevel = 3 }) {
                 <GenreChangesBlock changes={revision.genreChanges} baseGenres={revision.baseGenres} compact />
               ) : (
                 <>
-                  <MetadataBlock metadata={revision.proposedMetadata} compact headingLevel={nestedHeadingLevel} />
+                  <MetadataBlock artistRegistry={artistRegistry} metadata={revision.proposedMetadata} compact headingLevel={nestedHeadingLevel} />
                   {revision.proposedGenres ? <GenreChangesBlock changes={revision.proposedGenres} compact /> : null}
                   <EvidenceBlock
                     supportingSources={revision.supportingSources}
@@ -464,6 +484,7 @@ export function SubmissionDetails({
   headingLevel = 2,
   duplicateCandidates = null,
   genreReview = null,
+  artistRegistry = null,
 }) {
   if (!submission) {
     return null;
@@ -555,7 +576,7 @@ export function SubmissionDetails({
               <p className="suggestion-detail-kicker">Current revision</p>
               <SectionHeadingTag className="suggestion-detail-section-title">Release metadata</SectionHeadingTag>
             </div>
-            <MetadataBlock metadata={metadata} headingLevel={nestedHeadingLevel} />
+            <MetadataBlock artistRegistry={artistRegistry} metadata={metadata} headingLevel={nestedHeadingLevel} />
           </section>
 
           <section className="suggestion-detail-section">
@@ -599,7 +620,7 @@ export function SubmissionDetails({
       ) : null}
 
       <DuplicateCandidates candidates={duplicateCandidates} headingLevel={sectionHeadingLevel} />
-      <RevisionHistory revisions={submission.revisions} headingLevel={sectionHeadingLevel} />
+      <RevisionHistory artistRegistry={artistRegistry} revisions={submission.revisions} headingLevel={sectionHeadingLevel} />
       <ModerationTimeline history={submission.moderationHistory} headingLevel={sectionHeadingLevel} showContributor={showContributor} />
     </article>
   );

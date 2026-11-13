@@ -6,6 +6,8 @@ const { isModerator, serializeSubmission } = require("./utils/submissions");
 const { approveAlbumSubmission } = require("./utils/approval");
 const { applyModerationCommand } = require("./utils/moderationCommands");
 const { genreReview } = require("../lib/genres/review");
+const Artist = require("../models/Artist");
+const { artistRegistryContext } = require("../lib/artists/identity");
 const {
   ModerationConflictError,
   ModerationValidationError,
@@ -171,11 +173,23 @@ function moderatorSummary(submission) {
   };
 }
 
+// Every credit list a moderator can see on this submission: the current
+// proposal, each revision, and the album a correction targets.
+function submissionCreditLists(suggestion) {
+  return [
+    suggestion?.proposedMetadata?.artistCredits,
+    ...(Array.isArray(suggestion?.revisions) ? suggestion.revisions.map((revision) => revision?.proposedMetadata?.artistCredits) : []),
+    suggestion?.targetAlbum?.artistCredits,
+  ];
+}
+
 async function moderatorDetail(submission) {
-  const detail = {
-    suggestion: serializeSubmission(submission, { detail: true, moderator: true }),
-    duplicateCandidates: await duplicateCandidates(submission),
-  };
+  const suggestion = serializeSubmission(submission, { detail: true, moderator: true });
+  const [candidates, artistRegistry] = await Promise.all([
+    duplicateCandidates(submission),
+    artistRegistryContext(Artist, submissionCreditLists(suggestion)),
+  ]);
+  const detail = { suggestion, duplicateCandidates: candidates, artistRegistry };
   if (asPlain(submission)?.submissionType === "genre_suggestion") detail.genreReview = await genreReview(submission);
   return detail;
 }

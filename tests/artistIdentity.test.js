@@ -577,6 +577,20 @@ test("form credits keep a proposed identity only while the name is unchanged", a
   assert.deepEqual(creditsFromNames(" , ", known), []);
 });
 
+test("moderator review flags a credit worded differently from its linked registry artist", async () => {
+  const { registryNameDiffers } = await clientHelpers;
+  assert.equal(registryNameDiffers("Radiohead", "Radiohead"), false);
+  assert.equal(registryNameDiffers("  radiohead ", "Radiohead"), false, "case and spacing are not differences");
+  assert.equal(registryNameDiffers("Ｒａｄｉｏｈｅａｄ", "Radiohead"), false, "compatibility forms fold");
+  assert.equal(registryNameDiffers("Someone Else", "Radiohead"), true);
+  assert.equal(registryNameDiffers("Anything", ""), false, "no registry name, nothing to compare");
+  const panel = fs.readFileSync(path.join(__dirname, "../frontend/src/Components/Community/SubmissionDetails.jsx"), "utf8");
+  assert.match(panel, /Credited name differs from the registry name/);
+  assert.match(panel, /Unknown Rescened artist/);
+  const page = fs.readFileSync(path.join(__dirname, "../frontend/src/Pages/ModerationSuggestions.jsx"), "utf8");
+  assert.match(page, /artistRegistry=\{activeDetailState\.data\?\.artistRegistry \|\| null\}/);
+});
+
 test("the backfill CLI writes a sealed plan once and refuses an unconfirmed apply target", async (context) => {
   const os = require("node:os");
   const { main } = require("../scripts/backfillArtistIdentity");
