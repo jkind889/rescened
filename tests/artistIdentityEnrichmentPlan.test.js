@@ -86,7 +86,7 @@ test("evidence plans link exact matches with verified names and record source pr
   const uncovered = album(5, [{ name: "Epsilon", role: "main" }]);
   const reused = album(6, [{ name: "Gamma", role: "main" }]);
   const renamed = album(7, [{ name: "Alpha (Live)", role: "main" }]);
-  const deferredAlbum = album(8, [{ name: "Zeta", role: "main" }]);
+  const deferredAlbum = album(8, [{ name: "Zeta", role: "main", artistId: "55555555-6666-4777-8888-999999999999", artistMbid: A3 }], { source: "community" });
   const plan = planFrom([linked, legacy, community, redirected, uncovered, reused, renamed, deferredAlbum], [existing]);
   assert.equal(verifySealedPlan(plan, plan.planSha256), plan.planSha256);
   assert.equal(plan.planVersion, "1.0.0");
@@ -124,6 +124,9 @@ test("evidence plans link exact matches with verified names and record source pr
   assert.equal(flagged.get(redirected.albumId).code, "ENRICHMENT_UNRESOLVED");
   assert.deepEqual(flagged.get(redirected.albumId).details, { status: "unresolved", observedAt: AT, reason: "REDIRECTED", httpStatus: 301, destinationReleaseGroupMbid: RG(9) });
   assert.equal(flagged.get(deferredAlbum.albumId).details.reason, "TRANSIENT_FAILURE");
+  assert.equal(flagged.get(deferredAlbum.albumId).details.userOwned, true, "unresolved flags say when credits are user-owned");
+  assert.equal(flagged.get(deferredAlbum.albumId).details.alreadyIdentified, true, "and when every credit is already identified");
+  assert.equal(flagged.get(redirected.albumId).details.userOwned, undefined);
   assert.equal(flagged.get(renamed.albumId).code, "CREDIT_NAME_MISMATCH");
   assert.deepEqual(plan.noSource.map((entry) => entry.albumId), [uncovered.albumId]);
   assert.equal(plan.counts.flagged, 3);

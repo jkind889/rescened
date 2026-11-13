@@ -23,7 +23,8 @@ const USAGE = `Usage:
   npm run catalog:backfill-artists -- --apply --plan <plan.json> --plan-sha256 <sha> --confirm-target <database> --report <report.json>
 
 Plan mode (the default, also --dry-run) reads validated catalog import
-datasets and the catalog, then writes a sealed plan. It never writes to MongoDB.
+datasets, or pinned MusicBrainz credit evidence, and the catalog, then
+writes a sealed plan. It never writes to MongoDB.
 Apply reads only the sealed plan, refuses any other target database, and links
 each album in its own guarded transaction.
 

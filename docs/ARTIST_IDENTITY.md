@@ -88,7 +88,7 @@ Linking adds only `artistId` and `artistMbid`. Every existing credit key and val
 | `review` | `USER_OWNED_CREDITS`: matches that a reviewed catalog correction would need to link. Includes the proposed MBIDs. |
 | `flagged` | `MULTIPLE_RELEASE_GROUPS`, `SOURCE_CONFLICT` (input datasets disagree), `INVALID_SOURCE_CREDIT`, `CREDIT_COUNT_MISMATCH`, `CREDIT_NAME_MISMATCH`, `EXISTING_IDENTITY_CONFLICT`, and, for [enrichment](#enrichment-from-musicbrainz-release-groups) plans, `ENRICHMENT_UNRESOLVED`. |
 | `unchanged` | Already linked to the same identities. |
-| `noSource` | A release-group reference with no row in any input dataset. |
+| `noSource` | A release-group reference with no row in any input dataset (for enrichment plans, no result in the evidence). |
 
 `counts.withoutReleaseGroup` counts albums that have no MusicBrainz release-group reference, such as most community suggestions. Plan mode exits `2` when anything is flagged or needs review, and `0` otherwise.
 
@@ -131,7 +131,7 @@ npm run catalog:enrich-identities -- \
   --out ~/rescened-ops/artist-identity/<date>.credits-evidence.json
 ```
 
-`--ids-file <ids.json>` takes a JSON array of release-group MBIDs instead. IDs are validated, lowercased, sorted, and deduplicated before any request, with at most 5,000 unique IDs per run. `--from-plan` checks the plan's seal and `--plan-sha256`, then uses its `noSource` release groups.
+Pass the import-dataset plan to `--from-plan`, not an enrichment plan: an enrichment plan's `noSource` also lists every album linked from other sources. `--ids-file <ids.json>` takes a JSON array of release-group MBIDs instead. IDs are validated, lowercased, sorted, and deduplicated before any request, with at most 5,000 unique IDs per run. `--from-plan` checks the plan's seal and `--plan-sha256`, then uses its `noSource` release groups.
 
 - **Requests.** Each ID fetches only `release-group/<mbid>?inc=artist-credits&fmt=json`; there is no search by name or title. Every request in the process shares one gate (at least 1.1 seconds between request starts). Requests use an identifying user agent, an eight-second timeout that covers the response body, and a 256 KiB streamed size limit.
 - **Retries.** Network errors, timeouts, and HTTP 408/425/429/500/502/503/504 get at most three attempts. `Retry-After` is honored in both formats. A pause over 30 seconds stops the run. Any pause still in force when a run ends is written to the cache as a cooldown, and later runs with that `--cache-dir` refuse to start before it expires.
@@ -161,9 +161,9 @@ npm run catalog:backfill-artists -- \
   --out ~/rescened-ops/artist-identity/<database>-<date>.enrichment.plan.json
 ```
 
-`--enrichment` replaces `--input`; the two cannot be combined, and `--resolve-artist-names` is unnecessary because the evidence already carries verified names. The evidence and its pinned digest are validated before any database connection.
+`--enrichment` replaces `--input`; the two cannot be combined, and `--resolve-artist-names` is rejected because the evidence already carries verified names. The evidence and its pinned digest are validated before any database connection.
 
-- **Unsuccessful lookups.** An album whose release group was unresolved or deferred is flagged `ENRICHMENT_UNRESOLVED`, with the specific reason, any HTTP status, and any redirect destination.
+- **Unsuccessful lookups.** An album whose release group was unresolved or deferred is flagged `ENRICHMENT_UNRESOLVED`, with the specific reason, any HTTP status, and any redirect destination. The details add `userOwned` for community or manual credits and `alreadyIdentified` when every credit already carries an identity. Flagged albums do not reappear in `noSource`. To retry deferred IDs, rerun the original fetch, reusing its cache, or list them in an `--ids-file`, then plan from the new evidence.
 - **Provenance.** The plan's `inputs` entry records the evidence kind, `evidenceSha256`, and the unresolved and deferred counts. Album updates list their `sourceObservations`. New registry artists take the verified canonical name, and their provenance records the observation time and evidence digest. Existing registry names are never changed.
 - **Name conflicts.** If two resolved release groups report different canonical names for one artist MBID (for example, an artist renamed during a long fetch), the affected albums are flagged `SOURCE_CONFLICT`.
 - **noSource coverage.** An enrichment-only plan reports every album outside its evidence as `noSource`, including albums already linked by an earlier backfill. `noSource` describes the plan's source coverage, not missing identities.
