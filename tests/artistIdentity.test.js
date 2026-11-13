@@ -637,6 +637,8 @@ test("moderator review flags a credit worded differently from its linked registr
   const panel = fs.readFileSync(path.join(__dirname, "../frontend/src/Components/Community/SubmissionDetails.jsx"), "utf8");
   assert.match(panel, /Credited name differs from the registry name/);
   assert.match(panel, /Unknown Rescened artist/);
+  assert.match(panel, /change\.field === "artists"[\s\S]*<CreditList credits=\{values\(change\.proposed\.artistCredits\)\} registry=\{registry\} \/>/, "a correction's proposed credits show their registry artists");
+  assert.match(panel, /!entry && registry\.truncated/, "an ID past the lookup cap is not called unknown");
   const page = fs.readFileSync(path.join(__dirname, "../frontend/src/Pages/ModerationSuggestions.jsx"), "utf8");
   assert.match(page, /artistRegistry=\{activeDetailState\.data\?\.artistRegistry \|\| null\}/);
 });

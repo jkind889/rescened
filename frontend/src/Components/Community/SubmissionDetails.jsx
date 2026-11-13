@@ -90,12 +90,13 @@ function DetailItem({ label, children }) {
 // What a credit's artistId links to. Moderators get the registry entry, so a
 // credit worded as one artist but linked to another is visible; without
 // registry context (the contributor's own view) only the ID is shown.
-function CreditIdentity({ credit, artistRegistry }) {
+// `registry` is { artists, truncated } from moderator detail, or null.
+function CreditIdentity({ credit, registry }) {
   if (!credit.artistId) return null;
-  if (!artistRegistry) {
+  const entry = registry?.artists?.[credit.artistId];
+  if (!registry || (!entry && registry.truncated)) {
     return <span className="suggestion-credit-role">Rescened artist <code>{credit.artistId}</code></span>;
   }
-  const entry = artistRegistry[credit.artistId];
   if (!entry) {
     return <span className="suggestion-credit-warning">Unknown Rescened artist <code>{credit.artistId}</code></span>;
   }
@@ -109,7 +110,29 @@ function CreditIdentity({ credit, artistRegistry }) {
   );
 }
 
-function MetadataBlock({ metadata = {}, compact = false, headingLevel = 4, artistRegistry = null }) {
+function CreditList({ credits, registry }) {
+  return (
+    <ul className="suggestion-credit-list">
+      {credits.map((credit, index) => {
+        const musicBrainzUrl = musicBrainzArtistUrl(credit) || musicBrainzArtistUrl(registry?.artists?.[credit.artistId]);
+        return (
+          <li className="suggestion-credit-item" key={`${credit.name || "artist"}-${credit.role || "main"}-${index}`}>
+            <span className="suggestion-credit-name">{credit.name || "Unnamed artist"}</span>
+            <span className="suggestion-credit-role">{credit.role || "main"}</span>
+            <CreditIdentity credit={credit} registry={registry} />
+            {musicBrainzUrl ? (
+              <a className="suggestion-external-link" href={musicBrainzUrl} target="_blank" rel="noreferrer">
+                MusicBrainz artist
+              </a>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function MetadataBlock({ metadata = {}, compact = false, headingLevel = 4, registry = null }) {
   const artistCredits = values(metadata.artistCredits);
   const tracks = values(metadata.tracks);
   const SubheadingTag = `h${Math.min(Math.max(headingLevel, 1), 6)}`;
@@ -131,20 +154,7 @@ function MetadataBlock({ metadata = {}, compact = false, headingLevel = 4, artis
       {artistCredits.length ? (
         <div className="suggestion-detail-subsection">
           <SubheadingTag className="suggestion-detail-subheading">Artist credits</SubheadingTag>
-          <ul className="suggestion-credit-list">
-            {artistCredits.map((credit, index) => (
-              <li className="suggestion-credit-item" key={`${credit.name || "artist"}-${credit.role || "main"}-${index}`}>
-                <span className="suggestion-credit-name">{credit.name || "Unnamed artist"}</span>
-                <span className="suggestion-credit-role">{credit.role || "main"}</span>
-                <CreditIdentity artistRegistry={artistRegistry} credit={credit} />
-                {musicBrainzArtistUrl(credit) || musicBrainzArtistUrl(artistRegistry?.[credit.artistId]) ? (
-                  <a className="suggestion-external-link" href={musicBrainzArtistUrl(credit) || musicBrainzArtistUrl(artistRegistry?.[credit.artistId])} target="_blank" rel="noreferrer">
-                    MusicBrainz artist
-                  </a>
-                ) : null}
-              </li>
-            ))}
-          </ul>
+          <CreditList credits={artistCredits} registry={registry} />
         </div>
       ) : null}
 
@@ -268,7 +278,7 @@ function diffValue(value) {
   return JSON.stringify(value, null, 2);
 }
 
-function CorrectionDiffBlock({ submission, headingLevel = 3 }) {
+function CorrectionDiffBlock({ submission, headingLevel = 3, registry = null }) {
   const changes = values(submission.correctionDiff);
   if (submission.submissionType !== "catalog_correction" || !changes.length) {
     return null;
@@ -309,6 +319,12 @@ function CorrectionDiffBlock({ submission, headingLevel = 3 }) {
                 <dd><pre>{diffValue(change.proposed)}</pre></dd>
               </div>
             </dl>
+            {change.field === "artists" && values(change.proposed?.artistCredits).length ? (
+              <div className="suggestion-detail-subsection">
+                <p className="suggestion-detail-note">Proposed credits and the registry artists they link to</p>
+                <CreditList credits={values(change.proposed.artistCredits)} registry={registry} />
+              </div>
+            ) : null}
           </article>
         ))}
       </div>
@@ -384,7 +400,7 @@ function DuplicateCandidates({ candidates, headingLevel = 3 }) {
   );
 }
 
-function RevisionHistory({ revisions, headingLevel = 3, artistRegistry = null }) {
+function RevisionHistory({ revisions, headingLevel = 3, registry = null }) {
   const items = values(revisions).slice().reverse();
   const level = Math.min(Math.max(headingLevel, 1), 6);
   const HeadingTag = `h${level}`;
@@ -412,7 +428,7 @@ function RevisionHistory({ revisions, headingLevel = 3, artistRegistry = null })
                 <GenreChangesBlock changes={revision.genreChanges} baseGenres={revision.baseGenres} compact />
               ) : (
                 <>
-                  <MetadataBlock artistRegistry={artistRegistry} metadata={revision.proposedMetadata} compact headingLevel={nestedHeadingLevel} />
+                  <MetadataBlock registry={registry} metadata={revision.proposedMetadata} compact headingLevel={nestedHeadingLevel} />
                   {revision.proposedGenres ? <GenreChangesBlock changes={revision.proposedGenres} compact /> : null}
                   <EvidenceBlock
                     supportingSources={revision.supportingSources}
@@ -485,6 +501,7 @@ export function SubmissionDetails({
   duplicateCandidates = null,
   genreReview = null,
   artistRegistry = null,
+  artistRegistryTruncated = false,
 }) {
   if (!submission) {
     return null;
@@ -499,6 +516,7 @@ export function SubmissionDetails({
   const nestedHeadingLevel = Math.min(sectionHeadingLevel + 1, 6);
   const SectionHeadingTag = `h${sectionHeadingLevel}`;
   const metadata = submission.proposedMetadata || submission.targetAlbum || {};
+  const registry = artistRegistry ? { artists: artistRegistry, truncated: Boolean(artistRegistryTruncated) } : null;
 
   return (
     <article className="suggestion-detail">
@@ -550,7 +568,7 @@ export function SubmissionDetails({
         </section>
       ) : null}
 
-      <CorrectionDiffBlock submission={submission} headingLevel={sectionHeadingLevel} />
+      <CorrectionDiffBlock registry={registry} submission={submission} headingLevel={sectionHeadingLevel} />
 
       {isGenreSuggestion ? (
         <section className="suggestion-detail-section">
@@ -576,7 +594,7 @@ export function SubmissionDetails({
               <p className="suggestion-detail-kicker">Current revision</p>
               <SectionHeadingTag className="suggestion-detail-section-title">Release metadata</SectionHeadingTag>
             </div>
-            <MetadataBlock artistRegistry={artistRegistry} metadata={metadata} headingLevel={nestedHeadingLevel} />
+            <MetadataBlock registry={registry} metadata={metadata} headingLevel={nestedHeadingLevel} />
           </section>
 
           <section className="suggestion-detail-section">
@@ -620,7 +638,7 @@ export function SubmissionDetails({
       ) : null}
 
       <DuplicateCandidates candidates={duplicateCandidates} headingLevel={sectionHeadingLevel} />
-      <RevisionHistory artistRegistry={artistRegistry} revisions={submission.revisions} headingLevel={sectionHeadingLevel} />
+      <RevisionHistory registry={registry} revisions={submission.revisions} headingLevel={sectionHeadingLevel} />
       <ModerationTimeline history={submission.moderationHistory} headingLevel={sectionHeadingLevel} showContributor={showContributor} />
     </article>
   );

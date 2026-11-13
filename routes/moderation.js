@@ -173,23 +173,40 @@ function moderatorSummary(submission) {
   };
 }
 
-// Every credit list a moderator can see on this submission: the current
-// proposal, each revision, and the album a correction targets.
+// Every credit list a moderator can see on this submission, most important
+// first so a capped lookup keeps them: the current proposal (a new album's
+// metadata or a correction's proposed artists), the album a correction
+// targets and its captured baseline, then each revision.
 function submissionCreditLists(suggestion) {
+  const revisions = Array.isArray(suggestion?.revisions) ? suggestion.revisions : [];
   return [
     suggestion?.proposedMetadata?.artistCredits,
-    ...(Array.isArray(suggestion?.revisions) ? suggestion.revisions.map((revision) => revision?.proposedMetadata?.artistCredits) : []),
+    suggestion?.proposedChanges?.artists?.artistCredits,
     suggestion?.targetAlbum?.artistCredits,
+    suggestion?.baseValues?.artists?.artistCredits,
+    ...revisions.flatMap((revision) => [revision?.proposedMetadata?.artistCredits, revision?.proposedChanges?.artists?.artistCredits]),
   ];
+}
+
+// Registry context is advisory: if the registry read fails, detail and
+// command responses still succeed and the panel falls back to raw IDs.
+async function registryContextFor(suggestion) {
+  try {
+    return await artistRegistryContext(Artist, submissionCreditLists(suggestion));
+  } catch (error) {
+    console.error("Failed to load artist registry context for moderation", error?.message || error);
+    return { artists: null, truncated: false };
+  }
 }
 
 async function moderatorDetail(submission) {
   const suggestion = serializeSubmission(submission, { detail: true, moderator: true });
-  const [candidates, artistRegistry] = await Promise.all([
+  const [candidates, registry] = await Promise.all([
     duplicateCandidates(submission),
-    artistRegistryContext(Artist, submissionCreditLists(suggestion)),
+    registryContextFor(suggestion),
   ]);
-  const detail = { suggestion, duplicateCandidates: candidates, artistRegistry };
+  const detail = { suggestion, duplicateCandidates: candidates, artistRegistry: registry.artists };
+  if (registry.truncated) detail.artistRegistryTruncated = true;
   if (asPlain(submission)?.submissionType === "genre_suggestion") detail.genreReview = await genreReview(submission);
   return detail;
 }
