@@ -245,6 +245,11 @@
         "joinPhrase": {
           "type": "string",
           "maxLength": 32
+        },
+        "artistName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
         }
       }
     },

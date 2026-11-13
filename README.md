@@ -30,7 +30,7 @@ The custom `/account/edit` page sends username, email, and password changes dire
 
 ## Catalog contract
 
-Catalog responses expose `albumId`, `title`, `artistDisplayName`, `artistCredits`, `releaseType`, release date fields, `releaseYear`, `cover`, `tracks`, `label`, and normalized external references. Album-bearing social records resolve their current metadata from the catalog, so edits to an approved catalog record are reflected in reviews and activity.
+Catalog responses expose `albumId`, `title`, `artistDisplayName`, `artistCredits` (each with optional public `artistId` and MusicBrainz `artistMbid`; see [docs/ARTIST_IDENTITY.md](docs/ARTIST_IDENTITY.md)), `releaseType`, release date fields, `releaseYear`, `cover`, `tracks`, `label`, and normalized external references. Album-bearing social records resolve their current metadata from the catalog, so edits to an approved catalog record are reflected in reviews and activity.
 
 Saved albums are the deduplicated union of every board a user owns. Removing an item from one board does not remove it from the saved shelf while another board still contains it; manage membership from board detail pages.
 

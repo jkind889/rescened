@@ -482,6 +482,8 @@ export function ModerationSuggestions() {
               suggestion: updatedSuggestion,
               duplicateCandidates: data.duplicateCandidates || currentDetail.data?.duplicateCandidates || {},
               genreReview: data.genreReview || currentDetail.data?.genreReview || null,
+              artistRegistry: data.artistRegistry || currentDetail.data?.artistRegistry || null,
+              artistRegistryUnchecked: data.artistRegistry ? data.artistRegistryUnchecked || null : currentDetail.data?.artistRegistryUnchecked || null,
             },
           };
         });
@@ -543,6 +545,8 @@ export function ModerationSuggestions() {
       );
       const submissionDetail = (
         <SubmissionDetails
+          artistRegistry={activeDetailState.data?.artistRegistry || null}
+          artistRegistryUnchecked={activeDetailState.data?.artistRegistryUnchecked || null}
           duplicateCandidates={selectedDuplicateCandidates}
           genreReview={activeDetailState.data?.genreReview || null}
           headingLevel={2}

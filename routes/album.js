@@ -9,7 +9,8 @@ const Review = require("../models/Reviews");
 const { CATALOG_ALBUM_FIELDS, findAlbumByPublicId, normalizeCatalogAlbum } = require("./utils/albumCatalog");
 const { buildCatalogSearchQuery } = require("./utils/catalogSearch");
 const { albumTopTrack } = require("./utils/trackRankings");
-const { isGenresEnabled } = require("./utils/serverConfig");
+const { isArtistPagesEnabled, isGenresEnabled } = require("./utils/serverConfig");
+const { linkedArtistIds } = require("../lib/artists/read");
 const { resolveAlbumGenres } = require("../lib/genres/read");
 
 const router = express.Router();
@@ -121,7 +122,17 @@ router.get("/album/:albumId", async (req, res) => {
   try {
     const album = await findAlbumByPublicId(req.params.albumId);
     const normalized = normalizeCatalogAlbum(album);
-    res.json(isGenresEnabled() ? { ...normalized, genres: await resolveAlbumGenres(album) } : normalized);
+    const [genres, artistIds] = await Promise.all([
+      isGenresEnabled() ? resolveAlbumGenres(album) : null,
+      isArtistPagesEnabled() ? linkedArtistIds(normalized.artistCredits) : null,
+    ]);
+    // Optional sections appear only when their feature is on. artistPages lists
+    // the credited artistIds that resolve to a registry artist page.
+    res.json({
+      ...normalized,
+      ...(genres ? { genres } : {}),
+      ...(artistIds ? { artistPages: { artistIds } } : {}),
+    });
   } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : "Failed to fetch album details" }); }
 });
 

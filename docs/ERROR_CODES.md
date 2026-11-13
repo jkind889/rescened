@@ -166,6 +166,39 @@ At approval, `GENRE_RETIRED` and `GENRE_NOT_FOUND` are `409`: an added genre was
 
 Invalid genre suggestion bodies use `INVALID_SUBMISSION`, and missing albums use `CATALOG_TARGET_NOT_FOUND`, as for corrections. Marking a genre suggestion as a duplicate returns `400 INVALID_MODERATION_REQUEST`.
 
+### Artist pages
+
+The `/artists` routes are public reads. See [artist identity](ARTIST_IDENTITY.md#artist-pages-prototype).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `ARTIST_PAGES_DISABLED` | `503` | `ARTIST_PAGES_ENABLED` is off. |
+| `INVALID_ARTIST_ID` | `400` | The path segment is not a Rescened artist ID (UUID v4). |
+| `ARTIST_NOT_FOUND` | `404` | No registry artist has that `artistId`. |
+| `INVALID_ARTIST_RELEASES` | `400` | `GET /artists/:artistId/releases` got an unsupported query field, a `type` other than `all`, `album`, `ep`, `single`, `mixtape`, or `other`, or a `limit` outside 1–48. |
+| `INVALID_ARTIST_CURSOR` | `400` | A release cursor is empty, malformed, too long, or belongs to another `type`. |
+| `INVALID_ARTIST_LINKS` | `400` | `GET /artists/links` got a query field other than one `ids` string, an entry that is not a Rescened artist ID, or more than 100 IDs. |
+| `INVALID_ARTIST_SEARCH` | `400` | `GET /artists/search` got an unsupported query field, a `q` longer than 200 characters, or a `limit` outside 1–12. |
+| `ARTIST_DISCOGRAPHY_DISABLED` | `503` | `ARTIST_DISCOGRAPHY_ENABLED` is off (`GET /artists/:artistId/discography`). Artist pages still work. |
+| `INVALID_ARTIST_DISCOGRAPHY` | `400` | The discography request has an unsupported query field or a `type` other than `album`, `ep`, `single`, `other`, or `all`. |
+| `INVALID_DISCOGRAPHY_CURSOR` | `400` | A discography cursor is malformed, belongs to another artist or `type`, or names an offset outside 1–1,000. |
+| `ARTIST_DISCOGRAPHY_NOT_AVAILABLE` | `404` | The registry artist has no MusicBrainz artist identity to browse. |
+| `EXTERNAL_DISCOGRAPHY_UNAVAILABLE` | `502` | MusicBrainz failed, was busy, timed out, or returned data that could not be normalized or exceeded the response-size limit. Adds `category`, `upstreamStatus`, and `requestId` as for external search. Local artist content is unaffected. |
+
+### Artist biographies
+
+See [artist biographies](ARTIST_BIOGRAPHIES.md).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `ARTIST_BIOGRAPHIES_DISABLED` | `503` | `ARTIST_BIOGRAPHIES_ENABLED` is off (`GET /artists/:artistId/biography` and `/moderation/artist-biographies`). |
+| `BIOGRAPHY_NOT_FOUND` | `404` | No biography record exists for that artist (moderation routes). |
+| `INVALID_BIOGRAPHY_COMMAND` | `400`/`404` | A moderation command or queue request has an unknown command (`404`), unsupported field, missing `expectedRevision` or `reason`, invalid corrected text, or bad `state`/`limit`. |
+| `BIOGRAPHY_REVISION_CONFLICT` | `409` | The record changed since `expectedRevision`; reload and retry. |
+| `BIOGRAPHY_STATE_CONFLICT` | `409` | The command does not apply to the record's current state, for example confirming without a reviewable candidate, or accepting or dismissing when no changed text is staged. |
+
+The operator command (`npm run artists:biographies`) reports provider failures with `BIOGRAPHY_PROVIDER_TIMEOUT`, `BIOGRAPHY_PROVIDER_NETWORK`, `BIOGRAPHY_PROVIDER_HTTP`, `BIOGRAPHY_PROVIDER_THROTTLED`, `BIOGRAPHY_INVALID_RESPONSE`, and `BIOGRAPHY_REVISION_UNAVAILABLE`, and refuses to run with `INVALID_ARGUMENTS`, `INVALID_PLAN`, `PLAN_CHECKSUM_MISMATCH`, `TARGET_MISMATCH`, or `MISSING_MONGO_URI`. Apply and refresh results per artist are `written`, `stale`, `record_changed`, `artist_changed`, `outcome_changed`, or `not_applicable`.
+
 ### Review comments
 
 Comment mutations require Clerk authentication and `REVIEW_COMMENTS_ENABLED=true`. Create, edit and delete, and report each have their own limit (see below). Malformed review IDs return `400 INVALID_REVIEW_ID`, and a missing or hidden review returns `404 REVIEW_NOT_FOUND`. See [the review comments guide](REVIEW_COMMENTS.md).
@@ -204,6 +237,7 @@ See [the notifications guide](NOTIFICATIONS.md).
 | `CATALOG_CHANGED` | `409` | A correction target changed after submission or during its guarded update. |
 | `CATALOG_BASELINE_INVALID` | `409` | A correction does not retain a usable positive catalog-revision baseline. |
 | `CATALOG_REFERENCE_CONFLICT` | `409` | A proposed external reference is already owned by another catalog album. |
+| `ARTIST_IDENTITY_CONFLICT` | `409` | A proposed credit names an unknown `artistId`, an `artistId` whose registered MusicBrainz MBID differs from the credit's, or a MusicBrainz artist that another change registered concurrently. Nothing is published; `details[]` lists `index` and `code` (`ARTIST_NOT_FOUND`, `ARTIST_MBID_MISMATCH`, or the retryable `ARTIST_REGISTRATION_RACE`). See [ARTIST_IDENTITY.md](ARTIST_IDENTITY.md). |
 | `APPROVAL_CONFLICT` | `409` | Approval produced no consistent result, or an already-approved suggestion conflicts with the requested album. |
 | `APPROVAL_INCONSISTENT` | `409` | A submission says it is approved, but its linked catalog album is missing or unusable. |
 | `BULK_LIMIT_EXCEEDED` | `400` | A bulk approval lists more than 20 suggestions. |
@@ -216,7 +250,7 @@ Bulk approval returns `200` with a result for each item. Its per-item `error.cod
 
 | Code | Status | Meaning |
 | --- | --- | --- |
-| `INVALID_EXTERNAL_SEARCH` | `400` | The query, limit, or release-group MBID is invalid. |
+| `INVALID_EXTERNAL_SEARCH` | `400` | The query, limit, release-group MBID, or `cursor` is invalid. A cursor is invalid when it belongs to another query, names an offset beyond 1,000, or needs provider paging while `EXTERNAL_SEARCH_PROVIDER_PAGING_ENABLED` is off. |
 | `RATE_LIMITED` | `429` | The Rescened external-search bucket is exhausted; this is not a MusicBrainz response code. |
 | `EXTERNAL_SEARCH_UNAVAILABLE` | `502` | MusicBrainz failed, timed out, or returned data that could not be normalized. Local catalog search remains available. |
 | `EXTERNAL_SEARCH_DISABLED` | `503` | `EXTERNAL_ALBUM_SEARCH_ENABLED` is off. |
@@ -239,8 +273,8 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | --- | --- | --- | --- |
 | Global API | Every API route except `/health` and `/share` | IP | 300 requests per 5 minutes |
 | Share preview | `GET /share/album/:albumId`, `GET /share/review/:reviewId`, `GET /share/sitemap.xml` (not cumulative with the global bucket) | IP (Vercel's address when proxied) | 600 requests per 5 minutes |
-| Local search | `GET /search/search`, `GET /genres/search`, `GET /genres/:slug/albums` | IP | 90 requests per minute |
-| External search | `GET /search/external`, `GET /search/musicbrainz/release-group/:mbid` | IP | 30 requests per minute |
+| Local search | `GET /search/search`, `GET /genres/search`, `GET /genres/:slug/albums`, `GET /artists/search`, `GET /artists/:artistId/releases`, `GET /artists/:artistId/biography` | IP | 90 requests per minute |
+| External search | `GET /search/external`, `GET /search/musicbrainz/release-group/:mbid`, `GET /artists/:artistId/discography` | IP | 30 requests per minute |
 | Album save | `POST /boards/:boardId/albums` | authenticated user | 30 attempts per 10 minutes |
 | Diary mutation | `POST /diary`, `PATCH`/`DELETE /diary/:listenId`, `PUT`/`DELETE /boards/:boardId/listens/:listenId` | authenticated user | 30 attempts per 10 minutes |
 | Review create | `POST /reviews/review` | authenticated user | 6 attempts per 10 minutes |
@@ -255,7 +289,7 @@ All listed route-specific buckets are cumulative with the global bucket. Authent
 | Correction create | `POST /suggestions/corrections` | authenticated user | 6 attempts per 5 minutes |
 | Suggestion mutation | `POST /suggestions/:submissionId/revise`, `POST /suggestions/:submissionId/withdraw` | authenticated user | 20 attempts per 10 minutes |
 | Genre suggestion | `POST /suggestions/genres` | authenticated user | 20 attempts per hour |
-| Moderation mutation | Request-changes, reject, duplicate, and approve commands, bulk approval (one point per item), genre vocabulary commands, and comment remove and dismiss | authenticated moderator | 120 points per 10 minutes |
+| Moderation mutation | Request-changes, reject, duplicate, and approve commands, bulk approval (one point per item), genre vocabulary commands, artist biography commands, and comment remove and dismiss | authenticated moderator | 120 points per 10 minutes |
 | Comment create | `POST /reviews/review/:reviewId/comments` | authenticated user | 20 attempts per 10 minutes |
 | Comment mutation | `PATCH` and `DELETE /reviews/comments/:commentId` | authenticated user | 60 attempts per 10 minutes |
 | Comment report | `POST /reviews/comments/:commentId/report` | authenticated user | 10 attempts per 10 minutes |
@@ -290,7 +324,8 @@ These are internal diagnostics. Public external-search routes normally translate
 | Code | Meaning |
 | --- | --- |
 | `MUSICBRAINZ_SEARCH_FAILED` | Generic interactive search-adapter failure. |
-| `MUSICBRAINZ_INVALID_SEARCH_RESPONSE` | A search response is malformed or contains no usable release groups. |
+| `MUSICBRAINZ_INVALID_SEARCH_RESPONSE` | A search or artist-browse response is malformed or contains no usable release groups. |
+| `MUSICBRAINZ_RESPONSE_TOO_LARGE` | The decoded response body exceeded 2 MiB while being read, or the server declared a larger `Content-Length`. |
 | `MUSICBRAINZ_INVALID_RELEASE_GROUP` | An exact release-group response cannot be validated or normalized. |
 | `MUSICBRAINZ_REQUEST_FAILED` | The shared provider request layer failed. |
 | `MUSICBRAINZ_PROVIDER_ERROR` | An unexpected provider or adapter error occurred. |
@@ -410,6 +445,7 @@ Source: [`lib/catalogImport/listenBrainz.js`](../lib/catalogImport/listenBrainz.
 | `FINAL_DOCUMENT_SEMANTIC_INVALID` | A merged row violates date, reference, or cover invariants. |
 | `MODEL_VALIDATION_FAILED` | A merged catalog row fails Mongoose validation. |
 | `CONCURRENT_CATALOG_CHANGE` | An imported row changed between preflight and its guarded write. |
+| `IDENTITY_RELINK_NEEDS_BACKFILL` | `--apply` would re-version albums whose only change is artist credit identity. Run the artist backfill first, or pass `--allow-identity-relink`. Nothing was built or written. |
 | `TRANSACTION_UNAVAILABLE` | Transaction-capable MongoDB is unavailable. |
 | `TRANSACTION_ROLLED_BACK` | The import transaction did not commit. |
 | `MISSING_MONGO_URI` | `MONGO_URI` was not supplied. |
@@ -417,6 +453,8 @@ Source: [`lib/catalogImport/listenBrainz.js`](../lib/catalogImport/listenBrainz.
 | `ARTIFACT_FINALIZATION_FAILED` | One or more staged artifacts could not be finalized before a database commit. |
 | `IMPORT_COMMITTED_ARTIFACT_FINALIZATION_FAILED` | Database writes committed, but final report publication failed. Do not treat this as a rollback. |
 | `IMPORT_COMMITTED_SESSION_CLEANUP_FAILED` | Database writes committed, but Mongo session cleanup failed. Do not treat this as a rollback. |
+| `ARTIST_REGISTRY_UNAVAILABLE` | Preflight or apply was called without the Artist registry model. |
+| `ARTIST_IDENTITY_UNRESOLVED` | A dataset credit MBID had no planned registry artist when building a catalog row. This indicates an importer defect. |
 
 Source: [`lib/catalogImport/persistence.js`](../lib/catalogImport/persistence.js), [`scripts/validateCatalogDataset.js`](../scripts/validateCatalogDataset.js), and [`scripts/importCatalogDataset.js`](../scripts/importCatalogDataset.js).
 
@@ -433,6 +471,33 @@ Source: [`lib/catalogImport/persistence.js`](../lib/catalogImport/persistence.js
 Row statuses are `resolved` in dry-run mode, `updated` after a successful apply, `unresolved` when no safe cover is available, `conflict` when identity or optimistic-concurrency checks fail, and `failed` for a row-scoped provider failure. The report schema also counts `skipped`, although the current implementation does not produce that status.
 
 Source: [`scripts/backfillMissingAlbumCovers.js`](../scripts/backfillMissingAlbumCovers.js).
+
+## Artist identity backfill command codes
+
+| Code | Meaning |
+| --- | --- |
+| `ARTIST_BACKFILL_FAILED` | Generic fatal backfill failure. |
+| `ARTIST_NAME_LOOKUP_FAILED` | Artist lookup failed after bounded network or timeout retries; no final plan is written. |
+| `ARTIST_NAME_HTTP_ERROR` | Artist lookup returned a non-retryable HTTP response or exhausted its retries. |
+| `ARTIST_NAME_ID_MISMATCH` | Returned artist ID differs from the requested MBID; review merges manually. |
+| `ARTIST_NAME_INVALID_RESPONSE` | Invalid, oversized, malformed, or incomplete artist-name response. |
+| `ARTIST_NAME_RETRY_AFTER` | MusicBrainz requested more than thirty seconds of cooldown; stop and resume later. |
+| `ARTIST_NAME_BUDGET_EXHAUSTED` | The fifteen-minute lookup budget was exhausted; verified cache entries can be reused. |
+| `ARTIST_NAME_LIMIT` | More than 1,000 new artists were requested in one name-resolution plan. |
+| `ARTIST_NAME_CACHE_LOCKED` | Another resolver holds the cache lock; inspect before removing a stale lock. |
+| `ARTIST_NAME_CONFLICT` | Import inputs give different canonical names for the same artist MBID. |
+| `INVALID_ARGUMENTS` | CLI flags are missing, duplicated, unknown, or mix plan-only and apply-only options. |
+| `INVALID_PLAN` | The `--plan` file is not an artist identity backfill plan of a supported version. |
+| `PLAN_CHECKSUM_MISMATCH` | The plan was edited after sealing, or `--plan-sha256` is not the reviewed checksum. |
+| `TARGET_MISMATCH` | The connected database, the plan target, and `--confirm-target` do not all match. Nothing was written. |
+| `ARTIST_REGISTRY_CHANGED` | The registry maps a planned MBID to a different artist, or a reused artist is gone. No album changes were made; create a new plan. |
+| `ARTIFACT_EXISTS` | The plan or report path already exists; artifacts are never overwritten. |
+| `TRANSACTION_UNAVAILABLE` | Transaction-capable MongoDB is unavailable. |
+| `MISSING_MONGO_URI` | `MONGO_URI` was not supplied. |
+
+Plan buckets use `USER_OWNED_CREDITS` (review), and `MULTIPLE_RELEASE_GROUPS`, `SOURCE_CONFLICT`, `INVALID_SOURCE_CREDIT`, `CREDIT_COUNT_MISMATCH`, `CREDIT_NAME_MISMATCH`, or `EXISTING_IDENTITY_CONFLICT` (flagged). Apply album outcomes are `applied`, `already_applied`, or `conflict`. A failed apply report records `databaseCommitted` and `completed`, because registry and album transactions commit independently.
+
+Source: [`lib/artists/backfill.js`](../lib/artists/backfill.js) and [`scripts/backfillArtistIdentity.js`](../scripts/backfillArtistIdentity.js). Runbook: [ARTIST_IDENTITY.md](ARTIST_IDENTITY.md).
 
 ## Genre seed command codes
 
@@ -645,6 +710,7 @@ These are not error codes, but they frequently appear beside them in API respons
 | Catalog-fetch report | `running`, `complete`, `incomplete`, `failed` |
 | Cover resolver | `resolved`, `unresolved` |
 | Cover backfill row | `resolved`, `updated`, `unresolved`, `conflict`, `failed` |
+| Artist identity backfill album | `applied`, `already_applied`, `conflict` |
 | Import action | `inserted`, `refreshed`, `unchanged` |
 | Genre seed plan | `create`, `unchanged`, `drift`, `conflicts` |
 | Migration catalog action | `created`, `reused`, `quarantined`, `archived` |

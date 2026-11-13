@@ -12,6 +12,7 @@ import ReviewEditForm from "../features/reviews/ReviewEditForm";
 import { updateReview } from "../features/reviews/reviews";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import { reviewPageMeta } from "../utils/pageMeta";
+import ArtistCredits from "../features/artists/ArtistCredits";
 
 function formatDate(value) {
   const date = new Date(value);
@@ -144,7 +145,7 @@ function ReviewPermalinkContent({ reviewId, getToken, isLoaded, userId }) {
           </p>
           <h1><Link to={`/album/${album.albumId}`}>{album.title || "Untitled album"}</Link></h1>
           <p className="review-permalink-artist">
-            {album.artistDisplayName || "Artist unknown"}{album.releaseYear ? ` · ${album.releaseYear}` : ""}
+            <ArtistCredits album={album} fallback="Artist unknown" />{album.releaseYear ? ` · ${album.releaseYear}` : ""}
           </p>
           <p className="review-permalink-meta">
             <span aria-label={`${review.rating} out of 5`}>★ {review.rating}/5</span>

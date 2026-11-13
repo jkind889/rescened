@@ -19,6 +19,7 @@ const {
   getPageLimit,
   isModerator,
   isSubmissionsEnabled,
+  assertCreditIdentities,
   normalizeCorrectionPayload,
   correctionSnapshot,
   plain,
@@ -190,6 +191,7 @@ router.post("/editions/preview", auth, submissionsEnabled, editionsEnabled, cont
 router.post("/", auth, submissionsEnabled, submissionCreateRateLimit, async (req, res) => {
   try {
     const payload = await editions.normalize(req.body, req.userId);
+    await assertCreditIdentities(payload.proposedMetadata.artistCredits);
     payload.genreChanges = await normalizeAlbumGenreProposal(payload.proposedGenres);
     const duplicate = await findDuplicateSignals(payload);
     const submittedAt = new Date();
@@ -213,6 +215,9 @@ router.post("/corrections", auth, submissionsEnabled, correctionCreateRateLimit,
     const album = requestedAlbumId ? await queryResult(AlbumCatalog.findOne({ albumId: requestedAlbumId })) : null;
     if (!album) return res.status(404).json({ error: "Target catalog album not found", code: "CATALOG_TARGET_NOT_FOUND" });
     const payload = normalizeCorrectionPayload(req.body, album);
+    if (payload.proposedChanges.artists) {
+      await assertCreditIdentities(payload.proposedChanges.artists.artistCredits, "proposedChanges.artists.artistCredits");
+    }
     const submittedAt = new Date();
     const snapshot = correctionSnapshot(payload, submittedAt, 1);
     const submission = await AlbumSubmission.create({
@@ -405,6 +410,9 @@ router.post("/:submissionId/revise", auth, submissionsEnabled, submissionMutatio
       if (!target) return res.status(409).json({ error: "The correction target album is no longer available", code: "CATALOG_TARGET_MISSING" });
       const body = { ...(req.body || {}), albumId: req.body?.albumId || plain(target).albumId };
       const payload = normalizeCorrectionPayload(body, target);
+      if (payload.proposedChanges.artists) {
+        await assertCreditIdentities(payload.proposedChanges.artists.artistCredits, "proposedChanges.artists.artistCredits");
+      }
       update = {
         $set: correctionUpdate(payload, revision, "pending"),
         $push: {
@@ -414,6 +422,7 @@ router.post("/:submissionId/revise", auth, submissionsEnabled, submissionMutatio
       };
     } else {
       const payload = await editions.normalize(req.body, req.userId, current);
+      await assertCreditIdentities(payload.proposedMetadata.artistCredits);
       payload.genreChanges = await normalizeAlbumGenreProposal(payload.proposedGenres);
       genreAllowancePayload = payload;
       const duplicate = await findDuplicateSignals(payload, { excludeSubmissionId: current._id });

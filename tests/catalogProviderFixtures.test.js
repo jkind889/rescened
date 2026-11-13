@@ -53,6 +53,7 @@ test("captured official provider responses map through the strict catalog row pa
   assert.deepEqual(row.artistCredits, [{
     artistMbid: ARTIST_MBID,
     name: "Radiohead",
+    artistName: "Radiohead",
     joinPhrase: "",
   }]);
   assert.equal(row.releaseType, "album");

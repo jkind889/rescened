@@ -142,6 +142,7 @@ test("artist credits use MusicBrainz credited names and join phrases", () => {
   ]);
 
   assert.equal(mapped.artistDisplayName, "Alpha Alias feat. Beta & Gamma");
+  assert.deepEqual(mapped.artistCredits.map((credit) => credit.artistName), ["Alpha", "Beta", "Gamma"]);
   assert.deepEqual(mapped.artistCredits.map(({ name, joinPhrase }) => ({ name, joinPhrase })), [
     { name: "Alpha Alias", joinPhrase: " feat. " },
     { name: "Beta", joinPhrase: " & " },

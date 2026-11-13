@@ -1,0 +1,549 @@
+{
+ "release-group-count": 29,
+ "release-group-offset": 0,
+ "release-groups": [
+  {
+   "id": "0cbdd06c-f3e1-4ea4-960e-634332c8708c",
+   "title": "Live At The Astoria, London, 27/05/1994",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Live"
+   ],
+   "first-release-date": "1995-03-13",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "0ef22186-e92d-4f03-9b05-500fa2d581ad",
+   "title": "27 5 94: The Astoria London Live",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Live"
+   ],
+   "first-release-date": "1995-05-17",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "11f16b31-da2e-48b8-90a1-f65014bc8262",
+   "title": "Greenhouse Effect vs. Radiohead",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Remix"
+   ],
+   "first-release-date": "2005-08",
+   "artist-credit": [
+    {
+     "name": "Greenhouse Effect",
+     "joinphrase": " vs. ",
+     "artist": {
+      "id": "bec9c3ab-7428-4d65-909d-2e024fbcb924",
+      "name": "Greenhouse"
+     }
+    },
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "1af3fda4-4281-4ed9-ba38-389ed83d9ab2",
+   "title": "MINIDISCS [HACKED]",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Compilation",
+    "Demo"
+   ],
+   "first-release-date": "2019-06-05",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "270ff9af-bcfb-402c-8e6b-d1372a1e8824",
+   "title": "The Interview",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Interview"
+   ],
+   "first-release-date": "2010-08-23",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "30f765ef-d7f0-4cce-8a3b-d6e1069f1dda",
+   "title": "5 Album Set",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Compilation"
+   ],
+   "first-release-date": "2012-10-12",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "441803f3-eb4d-3847-93cf-ab473cf0b8ec",
+   "title": "1997-06-28: Glastonbury Festival of Contemporary Performing Arts",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Live"
+   ],
+   "first-release-date": "1997-06-28",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "44419ec0-d44a-4ec5-875c-d08f5c7ec13c",
+   "title": "Hail to the Thief: Live Recordings 2003–2009",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Live"
+   ],
+   "first-release-date": "2025-08-13",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "5c14fd50-a2f1-3672-9537-b0dad91bea2f",
+   "title": "Hail to the Thief",
+   "primary-type": "Album",
+   "secondary-types": [],
+   "first-release-date": "2003-05-26",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "69553ea8-c62c-4e2a-a878-d85276c45215",
+   "title": "2008-08-01: Lollapalooza, Chicago, IL",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Live"
+   ],
+   "first-release-date": "2022-01-21",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "6ac50c71-cfbf-4f6d-acb0-84af1462aae3",
+   "title": "1995-06-01: PASTE.COM Presents: Radiohead Live at Tramps: New York, NY, USA",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Live"
+   ],
+   "first-release-date": "2013-06-21",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "6e335887-60ba-38f0-95af-fae7774336bf",
+   "title": "In Rainbows",
+   "primary-type": "Album",
+   "secondary-types": [],
+   "first-release-date": "2007-10-10",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "6e78d500-67be-44e3-9aa5-e4d366e29f61",
+   "title": "2016‐05‐27: Roundhouse, London, UK",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Live"
+   ],
+   "first-release-date": "2020-01",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "6f25f9fb-e9e3-4c0d-8904-ecb8b46cd8aa",
+   "title": "KID A MNESIA",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Compilation"
+   ],
+   "first-release-date": "2021-11-05",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "80975c59-4094-30d5-bb58-365e8b061274",
+   "title": "The Best Of",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Compilation"
+   ],
+   "first-release-date": "2008-05-28",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "899b6d09-807e-4c18-a6d4-3642e00d6a3d",
+   "title": "The King of Limbs",
+   "primary-type": "Album",
+   "secondary-types": [],
+   "first-release-date": "2011-02-18",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "b1392450-e666-3926-a536-22c65f834433",
+   "title": "OK Computer",
+   "primary-type": "Album",
+   "secondary-types": [],
+   "first-release-date": "1997-05-21",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "b7db08f4-835a-4a69-970b-5321e6305032",
+   "title": "Album Box Set",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Compilation"
+   ],
+   "first-release-date": "2007-12-10",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "b8048f24-c026-3398-b23a-b5e50716cbc7",
+   "title": "The Bends",
+   "primary-type": "Album",
+   "secondary-types": [],
+   "first-release-date": "1994-11-29",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "b9e65b67-32e2-45ac-9e6b-cad36c248c14",
+   "title": "1997‐07‐04: Eurockéennes Festival, Belfort, France",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Live"
+   ],
+   "first-release-date": "2020-07-02",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bbce0087-d386-4246-a51d-dbcdfdbe8fb2",
+   "title": "A Moon Shaped Pool",
+   "primary-type": "Album",
+   "secondary-types": [],
+   "first-release-date": "2016-05-08",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bca9280e-28b4-327f-8fe0-fd918579e486",
+   "title": "Amnesiac",
+   "primary-type": "Album",
+   "secondary-types": [],
+   "first-release-date": "2001-05-30",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cd76f76b-ff15-3784-a71d-4da3078a6851",
+   "title": "Pablo Honey",
+   "primary-type": "Album",
+   "secondary-types": [],
+   "first-release-date": "1993-02-22",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "d2f48ef0-9a77-42bc-95af-89dd0c8452b4",
+   "title": "In Rainbows: From the Basement",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Live"
+   ],
+   "first-release-date": "2008-06-24",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "d8dd81ab-d840-4663-8da3-d8c27c2eaf91",
+   "title": "Radiohead Box",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Compilation"
+   ],
+   "first-release-date": "2008-01-01",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "e078a7ce-4147-4bbb-8909-0aaa2a7972ad",
+   "title": "2017‐04‐17: Greek Theatre, Berkely, CA, USA",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Live"
+   ],
+   "first-release-date": "",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "e404b349-7cef-398f-ac5e-ce06737341d1",
+   "title": "I Might Be Wrong: Live Recordings",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Live"
+   ],
+   "first-release-date": "2001-11-07",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "e75c0549-ad55-39e3-8025-c72c5d4a3c5d",
+   "title": "Kid A",
+   "primary-type": "Album",
+   "secondary-types": [],
+   "first-release-date": "2000-08-03",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "f1b5c8a1-a597-40c5-b244-f3c0f34f83ee",
+   "title": "TKOL RMX 1 2 3 4 5 6 7",
+   "primary-type": "Album",
+   "secondary-types": [
+    "Compilation",
+    "Remix"
+   ],
+   "first-release-date": "2011-09-21",
+   "artist-credit": [
+    {
+     "name": "Radiohead",
+     "joinphrase": "",
+     "artist": {
+      "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+      "name": "Radiohead"
+     }
+    }
+   ]
+  }
+ ]
+}

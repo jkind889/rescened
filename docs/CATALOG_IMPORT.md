@@ -4,7 +4,7 @@ Rescened's catalog bootstrap is an offline, two-stage process. It selects ranked
 
 See the [central error and status code reference](./ERROR_CODES.md) for validation, fetch, import, report, and exit-code meanings.
 
-The importer writes `AlbumCatalog` records only. It never creates community submissions, moderation history, reviews, likes, boards, profiles, or approved-feed entries.
+The importer writes `AlbumCatalog` and `Artist` registry records only. It never creates community submissions, moderation history, reviews, likes, boards, profiles, or approved-feed entries.
 
 ## Checked-in artifacts
 
@@ -45,7 +45,7 @@ Apply the accepted rows:
 MONGO_URI='mongodb://...' npm run catalog:import -- --input data/catalog-import/seeds/listenbrainz-YYYY-MM-DD.json --apply
 ```
 
-`--apply` is always explicit; omitting it keeps the command in dry-run mode. Import reports distinguish inserted, refreshed, unchanged, quarantined, and conflicting rows. Exit code `0` means a clean run, `2` means the run completed with quarantined/conflicting rows, and `1` means a fatal error or transaction rollback.
+`--apply` is always explicit; omitting it keeps the command in dry-run mode. Import reports distinguish inserted, refreshed, unchanged, quarantined, and conflicting rows. They also list `identityRelinks`: refreshed albums whose only change is artist credit identity. `--apply` refuses (`IDENTITY_RELINK_NEEDS_BACKFILL`, before building indexes or writing) while that list is non-empty; run the [artist identity backfill](ARTIST_IDENTITY.md#backfill) first, or pass `--allow-identity-relink` to re-version those albums deliberately. Exit code `0` means a clean run, `2` means the run completed with quarantined/conflicting rows, and `1` means a fatal error or transaction rollback.
 
 ## Dataset contract
 
@@ -68,6 +68,8 @@ Every schema object rejects unknown properties. File size, row counts, string le
 MusicBrainz secondary types take precedence in this order: soundtrack, mixtape/street, live, remix, compilation. Otherwise Album, EP, and Single map directly, and all remaining types become `other`.
 
 An album is matched by its `musicbrainz` / `release-group` external reference. New rows receive a UUID v4 and `catalogSource: "import"`. Reruns may refresh existing imported rows while preserving their public UUID, tracks, label, non-MusicBrainz references, and fields explicitly owned by manual or community provenance. A missing incoming cover never clears an existing cover. Manual or community catalog collisions are reported and left unchanged. Albums absent from a later file are never deleted.
+
+Each dataset credit's MusicBrainz artist MBID is resolved through the Artist registry. Known artists keep their Rescened `artistId`. New ones are registered in the same transaction as the catalog writes. Imported credits therefore carry both `artistId` and `artistMbid`, and the import report adds `artistRegistry: { registered, reused }`. See [ARTIST_IDENTITY.md](ARTIST_IDENTITY.md).
 
 Accepted writes run in one MongoDB transaction, so a persistence error rolls the accepted batch back. This requires a replica-set or sharded MongoDB deployment, matching the transaction requirement already used by community approval.
 
@@ -102,3 +104,7 @@ npm run test:catalog-live
 Normal test runs use the checked-in, CC0 ListenBrainz and MusicBrainz response fixtures under `tests/fixtures/catalogImport`; they never contact either provider.
 
 The provider-neutral guard covers the catalog model, application surfaces, and all importer/fetcher modules so catalog identity cannot silently regress to a Spotify dependency.
+
+### Artist names versus credited display names
+
+Fetched dataset credits retain MusicBrainz's underlying `artist.name` as optional `artistName`; `name` and `joinPhrase` remain the original credit display text. The optional field is backward-compatible with version 1.0.0 datasets. Import uses `artistName` only for new artist registry names and records its provider provenance. It never copies the canonical name over album credit wording or silently renames an existing registry artist. Older datasets without the field produce provisional credit-derived names unless a verified-name backfill is run first. See [Artist identity](ARTIST_IDENTITY.md#verified-registry-names) for the reviewed operator workflow.

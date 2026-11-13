@@ -324,6 +324,95 @@ test("moderator detail exposes the published album for approved duplicate candid
   assert.equal(result.body.duplicateCandidates.submissions[0].approvedAlbumId, catalog.albumId);
 });
 
+test("moderator detail names the registry artist behind each credited artistId", async () => {
+  const Artist = require("../models/Artist");
+  const originalFind = Artist.find;
+  const linked = crypto.randomUUID();
+  const unknown = crypto.randomUUID();
+  const mbid = "a74b1b7f-71a5-4011-9441-d0b5e4122711";
+  const queries = [];
+  Artist.find = (filter) => {
+    queries.push(filter);
+    const rows = [{ artistId: linked, name: "Radiohead", externalReferences: [{ provider: "musicbrainz", entityType: "artist", externalId: mbid }], fieldProvenance: { secret: true } }];
+    const chain = { select: () => chain, lean: () => chain, exec: async () => rows.filter((row) => filter.artistId.$in.includes(row.artistId)) };
+    return chain;
+  };
+  try {
+    const document = makeSubmission({
+      proposedMetadata: { ...validMetadata(), artistCredits: [{ name: "Someone Else", role: "main", artistId: linked }, { name: "Ghost", role: "main", artistId: unknown }] },
+      revisions: [{ revision: 1, submissionType: "new_album", proposedMetadata: { ...validMetadata(), artistCredits: [{ name: "Radiohead", role: "main", artistId: linked }] } }],
+    });
+    const state = installMocks({ documents: [document] });
+    const result = await callRoute(state.router, "get", "/:submissionId", { params: { submissionId: document.submissionId } });
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body.artistRegistry, { [linked]: { artistId: linked, name: "Radiohead", artistMbid: mbid } });
+    assert.equal(queries.length, 1, "one registry query covers every credit list");
+    assert.deepEqual([...queries[0].artistId.$in].sort(), [linked, unknown].sort());
+  } finally {
+    Artist.find = originalFind;
+  }
+});
+
+test("moderator detail covers correction credits, degrades on a registry failure, and reports truncation", async () => {
+  const Artist = require("../models/Artist");
+  const originalFind = Artist.find;
+  const linked = crypto.randomUUID();
+  const current = crypto.randomUUID();
+  const registryRows = [
+    { artistId: linked, name: "Radiohead", externalReferences: [] },
+    { artistId: current, name: "Thom Yorke", externalReferences: [] },
+  ];
+  let mode = "ok";
+  const queries = [];
+  Artist.find = (filter) => {
+    queries.push(filter);
+    const chain = { select: () => chain, lean: () => chain, exec: async () => {
+      if (mode === "fail") throw new Error("registry unavailable");
+      return registryRows.filter((row) => filter.artistId.$in.includes(row.artistId));
+    } };
+    return chain;
+  };
+  try {
+    const correction = makeSubmission({
+      revisions: [{ revision: 1, submissionType: "catalog_correction", proposedChanges: { artists: { artistDisplayName: "Someone", artistCredits: [{ name: "Someone", role: "main", artistId: linked }] } } }],
+    });
+    Object.assign(correction, {
+      submissionType: "catalog_correction",
+      proposedMetadata: undefined,
+      proposedChanges: { artists: { artistDisplayName: "Someone", artistCredits: [{ name: "Someone", role: "main", artistId: linked }] } },
+      baseValues: { artists: { artistDisplayName: "Thom Yorke", artistCredits: [{ name: "Thom Yorke", role: "main", artistId: current }] } },
+    });
+    const state = installMocks({ documents: [correction] });
+    const detail = await callRoute(state.router, "get", "/:submissionId", { params: { submissionId: correction.submissionId } });
+    assert.equal(detail.status, 200, JSON.stringify(detail.body));
+    assert.deepEqual(Object.keys(detail.body.artistRegistry).sort(), [linked, current].sort(), "proposed and baseline correction credits are both resolved");
+    assert.equal(detail.body.artistRegistry[linked].name, "Radiohead");
+    assert.equal(detail.body.artistRegistryUnchecked, undefined);
+
+    mode = "fail";
+    const degraded = await callRoute(state.router, "get", "/:submissionId", { params: { submissionId: correction.submissionId } });
+    assert.equal(degraded.status, 200, "a registry failure never blocks moderator detail");
+    assert.equal(degraded.body.artistRegistry, null);
+    mode = "ok";
+
+    // More IDs than the cap: the current proposal is looked up first, and truncation is reported.
+    const many = Array.from({ length: 105 }, () => crypto.randomUUID());
+    const crowded = makeSubmission({
+      proposedMetadata: { ...validMetadata(), artistCredits: [{ name: "Radiohead", role: "main", artistId: linked }] },
+      revisions: [{ revision: 1, submissionType: "new_album", proposedMetadata: { ...validMetadata(), artistCredits: many.map((artistId) => ({ name: "X", role: "main", artistId })) } }],
+    });
+    const crowdedState = installMocks({ documents: [crowded] });
+    queries.length = 0;
+    const capped = await callRoute(crowdedState.router, "get", "/:submissionId", { params: { submissionId: crowded.submissionId } });
+    assert.equal(capped.status, 200);
+    assert.equal(queries[0].artistId.$in.length, 100);
+    assert.deepEqual(capped.body.artistRegistryUnchecked, many.slice(99), "exactly the IDs past the cap are reported unchecked");
+    assert.equal(queries[0].artistId.$in[0], linked, "the current proposal is never the part that is cut");
+  } finally {
+    Artist.find = originalFind;
+  }
+});
+
 test("moderator commands enforce reasons, target validation, and conditional transitions", async () => {
   const target = makeSubmission({ status: "approved", approvedAlbumCatalogId: new mongoose.Types.ObjectId() });
   const document = makeSubmission();

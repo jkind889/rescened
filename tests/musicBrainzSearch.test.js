@@ -109,7 +109,10 @@ test("exact lookup maps core metadata into the existing suggestion input shape",
   assert.equal(draft.proposedMetadata.title, "Imaginal Disk");
   assert.equal(draft.proposedMetadata.releaseDatePrecision, "day");
   assert.equal(draft.proposedMetadata.releaseYear, 2024);
-  assert.deepEqual(draft.proposedMetadata.artistCredits, [{ name: "Magdalena Bay", role: "main" }]);
+  // The MusicBrainz artist MBID is proposed with the credit; approval resolves
+  // it to a Rescened artistId, so no artistId appears in the draft.
+  assert.deepEqual(draft.proposedMetadata.artistCredits, [{ name: "Magdalena Bay", role: "main", artistMbid: "33333333-3333-4333-8333-333333333333" }]);
+  assert.deepEqual(candidate.artistCredits, draft.proposedMetadata.artistCredits);
   assert.deepEqual(draft.proposedMetadata.tracks, []);
   assert.equal(draft.proposedMetadata.coverSourceUrl, "");
   assert.deepEqual(draft.supportingSources, [{

@@ -7,21 +7,29 @@ const test = require("node:test");
 const mongoose = require("mongoose");
 
 const RealAlbumCatalog = require("../models/AlbumCatalog");
+const persistence = require("../lib/catalogImport/persistence");
 const {
   CatalogImportError,
   parseImportArgs,
   buildCatalogInput,
   mergeImportedCatalog,
-  preflightImport,
-  applyImport,
   assertFinalDocumentSemantics,
-  runImport,
-} = require("../lib/catalogImport/persistence");
-const {
-  main: importMain,
-  resolveArtifactTargets,
-  stageJsonAtomic,
-} = require("../scripts/importCatalogDataset");
+} = persistence;
+const importScript = require("../scripts/importCatalogDataset");
+const { resolveArtifactTargets, stageJsonAtomic } = importScript;
+
+// The importer resolves dataset artist MBIDs through the Artist registry.
+// Unit tests use an in-memory registry unless a test supplies its own.
+function fakeArtistModel(rows = [], hooks = {}) {
+  return {
+    find: hooks.find || (() => Promise.resolve(JSON.parse(JSON.stringify(rows)))),
+    bulkWrite: hooks.bulkWrite || (async (operations) => ({ insertedCount: operations.length })),
+  };
+}
+const preflightImport = (options) => persistence.preflightImport({ Artist: fakeArtistModel(), ...options });
+const applyImport = (options) => persistence.applyImport({ Artist: fakeArtistModel(), ...options });
+const runImport = (options) => persistence.runImport({ Artist: fakeArtistModel(), ...options });
+const importMain = (argv, dependencies = {}) => importScript.main(argv, { Artist: fakeArtistModel(), ...dependencies });
 const {
   main: validateMain,
   parseValidateArgs,
@@ -138,9 +146,13 @@ test("import argument parsing defaults to dry-run and rejects ambiguous input", 
     quarantineReport: "",
     apply: false,
     dryRun: true,
+    allowIdentityRelink: false,
     help: false,
   });
   assert.equal(parseImportArgs(["--input", "seed.json", "--apply"]).apply, true);
+  assert.equal(parseImportArgs(["--input", "seed.json", "--apply", "--allow-identity-relink"]).allowIdentityRelink, true);
+  assert.throws(() => parseImportArgs(["--input", "seed.json", "--allow-identity-relink"]), /only valid with --apply/);
+  assert.throws(() => parseImportArgs(["--input", "seed.json", "--apply", "--allow-identity-relink", "--allow-identity-relink"]), /only be supplied once/);
   assert.throws(
     () => parseImportArgs(["--input", "seed.json", "--apply", "--dry-run"]),
     (error) => error instanceof CatalogImportError && error.code === "INVALID_ARGUMENTS",
@@ -449,7 +461,13 @@ test("a repeated import of the same dataset is idempotent", async () => {
     ...clone(first.accepted[0].document),
     _id: new mongoose.Types.ObjectId(),
   };
-  const second = await preflightImport({ validation: validation(), AlbumCatalog: fakeModel([persisted]) });
+  const registered = first.artistOperations.map((operation) => operation.insertOne.document);
+  assert.equal(registered.length, 1);
+  const second = await preflightImport({
+    validation: validation(),
+    AlbumCatalog: fakeModel([persisted]),
+    Artist: fakeArtistModel(registered),
+  });
   assert.deepEqual(second.counts, {
     inserted: 0,
     refreshed: 0,
@@ -697,4 +715,79 @@ test("fatal validation reports retain DatasetValidationError quarantine details"
   const payload = JSON.parse(fs.readFileSync(report, "utf8"));
   assert.deepEqual(payload.quarantine, knownQuarantine);
   assert.deepEqual(payload.error.quarantined, knownQuarantine);
+});
+
+test("connecting for an import never builds collections or indexes; only apply builds them", async (context) => {
+  async function run(extraArgs) {
+    const directory = temporaryDirectory(context, "rescened-connect-options-");
+    const calls = { connect: [], indexes: [] };
+    const Model = fakeModel([]);
+    Model.createIndexes = async () => { calls.indexes.push("album"); };
+    const Artist = fakeArtistModel();
+    Artist.createIndexes = async () => { calls.indexes.push("artist"); };
+    const db = {
+      ...transactionDatabase(),
+      connection: { readyState: 0 },
+      connect: async (uri, options) => { calls.connect.push({ uri, options }); },
+      disconnect: async () => {},
+    };
+    const exitCode = await importScript.main(
+      ["--input", path.join(directory, "seed.json"), ...extraArgs],
+      {
+        output: outputCapture().output,
+        readDatasetFile: async () => validation(),
+        AlbumCatalog: Model,
+        Artist,
+        mongoose: db,
+        mongoUri: "mongodb://example.invalid/rescened_test",
+      },
+    );
+    return { exitCode, calls };
+  }
+
+  const dryRun = await run([]);
+  assert.equal(dryRun.exitCode, 0);
+  assert.deepEqual(dryRun.calls.connect[0].options, { autoCreate: false, autoIndex: false });
+  assert.deepEqual(dryRun.calls.indexes, [], "a dry run builds no index");
+
+  const apply = await run(["--apply"]);
+  assert.equal(apply.exitCode, 0);
+  assert.deepEqual(apply.calls.connect[0].options, { autoCreate: false, autoIndex: false });
+  assert.deepEqual(apply.calls.indexes.sort(), ["album", "artist"]);
+});
+
+test("the import CLI refuses identity-only re-versioning before building indexes, unless allowed", async (context) => {
+  // A row this importer inserted before artist identity existed: same data, no credit identities.
+  const inserted = await preflightImport({ validation: validation(), AlbumCatalog: fakeModel([]) });
+  const stored = clone(inserted.accepted[0].document);
+  stored.artistCredits = stored.artistCredits.map(({ artistId: _id, artistMbid: _mbid, ...credit }) => credit);
+  stored._id = new mongoose.Types.ObjectId();
+  assert.ok(inserted.accepted[0].document.artistCredits.some((credit) => credit.artistId), "the fixture gains identities on import");
+
+  async function run(extraArgs) {
+    const directory = temporaryDirectory(context, "rescened-identity-relink-");
+    const calls = { indexes: [], sessions: 0 };
+    const Model = fakeModel([stored], { bulkWrite: async () => ({ matchedCount: 1 }) });
+    Model.createIndexes = async () => { calls.indexes.push("album"); };
+    const Artist = fakeArtistModel();
+    Artist.createIndexes = async () => { calls.indexes.push("artist"); };
+    const db = transactionDatabase();
+    const startSession = db.startSession;
+    db.startSession = async () => { calls.sessions += 1; return startSession(); };
+    const capture = outputCapture();
+    const exitCode = await importScript.main(["--input", path.join(directory, "seed.json"), ...extraArgs], {
+      output: capture.output, readDatasetFile: async () => validation(), AlbumCatalog: Model, Artist, mongoose: db,
+    });
+    return { exitCode, calls, errors: capture.messages.error.join("\n") };
+  }
+
+  const dryRun = await run([]);
+  assert.equal(dryRun.exitCode, 0, "a dry run reports relinks without refusing");
+  const refused = await run(["--apply"]);
+  assert.equal(refused.exitCode, 1);
+  assert.match(refused.errors, /catalog:backfill-artists/);
+  assert.deepEqual(refused.calls, { indexes: [], sessions: 0 }, "nothing built or started");
+  const allowed = await run(["--apply", "--allow-identity-relink"]);
+  assert.equal(allowed.exitCode, 0);
+  assert.equal(allowed.calls.sessions, 1);
 });

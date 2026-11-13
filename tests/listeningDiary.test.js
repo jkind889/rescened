@@ -80,7 +80,7 @@ test("diary list rejects invalid filters and forged cursors before querying list
 test("diary calendar validates the month before querying and groups listens by day", async (t) => {
   const aggregate = t.mock.method(Listen, "aggregate", async () => [
     { _id: new mongoose.Types.ObjectId(), listenId: "a", listenedOn: "2026-02-03", source: "manual", album: { albumId: "11111111-1111-4111-8111-111111111111", title: "One", artistDisplayName: "Artist", cover: "" } },
-    { _id: new mongoose.Types.ObjectId(), listenId: "b", listenedOn: "2026-02-03", source: "automatic", album: { albumId: "22222222-2222-4222-8222-222222222222", title: "Two", artistDisplayName: "Artist", cover: "https://example.test/two.jpg" } },
+    { _id: new mongoose.Types.ObjectId(), listenId: "b", listenedOn: "2026-02-03", source: "automatic", album: { albumId: "22222222-2222-4222-8222-222222222222", title: "Two", artistDisplayName: "Artist", artistCredits: [{ name: "Artist", role: "main", artistId: "33333333-3333-4333-8333-333333333333" }], cover: "https://example.test/two.jpg" } },
     { _id: new mongoose.Types.ObjectId(), listenId: "c", listenedOn: "2026-02-17", album: { albumId: "11111111-1111-4111-8111-111111111111", title: "One", artistDisplayName: "Artist", cover: "" } },
   ]);
   for (const query of [{}, { month: "2026-13" }, { month: "2026-2" }, { month: "0000-01" }, { month: ["2026-02"] }, { month: "2026-02", userId: "other" }]) {
@@ -98,7 +98,10 @@ test("diary calendar validates the month before querying and groups listens by d
   assert.ok(stages.indexOf("$unwind") < stages.indexOf("$limit"));
   assert.deepEqual(aggregate.mock.calls[0].arguments[0][stages.lastIndexOf("$match")], { $match: { "album.albumId": { $type: "string" } } });
   assert.deepEqual(calendar.days.map((day) => [day.date, day.listens.map((listen) => listen.listenId)]), [["2026-02-03", ["a", "b"]], ["2026-02-17", ["c"]]]);
-  assert.deepEqual(Object.keys(calendar.days[0].listens[1].album).sort(), ["albumId", "artistDisplayName", "cover", "title"]);
+  assert.deepEqual(Object.keys(calendar.days[0].listens[1].album).sort(), ["albumId", "artistCredits", "artistDisplayName", "cover", "title"]);
+  // Credits travel with the album so the calendar can link a credit that carries an artistId.
+  assert.deepEqual(calendar.days[0].listens[1].album.artistCredits, [{ name: "Artist", role: "main", artistId: "33333333-3333-4333-8333-333333333333" }]);
+  assert.deepEqual(calendar.days[0].listens[0].album.artistCredits, [], "an album without stored credits still has a list");
   assert.equal(calendar.days[0].listens[1].source, "automatic");
   assert.equal(JSON.stringify(calendar).includes("_id"), false);
 });

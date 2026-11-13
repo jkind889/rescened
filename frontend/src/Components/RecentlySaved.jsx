@@ -2,6 +2,7 @@ import { API_BASE_URL } from "../config/api";
 import { useState, useEffect } from "react";
 import { useAuth } from "@clerk/react";
 import Cover from "./Cover";
+import ArtistCredits from "../features/artists/ArtistCredits";
 
 export function RecentlySaved() {
     const [savedAlbums, setSavedAlbums] = useState([]);
@@ -29,7 +30,7 @@ export function RecentlySaved() {
                     <Cover src={album.cover} alt={`${album.title} cover`} className="recent-saved-album-cover" />
                     <div className="recent-saved-album-info">
                         <h3>{album.title}</h3>
-                        <p>{album.artistDisplayName}</p>
+                        <p><ArtistCredits album={album} /></p>
                     </div>
                 </div>
             ))}

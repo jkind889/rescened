@@ -1,0 +1,379 @@
+.artist-page-header {
+  display: grid;
+  gap: .5rem;
+  padding-bottom: 1rem;
+}
+
+.artist-page-heading-copy {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.artist-page-heading-copy .artist-biography {
+  margin-top: 1rem;
+}
+
+.artist-releases {
+  margin-top: 1.5rem;
+}
+
+.artist-releases-heading {
+  display: grid;
+  gap: .25rem;
+  margin-bottom: .8rem;
+}
+
+.artist-releases-heading h2 {
+  font-size: 1.2rem;
+  margin: 0;
+}
+
+.artist-releases-heading p {
+  margin: 0;
+}
+
+.artist-release-filters {
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.artist-release-filter-count {
+  color: var(--app-muted);
+  font-size: .75rem;
+  margin-left: .25rem;
+}
+
+/* The shared card's implicit grid track sizes to its nowrap metadata, which
+   can push a narrow two-column grid past the viewport. Let artist cards
+   shrink to their column and wrap long "year · type · note" lines. */
+.artist-page .artist-release-card {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.artist-page .artist-release-card .result-year {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.artist-release-with {
+  overflow-wrap: anywhere;
+}
+
+.artist-release-note {
+  color: var(--app-muted);
+}
+
+/* Matching artists above album search results. */
+.search-artist-matches {
+  margin: 0 0 1.25rem;
+}
+
+.search-artist-matches h3 {
+  font-size: .8rem;
+  letter-spacing: .08em;
+  margin: 0 0 .5rem;
+  text-transform: uppercase;
+  color: var(--app-muted);
+}
+
+.search-artist-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.search-artist-list a {
+  border: 1px solid var(--app-line-strong);
+  color: var(--app-text);
+  display: grid;
+  gap: .1rem;
+  max-width: 100%;
+  padding: .45rem .7rem;
+  text-decoration: none;
+}
+
+.search-artist-list a:hover,
+.search-artist-list a:focus-visible {
+  border-color: var(--app-accent);
+}
+
+.search-artist-list strong {
+  overflow-wrap: anywhere;
+}
+
+.search-artist-list small {
+  color: var(--app-muted);
+  font-size: .75rem;
+  overflow-wrap: anywhere;
+}
+
+/* MusicBrainz discography reuses the external album cards from search. */
+.artist-discography {
+  --search-accent: #744e96;
+  --search-line: #242424;
+  --search-muted: #8c8c8c;
+}
+
+:root[data-theme="light"] .artist-discography {
+  --search-line: var(--app-line);
+  --search-muted: var(--app-muted);
+}
+
+.artist-discography-note,
+.artist-discography-summary {
+  margin: 0 0 .8rem;
+}
+
+.artist-discography .external-candidates-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+}
+
+.artist-discography-source {
+  color: var(--app-muted);
+  font-size: .75rem;
+  margin: 1rem 0 0;
+}
+
+.artist-discography-source a {
+  color: inherit;
+}
+
+/* Header cover cycle: stored release art, never a portrait. The two-column
+   layout applies only while the cycle is actually rendered, so a header whose
+   covers all failed to load falls back to the plain text layout. */
+.artist-page-header:has(> .artist-cover-cycle) {
+  align-items: start;
+  column-gap: 1.5rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 12rem);
+}
+
+.artist-page-header > .artist-cover-cycle {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.artist-cover-cycle {
+  display: grid;
+  gap: .4rem;
+  min-width: 0;
+}
+
+.artist-cover-figure {
+  display: grid;
+  gap: .4rem;
+  margin: 0;
+}
+
+.artist-cover-frame {
+  aspect-ratio: 1;
+  background: var(--app-surface-strong);
+  border: 1px solid var(--app-line-strong);
+  overflow: hidden;
+  width: 100%;
+}
+
+.artist-cover-frame .artist-cover-image {
+  display: block;
+  height: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+
+.artist-cover-frame.is-moving .artist-cover-image {
+  animation: artist-cover-in .45s ease both;
+}
+
+@keyframes artist-cover-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.artist-cover-caption {
+  display: grid;
+  font-size: .8rem;
+  gap: .15rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.artist-cover-caption a {
+  color: var(--app-text);
+  text-decoration-color: var(--app-line-strong);
+  text-underline-offset: .2em;
+}
+
+.artist-cover-caption a:hover,
+.artist-cover-caption a:focus-visible {
+  text-decoration-color: var(--app-accent);
+}
+
+.artist-cover-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+}
+
+.artist-cover-button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--app-line-strong);
+  color: var(--app-text);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: .8rem;
+  height: 2rem;
+  justify-content: center;
+  min-width: 2rem;
+  padding: 0 .4rem;
+}
+
+.artist-cover-button:hover,
+.artist-cover-button:focus-visible {
+  border-color: var(--app-accent);
+}
+
+.artist-cover-button:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+}
+
+.artist-cover-position {
+  color: var(--app-muted);
+  font-size: .75rem;
+  margin-left: auto;
+}
+
+/* Narrow screens: the cover sits below the title and About instead of beside them. */
+@media (max-width: 640px) {
+  .artist-page-header:has(> .artist-cover-cycle) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .artist-page-heading-copy {
+    grid-row: 1;
+  }
+
+  .artist-page-header > .artist-cover-cycle {
+    grid-column: 1;
+    grid-row: 2;
+    max-width: 10rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artist-cover-frame.is-moving .artist-cover-image {
+    animation: none;
+  }
+}
+
+/* Cached biography and its attribution. */
+.artist-biography {
+  margin: 1.25rem 0 0;
+  max-width: 46rem;
+}
+
+.artist-biography-heading {
+  font-size: 1rem;
+  margin: 0 0 .4rem;
+}
+
+.artist-biography-text {
+  line-height: 1.55;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.artist-biography-attribution {
+  color: var(--app-muted);
+  font-size: .75rem;
+  line-height: 1.5;
+  margin: .4rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.artist-biography-attribution a {
+  color: inherit;
+}
+
+.artist-biography-moderation {
+  border: 1px solid var(--app-line-strong);
+  margin: 1rem 0 0;
+  max-width: 46rem;
+  padding: .5rem .75rem;
+}
+
+.artist-biography-moderation summary {
+  cursor: pointer;
+  font-size: .85rem;
+}
+
+.artist-biography-moderation-body {
+  display: grid;
+  gap: .6rem;
+  margin-top: .6rem;
+}
+
+.artist-biography-facts {
+  display: grid;
+  font-size: .8rem;
+  gap: .25rem;
+  margin: 0;
+}
+
+.artist-biography-facts div {
+  display: grid;
+  gap: .5rem;
+  grid-template-columns: minmax(7rem, auto) minmax(0, 1fr);
+}
+
+.artist-biography-facts dt {
+  color: var(--app-muted);
+}
+
+.artist-biography-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.artist-biography-candidate blockquote {
+  border-left: 2px solid var(--app-line-strong);
+  margin: .3rem 0 0;
+  padding-left: .6rem;
+}
+
+.artist-biography-field {
+  display: grid;
+  font-size: .8rem;
+  gap: .25rem;
+}
+
+.artist-biography-field input,
+.artist-biography-field textarea {
+  background: var(--app-surface-strong);
+  border: 1px solid var(--app-line-strong);
+  color: var(--app-text);
+  font: inherit;
+  min-width: 0;
+  padding: .4rem .6rem;
+}
+
+.artist-biography-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+
+.artist-biography-history {
+  color: var(--app-muted);
+  font-size: .75rem;
+  margin: 0;
+  padding-left: 1.2rem;
+}

@@ -359,7 +359,8 @@
 }
 
 .signal-rank-row:hover,
-.signal-rank-row:focus-visible {
+.signal-rank-row:focus-visible,
+.signal-rank-row:has(.card-link-title:focus-visible) {
   background: var(--home-hover);
 }
 
@@ -425,7 +426,8 @@
 }
 
 .signal-queue-album:hover strong,
-.signal-queue-album:focus-visible strong {
+.signal-queue-album:focus-visible strong,
+.signal-queue-album:has(.card-link-title:focus-visible) strong {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -644,7 +646,7 @@ button.signal-queue-action {
   font-size: 0.8rem;
 }
 
-a.community-lead:hover strong {
+.community-lead.card-link:hover strong {
   text-decoration: underline;
   text-underline-offset: 4px;
 }

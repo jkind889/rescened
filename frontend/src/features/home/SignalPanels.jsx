@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 import { formatCalendarDate, formatRating, formatReviewCount, getAlbumId } from "./signals";
 import EditedTag from "../reviews/EditedTag";
+import { CardLink, CardTitleLink } from "../../Components/CardLink";
+import ArtistCredits from "../artists/ArtistCredits";
 
 export function ArrowIcon() {
     return (
@@ -47,17 +49,17 @@ export function RankedAlbumList({ albums }) {
         <ol className="signal-rank-list">
             {albums.map((album, index) => (
                 <li key={getAlbumId(album)}>
-                    <Link className="signal-rank-row" to={`/album/${getAlbumId(album)}`}>
+                    <CardLink className="signal-rank-row">
                         <span className="signal-rank">{String(index + 1).padStart(2, "0")}</span>
                         <AlbumCover album={album} className="signal-rank-cover" />
                         <span className="signal-rank-copy">
-                            <strong>{album.title || "Untitled album"}</strong>
-                            <small>{album.artistDisplayName || "Unknown artist"}</small>
+                            <strong><CardTitleLink to={`/album/${getAlbumId(album)}`}>{album.title || "Untitled album"}</CardTitleLink></strong>
+                            <small><ArtistCredits album={album} fallback="Unknown artist" /></small>
                         </span>
                         <span className="signal-rank-context">
                             {formatReviewCount(album.reviewCount)} / {formatRating(album.averageRating)}
                         </span>
-                    </Link>
+                    </CardLink>
                 </li>
             ))}
         </ol>
@@ -105,18 +107,18 @@ export function ReviewQueue({ albums }) {
         <ol className="signal-queue">
             {albums.map((row) => (
                 <li key={getAlbumId(row)} className="signal-queue-row">
-                    <Link to={`/album/${getAlbumId(row)}`} className="signal-queue-album">
+                    <CardLink className="signal-queue-album">
                         <AlbumCover album={row.album} className="signal-queue-cover" />
                         <span className="signal-rank-copy">
-                            <strong>{row.album?.title || "Untitled album"}</strong>
+                            <strong><CardTitleLink to={`/album/${getAlbumId(row)}`}>{row.album?.title || "Untitled album"}</CardTitleLink></strong>
                             <small>
-                                {row.album?.artistDisplayName || "Unknown artist"}
+                                <ArtistCredits album={row.album} fallback="Unknown artist" />
                                 {" / "}
                                 {row.listenCount > 1 ? `${row.listenCount} listens, last ` : "listened "}
                                 {formatCalendarDate(row.lastListenedOn)}
                             </small>
                         </span>
-                    </Link>
+                    </CardLink>
                     <Link
                         to={`/album/${getAlbumId(row)}`}
                         state={{ openReview: true }}

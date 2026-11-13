@@ -7,10 +7,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 const mongoose = require("mongoose");
 const AlbumCatalog = require("../models/AlbumCatalog");
+const Artist = require("../models/Artist");
 const { readDatasetFile } = require("../lib/catalogImport/dataset");
 const {
   CatalogImportError,
   applyImport,
+  assertIdentityRelinksAllowed,
   createImportReport,
   parseImportArgs,
   preflightImport,
@@ -26,6 +28,9 @@ Options:
   --quarantine-report <path>   Quarantine report output path
   --dry-run                    Preflight only (default)
   --apply                      Apply accepted writes in one transaction
+  --allow-identity-relink      With --apply: allow refreshes that change only
+                               artist credit identities (run the artist
+                               backfill first instead)
   --help                       Show this help`;
 
 function artifactPath(input, suffix) {
@@ -250,14 +255,16 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     const validation = await (dependencies.readDatasetFile || readDatasetFile)(options.input);
     const db = dependencies.mongoose || mongoose;
     const Model = dependencies.AlbumCatalog || AlbumCatalog;
+    const ArtistModel = dependencies.Artist || Artist;
     if (db.connection?.readyState !== 1) {
       const mongoUri = dependencies.mongoUri || process.env.MONGO_URI;
       if (!mongoUri) throw new CatalogImportError("MONGO_URI is required", "MISSING_MONGO_URI");
-      await db.connect(mongoUri);
+      // Connecting must not build collections or indexes: a dry run stays read-only.
+      await db.connect(mongoUri, { autoCreate: false, autoIndex: false });
       connectedHere = true;
     }
 
-    plan = await preflightImport({ validation, AlbumCatalog: Model });
+    plan = await preflightImport({ validation, AlbumCatalog: Model, Artist: ArtistModel });
     const report = createImportReport(plan, { apply: options.apply, now: dependencies.now });
     const quarantine = quarantinePayload(plan, report.generatedAt);
 
@@ -267,7 +274,13 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     staged.push(await artifactIO.stage(targets.quarantine, quarantine));
 
     if (options.apply) {
-      await applyImport({ plan, AlbumCatalog: Model, mongoose: db });
+      // Refuse identity-only re-versioning before building indexes or writing.
+      assertIdentityRelinksAllowed(plan, options.allowIdentityRelink);
+      // Apply only: build the catalog and registry indexes (including the unique
+      // MusicBrainz index) before inserting, since connecting does not.
+      if (typeof Model.createIndexes === "function") await Model.createIndexes();
+      if (typeof ArtistModel.createIndexes === "function") await ArtistModel.createIndexes();
+      await applyImport({ plan, AlbumCatalog: Model, Artist: ArtistModel, mongoose: db, allowIdentityRelink: options.allowIdentityRelink });
       databaseApplyCompleted = true;
     }
 
@@ -291,6 +304,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     output.log(JSON.stringify({
       mode: report.mode,
       counts: report.counts,
+      artistRegistry: report.artistRegistry,
       report: targets.report,
       quarantineReport: targets.quarantine,
     }, null, 2));

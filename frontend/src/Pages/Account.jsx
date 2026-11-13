@@ -26,6 +26,8 @@ import EditedTag from "../features/reviews/EditedTag";
 import useProfileReviews from "../features/reviews/useProfileReviews";
 import { MAX_REVIEW_SEARCH_LENGTH, normalizeReviewSearch } from "../features/reviews/profileReviewSearch";
 import { suggestionActivityLabels } from "../utils/activityLabels";
+import { CardLink, CardTitleLink } from "../Components/CardLink";
+import ArtistCredits from "../features/artists/ArtistCredits";
 
 const tabs = [
   { id: "overview", label: "Overview" },
@@ -76,10 +78,6 @@ function formatMonthYear(value) {
     month: "long",
     year: "numeric",
   });
-}
-
-function getArtistName(album) {
-  return album.artistDisplayName || "Artist unknown";
 }
 
 function ProfileEmptyState({ title, body }) {
@@ -596,14 +594,14 @@ export function Account() {
           </div>
           <div className="profile-pin-grid">
             {profile.listeningNextAlbum ? (
-              <Link className="profile-pin-card profile-listening-next-card" to={`/album/${profile.listeningNextAlbum.albumId}`}>
+              <CardLink className="profile-pin-card profile-listening-next-card">
                 <AlbumCover src={profile.listeningNextAlbum.cover} title={profile.listeningNextAlbum.title} />
                 <div>
                   <span>Up Next{profile.queueCount > 1 ? ` · 1 of ${profile.queueCount}` : ""}</span>
-                  <h3>{profile.listeningNextAlbum.title || "Untitled album"}</h3>
-                  <p>{getArtistName(profile.listeningNextAlbum)}</p>
+                  <h3><CardTitleLink to={`/album/${profile.listeningNextAlbum.albumId}`}>{profile.listeningNextAlbum.title || "Untitled album"}</CardTitleLink></h3>
+                  <p><ArtistCredits album={profile.listeningNextAlbum} fallback="Artist unknown" /></p>
                 </div>
-              </Link>
+              </CardLink>
             ) : (
               <div className="profile-pin-card profile-pin-empty">
                 <span>Up Next</span>
@@ -674,15 +672,14 @@ export function Account() {
           ) : (
             <div className="profile-favorites-grid">
               {favoriteAlbums.map((album) => (
-                <Link
+                <CardLink
                   className="profile-favorite-card"
                   key={album.albumId}
-                  to={`/album/${album.albumId}`}
                 >
                   <AlbumCover src={album.cover} title={album.title} />
-                  <h3>{album.title || "Untitled album"}</h3>
-                  <p>{getArtistName(album)}</p>
-                </Link>
+                  <h3><CardTitleLink to={`/album/${album.albumId}`}>{album.title || "Untitled album"}</CardTitleLink></h3>
+                  <p><ArtistCredits album={album} fallback="Artist unknown" /></p>
+                </CardLink>
               ))}
             </div>
           )}
@@ -791,12 +788,12 @@ export function Account() {
           <div className="profile-album-grid">
             {sortedSavedAlbums.map((album) => (
               <article className="profile-album-card" key={album.albumId}>
-                <Link to={`/album/${album.albumId}`} className="profile-album-card-link">
+                <CardLink className="profile-album-card-link">
                   <AlbumCover src={album.cover} title={album.title} />
-                  <h3>{album.title || "Untitled album"}</h3>
-                  <p>{getArtistName(album)}</p>
+                  <h3><CardTitleLink to={`/album/${album.albumId}`}>{album.title || "Untitled album"}</CardTitleLink></h3>
+                  <p><ArtistCredits album={album} fallback="Artist unknown" /></p>
                   <span>Saved {formatMonthYear(album.savedAt)}</span>
-                </Link>
+                </CardLink>
               </article>
             ))}
           </div>
@@ -804,13 +801,13 @@ export function Account() {
           <div className="profile-saved-list">
             {sortedSavedAlbums.map((album) => (
               <article className="profile-saved-row" key={album.albumId}>
-                <Link to={`/album/${album.albumId}`} className="profile-saved-album">
+                <CardLink className="profile-saved-album">
                   <AlbumCover src={album.cover} title={album.title} />
                   <div>
-                    <h3>{album.title || "Untitled album"}</h3>
-                    <p>{getArtistName(album)}</p>
+                    <h3><CardTitleLink to={`/album/${album.albumId}`}>{album.title || "Untitled album"}</CardTitleLink></h3>
+                    <p><ArtistCredits album={album} fallback="Artist unknown" /></p>
                   </div>
-                </Link>
+                </CardLink>
                 <div className="profile-saved-date">
                   <span>Saved</span>
                   <strong>{formatMonthYear(album.savedAt)}</strong>
@@ -920,7 +917,7 @@ export function Account() {
                   <p>Reviewed by {reviewAuthorName}</p>
                 )}
                 {activity.type !== "follow" && activity.type !== "liked_review" && (
-                  <p>{album.artistDisplayName || "Artist unknown"}</p>
+                  <p><ArtistCredits album={album} fallback="Artist unknown" /></p>
                 )}
                 {activity.type === "listen" && activity.listenedOn && (
                   <p className="profile-listen-date">
@@ -1048,13 +1045,13 @@ export function Account() {
   function renderReviews() {
     const renderReviewCard = (review) => (
       <article className="profile-review-card" key={review.reviewId}>
-        <Link className="profile-review-album" to={`/album/${review.albumId}`}>
+        <CardLink className="profile-review-album">
           <AlbumCover src={review.cover} title={review.title} />
           <div>
-            <h3>{review.title || "Untitled album"}</h3>
-            <p>{review.album?.artistDisplayName || "Artist unknown"}</p>
+            <h3><CardTitleLink to={`/album/${review.albumId}`}>{review.title || "Untitled album"}</CardTitleLink></h3>
+            <p><ArtistCredits album={review.album} fallback="Artist unknown" /></p>
           </div>
-        </Link>
+        </CardLink>
         <div className="profile-review-meta">
           <span>{review.rating}/5</span>
           <time>{formatDate(review.date)}</time>

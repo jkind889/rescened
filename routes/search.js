@@ -1,21 +1,24 @@
-const { randomUUID } = require("node:crypto");
+const { createHash, randomUUID } = require("node:crypto");
 const express = require("express");
 const AlbumCatalog = require("../models/AlbumCatalog");
-const { normalizeCatalogAlbum, toSearchResult } = require("./utils/albumCatalog");
-const { buildRankedCatalogSearchPipeline, escapeRegex } = require("./utils/catalogSearch");
+const { toSearchResult } = require("./utils/albumCatalog");
+const { buildRankedCatalogSearchPipeline } = require("./utils/catalogSearch");
+const { findCatalogAlbumsByReleaseGroup } = require("./utils/catalogReleaseGroups");
 const {
   MusicBrainzSearchError,
   getSuggestionDraft,
   normalizeLimit: normalizeExternalLimit,
+  MAX_PROVIDER_OFFSET,
   normalizeSearchQuery,
-  searchReleaseGroups,
+  searchReleaseGroupPage,
 } = require("../lib/musicBrainzSearch");
 const {
   externalSearchRateLimit,
   searchRateLimit,
 } = require("./utils/rateLimit");
-const { isExternalAlbumSearchEnabled, isGenresEnabled } = require("./utils/serverConfig");
+const { isArtistPagesEnabled, isExternalAlbumSearchEnabled, isExternalSearchProviderPagingEnabled, isGenresEnabled } = require("./utils/serverConfig");
 const { genreFilterIds } = require("../lib/genres/browse");
+const { artistIdsForExactQuery } = require("../lib/artists/read");
 
 const router = express.Router();
 const DEFAULT_LIMIT = 24;
@@ -24,49 +27,6 @@ const MAX_LIMIT = 24;
 function getLimit(value) {
   const parsed = Number.parseInt(value, 10);
   return Math.min(Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_LIMIT, MAX_LIMIT);
-}
-
-function queryResult(query) {
-  let result = query;
-  if (result && typeof result.lean === "function") result = result.lean();
-  if (result && typeof result.exec === "function") result = result.exec();
-  return result;
-}
-
-function catalogReferenceQuery(mbid) {
-  return {
-    externalReferences: {
-      $elemMatch: {
-        provider: "musicbrainz",
-        entityType: "release-group",
-        externalId: { $regex: `^${escapeRegex(mbid)}$`, $options: "i" },
-      },
-    },
-  };
-}
-
-async function findCatalogAlbumsByReleaseGroup(mbids) {
-  const normalizedMbids = [...new Set(mbids.map((mbid) => String(mbid || "").trim().toLowerCase()).filter(Boolean))];
-  if (!normalizedMbids.length) return new Map();
-
-  const rows = await queryResult(AlbumCatalog.find({
-    $or: normalizedMbids.map(catalogReferenceQuery),
-  }));
-  const matches = new Map();
-  (rows || []).forEach((album) => {
-    const source = typeof album?.toObject === "function" ? album.toObject() : album;
-    const normalized = normalizeCatalogAlbum(album);
-    (Array.isArray(source?.externalReferences) ? source.externalReferences : []).forEach((reference) => {
-      if (
-        String(reference?.provider || "").toLowerCase() === "musicbrainz"
-        && String(reference?.entityType || "").toLowerCase() === "release-group"
-      ) {
-        const mbid = String(reference.externalId || "").trim().toLowerCase();
-        if (normalizedMbids.includes(mbid) && !matches.has(mbid)) matches.set(mbid, normalized);
-      }
-    });
-  });
-  return matches;
 }
 
 function externalSearchEnabled(req, res, next) {
@@ -86,6 +46,38 @@ function invalidExternalSearch(res, error) {
   });
 }
 
+// Opaque "show more" cursor for external search, bound to the normalized
+// query by `h`, a short SHA-256 fingerprint, so the cursor stays small for
+// any accepted query (200 characters of multibyte text included). `o` is the
+// raw MusicBrainz offset of a provider page and `s` the
+// position within that page's ranked candidates. Paging is best effort: while
+// the page stays in the adapter's short-lived cache (60 s by default, bounded
+// entries), showing more of it needs no provider request; after expiry or
+// eviction the page is fetched again and the provider may rank it
+// differently, so a result can be skipped or repeated (clients de-duplicate).
+// Moving to the next provider page needs EXTERNAL_SEARCH_PROVIDER_PAGING_ENABLED.
+function queryFingerprint(query) {
+  return createHash("sha256").update(query.toLowerCase(), "utf8").digest("base64url").slice(0, 22);
+}
+
+function encodeExternalCursor(query, offset, start) {
+  return Buffer.from(JSON.stringify({ v: 2, h: queryFingerprint(query), o: offset, s: start })).toString("base64url");
+}
+
+function decodeExternalCursor(query, cursor) {
+  if (cursor === undefined) return { offset: 0, start: 0 };
+  try {
+    if (typeof cursor !== "string" || !cursor || cursor.length > 512) throw new Error("bad");
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+    if (value?.v !== 2 || value.h !== queryFingerprint(query) || !Number.isInteger(value.o) || value.o < 0
+      || value.o > MAX_PROVIDER_OFFSET || !Number.isInteger(value.s) || value.s < 0 || value.s > 100) throw new Error("bad");
+    if (value.o > 0 && !isExternalSearchProviderPagingEnabled()) throw new Error("paging off");
+    return { offset: value.o, start: value.s };
+  } catch {
+    throw new MusicBrainzSearchError("External search cursor is invalid", { code: "INVALID_EXTERNAL_SEARCH", status: 400 });
+  }
+}
+
 function externalSearchUnavailable(res, diagnostic) {
   return res.status(502).json({
     error: "External album search is temporarily unavailable",
@@ -101,8 +93,11 @@ function externalSearchUnavailable(res, diagnostic) {
 async function findLocal(query, { skip = 0, limit, paginated = false, genreIds = null }) {
   // Search exposes only a next-page flag, not a total. One extra row answers
   // that question without counting every match across the catalog.
+  // With artist pages on, an exact artist name or reviewed alias also finds
+  // that artist's linked releases under any credited spelling.
+  const artistIds = isArtistPagesEnabled() ? await artistIdsForExactQuery(query) : [];
   const albums = await AlbumCatalog.aggregate(buildRankedCatalogSearchPipeline(query, {
-    skip, limit: limit + (paginated ? 1 : 0), genreIds,
+    skip, limit: limit + (paginated ? 1 : 0), genreIds, artistIds,
   }));
   return { albums: paginated ? albums.slice(0, limit) : albums, hasNextPage: paginated && albums.length > limit };
 }
@@ -172,24 +167,32 @@ function logExternalSearchFailure(error, diagnostic, operation) {
 router.get("/external", externalSearchEnabled, externalSearchRateLimit, async (req, res) => {
   let query;
   let limit;
+  let position;
   try {
     query = normalizeSearchQuery(req.query?.q);
     limit = normalizeExternalLimit(req.query?.limit);
+    position = decodeExternalCursor(query, req.query?.cursor);
   } catch (error) {
     return invalidExternalSearch(res, error);
   }
 
   const requestId = randomUUID();
   res.set("X-Request-ID", requestId);
-  let candidates;
+  let page;
   try {
-    candidates = await searchReleaseGroups(query, limit);
+    page = await searchReleaseGroupPage(query, { offset: position.offset });
   } catch (error) {
     if (error?.code === "INVALID_EXTERNAL_SEARCH") return invalidExternalSearch(res, error);
     const diagnostic = externalSearchDiagnostic(error, requestId);
     logExternalSearchFailure(error, diagnostic, "search");
     return externalSearchUnavailable(res, diagnostic);
   }
+
+  const candidates = page.candidates.slice(position.start, position.start + limit);
+  const end = position.start + candidates.length;
+  let nextCursor = null;
+  if (end < page.candidates.length) nextCursor = encodeExternalCursor(query, page.offset, end);
+  else if (page.nextOffset !== null && isExternalSearchProviderPagingEnabled()) nextCursor = encodeExternalCursor(query, page.nextOffset, 0);
 
   try {
     const catalogByMbid = await findCatalogAlbumsByReleaseGroup(candidates.map((candidate) => candidate.externalId));
@@ -205,6 +208,10 @@ router.get("/external", externalSearchEnabled, externalSearchRateLimit, async (r
       provider: "musicbrainz",
       catalogMatches,
       candidates: remainingCandidates,
+      // Total MusicBrainz matches for the query (null when not reported),
+      // and the cursor for the next slice, or null when there is no more.
+      providerCount: page.providerCount,
+      nextCursor,
     });
   } catch (error) {
     console.error(error);

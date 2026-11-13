@@ -6,6 +6,8 @@ const { isModerator, serializeSubmission } = require("./utils/submissions");
 const { approveAlbumSubmission } = require("./utils/approval");
 const { applyModerationCommand } = require("./utils/moderationCommands");
 const { genreReview } = require("../lib/genres/review");
+const Artist = require("../models/Artist");
+const { artistRegistryContext } = require("../lib/artists/identity");
 const {
   ModerationConflictError,
   ModerationValidationError,
@@ -171,11 +173,40 @@ function moderatorSummary(submission) {
   };
 }
 
+// Every credit list a moderator can see on this submission, most important
+// first so a capped lookup keeps them: the current proposal (a new album's
+// metadata or a correction's proposed artists), the album a correction
+// targets and its captured baseline, then each revision.
+function submissionCreditLists(suggestion) {
+  const revisions = Array.isArray(suggestion?.revisions) ? suggestion.revisions : [];
+  return [
+    suggestion?.proposedMetadata?.artistCredits,
+    suggestion?.proposedChanges?.artists?.artistCredits,
+    suggestion?.targetAlbum?.artistCredits,
+    suggestion?.baseValues?.artists?.artistCredits,
+    ...revisions.flatMap((revision) => [revision?.proposedMetadata?.artistCredits, revision?.proposedChanges?.artists?.artistCredits]),
+  ];
+}
+
+// Registry context is advisory: if the registry read fails, detail and
+// command responses still succeed and the panel falls back to raw IDs.
+async function registryContextFor(suggestion) {
+  try {
+    return await artistRegistryContext(Artist, submissionCreditLists(suggestion));
+  } catch (error) {
+    console.error("Failed to load artist registry context for moderation", error?.message || error);
+    return { artists: null, unchecked: [] };
+  }
+}
+
 async function moderatorDetail(submission) {
-  const detail = {
-    suggestion: serializeSubmission(submission, { detail: true, moderator: true }),
-    duplicateCandidates: await duplicateCandidates(submission),
-  };
+  const suggestion = serializeSubmission(submission, { detail: true, moderator: true });
+  const [candidates, registry] = await Promise.all([
+    duplicateCandidates(submission),
+    registryContextFor(suggestion),
+  ]);
+  const detail = { suggestion, duplicateCandidates: candidates, artistRegistry: registry.artists };
+  if (registry.unchecked.length) detail.artistRegistryUnchecked = registry.unchecked;
   if (asPlain(submission)?.submissionType === "genre_suggestion") detail.genreReview = await genreReview(submission);
   return detail;
 }

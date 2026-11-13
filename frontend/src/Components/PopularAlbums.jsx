@@ -1,7 +1,8 @@
 import { API_BASE_URL } from "../config/api";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import Cover from "./Cover";
+import { CardLink, CardTitleLink } from "./CardLink";
+import ArtistCredits from "../features/artists/ArtistCredits";
 
 export function PopularAlbums({ limit = 10, window = "30d" }) {
     const [albums, setAlbums] = useState([]);
@@ -61,10 +62,9 @@ export function PopularAlbums({ limit = 10, window = "30d" }) {
     return (
         <div className="popular-albums-grid">
             {albums.map((album, index) => (
-                <Link
+                <CardLink
                     key={album.albumId}
                     className="popular-album-card"
-                    to={`/album/${album.albumId}`}
                 >
                     <span className="popular-album-rank">{index + 1}</span>
                     {album.cover ? (
@@ -80,10 +80,10 @@ export function PopularAlbums({ limit = 10, window = "30d" }) {
                         </div>
                     )}
                     <div className="popular-album-info">
-                        <h4>{album.title}</h4>
-                        <p>{album.artistDisplayName}</p>
+                        <h4><CardTitleLink to={`/album/${album.albumId}`}>{album.title}</CardTitleLink></h4>
+                        <p><ArtistCredits album={album} /></p>
                     </div>
-                </Link>
+                </CardLink>
             ))}
         </div>
     );

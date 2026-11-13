@@ -74,7 +74,23 @@ npm run worktree -- start --profile "$HOME/.config/rescened/shared-development.j
 
 The command runs in the foreground. It starts only the API and Vite, bound to `127.0.0.1`, using the printed ports. Vite uses `--strictPort`, the frontend API URL points to the matching API, and CORS permits that exact frontend origin. Use the printed `127.0.0.1` URL, not a different localhost origin. Verify that your Clerk development setup accepts that origin; the helper never changes Clerk settings.
 
-Only detection and moderation are enabled by the profile's explicit user allowlists. Last.fm connection, sync, discovery and deep sweep, automatic diary publication, provider/tracklist enrichment, contributor editions, community submissions, and all other optional feature flags remain off. The helper offers no switch to enable them. No listening worker is launched. Existing workers elsewhere are not inspected, stopped, or restarted, so any independently running development worker can still affect the shared database.
+Only detection and moderation are enabled by the profile's explicit user allowlists. Last.fm connection, sync, discovery and deep sweep, automatic diary publication, provider/tracklist enrichment, contributor editions, community submissions, and all other optional feature flags remain off. The helper offers no switch to enable them, except the artist pages switch below. No listening worker is launched. Existing workers elsewhere are not inspected, stopped, or restarted, so any independently running development worker can still affect the shared database.
+
+### Artist pages preview
+
+```sh
+npm run worktree -- start --profile "$HOME/.config/rescened/shared-development.json" --artist-pages
+```
+
+`--artist-pages` is the only switch for an optional flag. It is per run, and the profile cannot set it. It sets `ARTIST_PAGES_ENABLED=true` for the API only. With it, the API wrapper (`scripts/worktree-server.cjs`):
+
+1. turns off Mongoose automatic collection and index creation for every model, before any model loads and on connect;
+2. checks that the connected database name equals the profile's `database`, and stops before any write if it does not;
+3. ensures only `albumcatalogs` index `artistCredits.artistId_1` (sparse, non-unique). An existing matching index is reused. A conflicting index stops startup and is never dropped or changed.
+
+Add `--artist-discography` (only together with `--artist-pages`) to also set `ARTIST_DISCOGRAPHY_ENABLED=true`. The API then makes live, read-only MusicBrainz requests when someone opens an artist page's discography, behind the shared rate gate. It writes nothing to the database. Suggestion prefill and submissions stay off, so the section shows MusicBrainz links instead of "Suggest this album".
+
+The log says whether the index was created or already present. Because automatic initialization is off, this run relies on the collections and indexes that already exist in the development database, including those for moderation features. Without the switch, startup behaves as before and `ARTIST_PAGES_ENABLED` is forced to `false`. See [artist pages](ARTIST_IDENTITY.md#artist-pages-prototype).
 
 Detection access does not ingest plays, run detection jobs, or publish new diary listens. Its view requires an existing active/paused Last.fm connection and stored detection records for the approved test account; without those, the view can be empty. Changing a connected account's time zone still writes shared connection state and queues detection work. Automatic diary opt-in, confirmation and publication stay disabled. Ordinary app actions, including manually recording a listen, are not made read-only by these flags.
 
@@ -114,4 +130,4 @@ Squash/rebase merges may not preserve commit ancestry. The conservative check ca
 
 ## Verification
 
-`npm run test:worktree` is offline and uses disposable Git repositories, fake credential strings, loopback sockets, and mock API/Vite processes. It covers profile restrictions, independent user scopes, detection access for approved/unapproved users, disabled ingestion/publication flags, frontend isolation, configured/explicit creation bases, idempotent setup, port collisions, safe removal, and process shutdown without connecting to MongoDB, Clerk, or a provider. Run `npm test` for the broader backend test suite; see [repository verification guidance](../AGENTS.md) for the full gate. A read-only UI check can verify signed-in queue access and existing detections after an approved restart; do not perform a moderation command, time-zone update, or diary mutation unless that specific shared-dev test is authorized.
+`npm run test:worktree` is offline and uses disposable Git repositories, fake credential strings, loopback sockets, and mock API/Vite processes. It covers profile restrictions, the artist pages switch and its guarded database setup (with stubs), independent user scopes, detection access for approved/unapproved users, disabled ingestion/publication flags, frontend isolation, configured/explicit creation bases, idempotent setup, port collisions, safe removal, and process shutdown without connecting to MongoDB, Clerk, or a provider. Run `npm test` for the broader backend test suite; see [repository verification guidance](../AGENTS.md) for the full gate. A read-only UI check can verify signed-in queue access and existing detections after an approved restart; do not perform a moderation command, time-zone update, or diary mutation unless that specific shared-dev test is authorized.

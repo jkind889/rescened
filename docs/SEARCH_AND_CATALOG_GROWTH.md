@@ -45,11 +45,46 @@ Matching ignores case, normalizes query whitespace and canonical Unicode, treats
 
 Reviewed whole-query artist preferences live in `routes/utils/searchArtistAliases.js`: `ye` / `Kanye West` and `LOONA` / `이달의 소녀` each find records credited to either name in their pair; `Travis` prioritizes Travis Scott; `Pierre`, `Pierre Bourne`, `Pi'erre`, and `Pi'erre Bourne` prioritize Pi’erre Bourne (including straight/curly/no-apostrophe catalog spellings). These matches rank before ordinary exact matches, while alternative text matches remain available. Expansion applies only to exact display-artist or credited-artist names, never labels or titles. Explicit queries such as `Travis Barker` and `Pierre Henry` keep their own results. Aliases require a complete normalized query, so `yellow` does not activate `ye`, and mixed inputs such as `ye graduation` or `LOONA [#]` continue to use ordinary token matching. The table is a small curated set, not a popularity score, catalog rename, or general artist-identity database. Search aliases do not change the separate album-specific listening mappings. Add aliases with competing-artist regression cases; the separate real-route alias suite preserves the original 30-query baseline.
 
+When `ARTIST_PAGES_ENABLED` is on, search also expands an exact registry artist name or reviewed alias to that artist's linked releases by `artistId`. It ranks those with exact artist matches, after these curated preferences. See [artist search aliases](ARTIST_IDENTITY.md#search-aliases).
+
 Results rank by exact artist/display credit, exact title, exact label, partial title/artist phrase, then other matches. Artist, title, and immutable public `albumId` break ties. The artist-first choice for ambiguous names such as `Air` is a product rule to revisit with actual usage, not a universal interpretation of intent. Label-intent collisions remain an evaluation limitation.
 
 MongoDB performs matching, ranking, sorting, and pagination before the API serializes public catalog fields. Both response shapes and the one-extra-row next-page check remain unchanged. The alphabetic `/albums/catalog` browse endpoint retains its existing phrase matcher. No schema migration, catalog writes, frontend deployment change, or provider request is required for local ranking.
 
 The unchanged 30-query corpus and historical baseline remain the comparison source. Run `npm run search:evaluate -- --compare benchmarks/search-quality/baseline.json`; retain the generated report under `.benchmarks/search-quality/`. Run the normal tests, MongoDB integration suite, and catalog contract check before release. Relevance measurements on this synthetic set do not establish production accuracy or latency. The computed sort adds database work; new capacity measurements are required before reusing earlier performance claims.
+
+## External result count and provider paging
+
+Last measured: 2026-11-11, a small public sample. It shows tradeoffs, not statistical performance.
+
+**Baseline.** Each external search makes one MusicBrainz request for 50 release groups, ranks them locally, and returns at most 12. The results page asks for 12.
+
+**What changed.** There are two separate mechanisms:
+
+- **Show more of the same fetch (on).** This has no flag of its own: it is on wherever external search is (`EXTERNAL_ALBUM_SEARCH_ENABLED`), independent of the artist flags. `GET /search/external` now returns `providerCount` and an opaque `nextCursor`. "Show more MusicBrainz results" returns the next 12 of the ranked 50, from the adapter's cached page. This adds no provider work while that page is cached (60 s, bounded entries). After expiry or eviction the page is fetched again, and MusicBrainz may rank it differently.
+- **Broader recall (opt-in).** With `EXTERNAL_SEARCH_PROVIDER_PAGING_ENABLED=true` (default off), the cursor continues to the next provider page (offset 50, 100, and so on, up to offset 1,000). Each further page is one user-initiated request. Without the flag, a cursor that needs another provider page is rejected with `400 INVALID_EXTERNAL_SEARCH`.
+
+Paging is best effort. The cursor carries a short SHA-256 fingerprint of the case-folded query and the raw provider offset, not a pinned snapshot, so it stays small for any accepted query. The page clients de-duplicate results by `externalId` and catalog `albumId`. A provider reorder between requests can still skip a result. Catalog matches and candidates share each slice, as before.
+
+**Findings** from `node benchmarks/musicbrainz/run.cjs --live` (8 queries × limits 25/50/100 plus offset 50; 42 requests):
+
+| Measure | 25 rows | 50 rows | 100 rows |
+| --- | --- | --- | --- |
+| Median latency (successful requests) | 381 ms | 269 ms | 383 ms |
+| Median response size | 98 kB | 106 kB | 157 kB |
+| Largest response (`taylor swift`) | 280 kB | 592 kB | 1.2 MB |
+
+- **Relevance** is the adapter's heuristic, not a human judgment. "Strong" means an exact normalized title or artist-name match; "token match" means every query word appears in the title or artist fields.
+  - Artist queries stayed strong past row 12. Rows 13–24 were 12 of 12 strong and rows 25–50 were 23–26 of 26 strong for `taylor swift`, `bts`, and `tyler the creator` (50-row requests) and `radiohead`. The `radiohead` 50-row request returned 503, so its figures come from its successful 100-row request.
+  - Title queries had no exact title or artist match after row 12. `kid a` rows 13–50 were 0 strong but 38 of 38 token matches, and `discovery` rows 13–50 (50-row request) were 0 strong. `ok computer` had 13 results in total.
+  - Where both the 50- and 100-row requests succeeded (five queries), the 100-row request changed the top 12 for `bts` (3 of 12) and `discovery` (11 of 12, pulling exact titles up from rows 51–100), and left the others unchanged.
+- **Duplicates:** no repeated IDs within a page. `tyler the creator` page 2 (offset 50) repeated 11 rows of page 1, so provider pages can overlap.
+- **Availability:** 10 of 42 requests returned MusicBrainz `503` ("server is currently busy") despite 1.1 s spacing. Those 42 include 10 artist-discography requests made with the earlier search-based design. A later run of 10 browse requests returned none. MusicBrainz documents one request per second per client; a 503 can mean throttling or general load, and this sample cannot tell which.
+- Latency differences between sizes were within the sample's noise.
+
+**Decision.** Keep one 50-row request per search. Expose the rest of that fetch through "Show more" rather than raising the first view above 12, because title queries had no exact matches after row 12 in this sample. Keep further provider pages opt-in, because each costs another request against a shared, sometimes busy service. A 100-row first request was not adopted: it about doubled the payload for popular artists and changed the top 12 in two of five comparable queries, which this sample cannot weigh against its cost.
+
+**Adjusting the experiment.** `npm run benchmark:musicbrainz` prints the planned requests without network access. Add `-- --live` to run it, with `--queries`, `--limits`, and `--artists` to change the sample. Requests are serial behind a 1.1 s gate with the application's user agent and no retries, and the command refuses to plan more than 80. Reports go to ignored `.benchmarks/musicbrainz/`. The levers are `PROVIDER_LIMIT` (rows per provider request, 1–100) and `MAX_PROVIDER_OFFSET` in `lib/musicBrainzSearch.js`, `EXTERNAL_SEARCH_LIMIT` (slice size) in `frontend/src/Pages/SearchResults.jsx`, and the paging flag.
 
 ## Goals
 

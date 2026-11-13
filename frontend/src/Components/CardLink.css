@@ -1,0 +1,28 @@
+/* A card whose whole surface opens an album while the artist names inside it
+   stay separate links. Anchors cannot nest, so the card is a plain container
+   and only its title is the album link; that link's ::after stretches over the
+   card. Artist links sit above it (see .artist-credit-link). */
+.card-link {
+  position: relative;
+}
+
+.card-link-title {
+  color: inherit;
+  text-decoration: none;
+}
+
+.card-link-title::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.card-link-title:focus-visible {
+  outline: none;
+}
+
+.card-link-title:focus-visible::after {
+  outline: 2px solid var(--app-accent, currentColor);
+  outline-offset: -2px;
+}

@@ -31,6 +31,7 @@ const AlbumBaselines = lazy(() => import("./Pages/AlbumBaselines"));
 const GenreVocabulary = lazy(() => import("./Pages/GenreVocabulary"));
 const CommentReports = lazy(() => import("./Pages/CommentReports"));
 const GenrePage = lazy(() => import("./Pages/GenrePage"));
+const ArtistPage = lazy(() => import("./Pages/ArtistPage"));
 
 export function App() {
    return (
@@ -50,6 +51,7 @@ export function App() {
             <Route path="/album/:albumId/reviews" element={<AlbumDetail />} />
             <Route path="/review/:reviewId" element={<ReviewPermalink />} />
             <Route path="/genre/:slug" element={<GenrePage />} />
+            <Route path="/artist/:artistId" element={<ArtistPage />} />
             <Route path="/viewreviews" element={
             <ProtectedRoute>
               <ViewReviews />

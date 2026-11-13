@@ -1,5 +1,9 @@
 # Rescened performance benchmarks
 
+## MusicBrainz result-size experiment
+
+`npm run benchmark:musicbrainz` prints a small plan of public MusicBrainz requests and exits without network access. Add `-- --live` to run it. It compares search result counts (25, 50, and 100 rows, plus a second page) and artist discography browse pages for latency, size, duplicates, and relevance tiers. It makes live, read-only, rate-gated requests and writes reports to ignored `.benchmarks/musicbrainz/`. Findings and how to adjust it are in [search and catalog growth](../docs/SEARCH_AND_CATALOG_GROWTH.md#external-result-count-and-provider-paging). Normal tests never run it live.
+
 ## Search relevance evaluation
 
 Run `npm run search:evaluate` for a small, deterministic **quality** evaluation of local catalog search. This command does not run k6 or measure capacity, and it does not change matching, ranking, the frontend, or production data.

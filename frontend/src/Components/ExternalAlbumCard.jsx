@@ -25,7 +25,9 @@ function ExternalAlbumCover({ candidate }) {
   );
 }
 
-export function ExternalAlbumCard({ candidate }) {
+// showSuggest: false hides "Suggest this album" where its prefill lookup is
+// unavailable (EXTERNAL_ALBUM_SEARCH_ENABLED off), leaving the source link.
+export function ExternalAlbumCard({ candidate, showSuggest = true }) {
   const title = candidate.title || "Untitled release";
   const artist = candidate.artistDisplayName || "Artist unknown";
   const releaseType = candidate.releaseType || "Release";
@@ -46,9 +48,11 @@ export function ExternalAlbumCard({ candidate }) {
         <p className="external-album-artist">{artist}</p>
         <p className="external-album-year">{releaseYear}</p>
         <div className="external-album-actions">
-          <Link className="external-album-suggest" to={suggestionUrl}>
-            Suggest this album
-          </Link>
+          {showSuggest ? (
+            <Link className="external-album-suggest" to={suggestionUrl}>
+              Suggest this album
+            </Link>
+          ) : null}
           {candidate.sourceUrl ? (
             <a
               className="external-album-source"

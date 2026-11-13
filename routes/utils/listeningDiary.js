@@ -247,7 +247,7 @@ async function listenCalendar(userId, query = {}) {
     if (!days.has(row.listenedOn)) days.set(row.listenedOn, []);
     days.get(row.listenedOn).push({
       listenId: row.listenId, listenedOn: row.listenedOn, source: row.source || "manual",
-      album: { albumId: album.albumId, title: album.title, artistDisplayName: album.artistDisplayName, cover: album.cover },
+      album: { albumId: album.albumId, title: album.title, artistDisplayName: album.artistDisplayName, artistCredits: album.artistCredits, cover: album.cover },
     });
   }
   const dayList = [...days].map(([date, listens]) => ({ date, listens }));

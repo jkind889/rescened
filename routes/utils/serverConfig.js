@@ -20,6 +20,22 @@ function isGenresEnabled(env = process.env) {
   return String(env.GENRES_ENABLED || "").trim().toLowerCase() === "true";
 }
 
+function isArtistBiographiesEnabled(env = process.env) {
+  return String(env.ARTIST_BIOGRAPHIES_ENABLED || "").trim().toLowerCase() === "true";
+}
+
+function isArtistDiscographyEnabled(env = process.env) {
+  return String(env.ARTIST_DISCOGRAPHY_ENABLED || "").trim().toLowerCase() === "true";
+}
+
+function isExternalSearchProviderPagingEnabled(env = process.env) {
+  return String(env.EXTERNAL_SEARCH_PROVIDER_PAGING_ENABLED || "").trim().toLowerCase() === "true";
+}
+
+function isArtistPagesEnabled(env = process.env) {
+  return String(env.ARTIST_PAGES_ENABLED || "").trim().toLowerCase() === "true";
+}
+
 function isDataExportEnabled(env = process.env) {
   return String(env.DATA_EXPORT_ENABLED || "").trim().toLowerCase() === "true";
 }
@@ -127,8 +143,12 @@ module.exports = {
   buildCorsOptions,
   getAllowedOrigins,
   getConfiguredOrigins,
+  isArtistBiographiesEnabled,
+  isArtistDiscographyEnabled,
+  isArtistPagesEnabled,
   isDataExportEnabled,
   isExternalAlbumSearchEnabled,
+  isExternalSearchProviderPagingEnabled,
   isGenresEnabled,
   normalizeOrigin,
   parseOriginList,

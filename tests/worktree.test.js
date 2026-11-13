@@ -210,3 +210,116 @@ test('a failed app stops its paired mock app and releases the run marker', async
   assert.equal(code, 1); assert.equal(output.includes('DO_NOT_LEAK_CONNECTION_SECRET'), false);
   assert.equal(fs.existsSync(wt.runPath(f.child)), false); assert.equal(await wt.pairFree(f.state.apiPort, f.state.webPort), true);
 });
+
+const previewServer = require('../scripts/worktree-server.cjs');
+function stubMongoose({ databaseName = 'rescened_dev', indexes = [] } = {}) {
+  const calls = { set: [], connect: [], created: [], disconnected: 0, dropped: 0 };
+  const collection = {
+    indexes: async () => indexes,
+    createIndex: async (key, options) => { calls.created.push({ key, options }); },
+    dropIndex: async () => { calls.dropped += 1; },
+  };
+  return {
+    calls,
+    set: (key, value) => calls.set.push([key, value]),
+    connect: async (uri, options) => { calls.connect.push({ uri, options }); },
+    disconnect: async () => { calls.disconnected += 1; },
+    connection: { db: { databaseName, collection: (name) => { calls.collection = name; return collection; } } },
+  };
+}
+
+test('artist pages stay off unless start passes the explicit opt-in, which never reaches the frontend', () => {
+  const inherited = { ARTIST_PAGES_ENABLED: 'true', RESCENED_PREVIEW_INIT: 'artist-pages', RESCENED_PREVIEW_DATABASE: 'rescened' };
+  const off = wt.buildEnvironments(profile(), { apiPort: 3101, webPort: 5201 }, inherited);
+  assert.equal(off.backend.ARTIST_PAGES_ENABLED, 'false');
+  assert.equal(off.backend.RESCENED_PREVIEW_INIT, undefined);
+  assert.equal(off.backend.RESCENED_PREVIEW_DATABASE, undefined);
+  assert.equal(wt.buildEnvironments(profile(), { apiPort: 3101, webPort: 5201 }, {}, { artistPages: 'true' }).backend.ARTIST_PAGES_ENABLED, 'false');
+
+  const p = profile(); p.preview = { moderatorUserIds: ['user_test'] };
+  const on = wt.buildEnvironments(p, { apiPort: 3101, webPort: 5201 }, inherited, { artistPages: true });
+  assert.equal(on.backend.ARTIST_PAGES_ENABLED, 'true');
+  assert.equal(on.backend.RESCENED_PREVIEW_INIT, 'artist-pages');
+  assert.equal(on.backend.RESCENED_PREVIEW_DATABASE, 'rescened_dev');
+  assert.equal(on.backend.COMMUNITY_MODERATION_ENABLED, 'true', 'other profile controls are unchanged');
+  for (const flag of wt.DISABLED.filter((key) => !['ARTIST_PAGES_ENABLED', 'COMMUNITY_MODERATION_ENABLED', 'ALBUM_MAPPING_MODERATION_ENABLED', 'TRACKLIST_BASELINE_MODERATION_ENABLED'].includes(key))) assert.equal(on.backend[flag], 'false', flag);
+  assert.deepEqual(Object.keys(on.frontend).sort(), ['NODE_ENV', 'VITE_API_URL', 'VITE_CLERK_PUBLISHABLE_KEY']);
+});
+
+test('--artist-pages is a start-only switch', async () => {
+  assert.deepEqual(wt.parseArgs(['start', '--profile', '/p.json', '--artist-pages']).options, { profile: '/p.json', artistPages: true });
+  assert.throws(() => wt.parseArgs(['start', '--artist-pages', '--artist-pages']), /Duplicate/);
+  await assert.rejects(wt.main(['setup', '--artist-pages']), /not supported/);
+  await assert.rejects(wt.main(['status', '--artist-pages']), /not supported/);
+});
+
+test('artist preview connects without auto creation, verifies the database, and ensures only its index', async () => {
+  const logs = [];
+  const fresh = stubMongoose({ indexes: [{ name: '_id_', key: { _id: 1 } }] });
+  assert.deepEqual(await previewServer.connectForArtistPreview('mongodb+srv://u:SECRET@h/rescened_dev', { mongoose: fresh, expectedDatabase: 'rescened_dev', log: (line) => logs.push(line) }), { created: true });
+  assert.deepEqual(fresh.calls.set, [['autoIndex', false], ['autoCreate', false]]);
+  assert.deepEqual(fresh.calls.connect[0].options, { autoIndex: false, autoCreate: false });
+  assert.equal(fresh.calls.collection, 'albumcatalogs');
+  assert.deepEqual(fresh.calls.created, [{ key: { 'artistCredits.artistId': 1 }, options: { name: 'artistCredits.artistId_1', sparse: true } }]);
+  assert.equal(logs.some((line) => line.includes('SECRET')), false);
+
+  const present = stubMongoose({ indexes: [{ name: 'artistCredits.artistId_1', key: { 'artistCredits.artistId': 1 }, sparse: true }] });
+  assert.deepEqual(await previewServer.connectForArtistPreview('uri', { mongoose: present, expectedDatabase: 'rescened_dev', log: () => {} }), { created: false });
+  assert.deepEqual(present.calls.created, []);
+});
+
+test('artist preview refuses a mismatched database or conflicting index without writing or dropping', async () => {
+  const wrong = stubMongoose({ databaseName: 'rescened' });
+  await assert.rejects(previewServer.connectForArtistPreview('uri', { mongoose: wrong, expectedDatabase: 'rescened_dev', log: () => {} }), (error) => error instanceof previewServer.PreviewSetupError && /does not match/.test(error.message));
+  assert.deepEqual(wrong.calls.created, []); assert.equal(wrong.calls.disconnected, 1); assert.equal(wrong.calls.collection, undefined);
+
+  for (const conflict of [
+    { name: 'artistCredits.artistId_1', key: { 'artistCredits.artistId': 1 } },
+    { name: 'artistCredits.artistId_1', key: { 'artistCredits.artistId': 1 }, sparse: true, unique: true },
+    { name: 'credit_ids', key: { 'artistCredits.artistId': 1 }, sparse: true },
+    { name: 'artistCredits.artistId_1', key: { 'artistCredits.artistId': -1 }, sparse: true },
+  ]) {
+    const stub = stubMongoose({ indexes: [conflict] });
+    await assert.rejects(previewServer.connectForArtistPreview('uri', { mongoose: stub, expectedDatabase: 'rescened_dev', log: () => {} }), /conflicts/);
+    assert.deepEqual(stub.calls.created, []); assert.equal(stub.calls.dropped, 0);
+  }
+
+  const unsafe = stubMongoose();
+  await assert.rejects(previewServer.connectForArtistPreview('uri', { mongoose: unsafe, expectedDatabase: 'rescened', log: () => {} }), /rescened_dev/);
+  assert.deepEqual(unsafe.calls.connect, []);
+});
+
+test('launcher passes the artist opt-in and guarded connect to the API only', async (t) => {
+  const f = await childTree(t);
+  const root = f.state.root;
+  fs.mkdirSync(path.join(root, 'node_modules/express'), { recursive: true });
+  const viteDir = path.join(root, 'frontend/node_modules/vite/bin'); fs.mkdirSync(viteDir, { recursive: true });
+  fs.writeFileSync(path.join(root, 'server.js'), `const net=require('node:net'); const assert=require('node:assert/strict'); assert.equal(process.env.ARTIST_PAGES_ENABLED,'true'); assert.equal(process.env.RESCENED_PREVIEW_INIT,'artist-pages'); assert.equal(process.env.RESCENED_PREVIEW_DATABASE,'rescened_dev'); exports.app={listen:(port,host,cb)=>net.createServer().listen(port,host,cb)}; exports.startServer=async({listen,connect})=>{assert.equal(typeof connect,'function'); listen(Number(process.env.PORT),()=>console.log('mock-api-ready'));};`);
+  fs.writeFileSync(path.join(viteDir, 'vite.js'), `const net=require('node:net'); const port=Number(process.argv[process.argv.indexOf('--port')+1]); if(process.env.ARTIST_PAGES_ENABLED||process.env.RESCENED_PREVIEW_DATABASE||process.env.MONGO_URI) process.exit(9); net.createServer().listen(port,'127.0.0.1',()=>console.log('mock-vite-ready'));`);
+  const p = path.join(f.dir, 'profile.json'); fs.writeFileSync(p, JSON.stringify(profile()), { mode: 0o600 });
+  const child = spawn(process.execPath, [cli, 'start', '--profile', p, '--artist-pages'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = ''; child.stdout.on('data', (b) => { output += b; }); child.stderr.on('data', (b) => { output += b; });
+  const finished = once(child, 'exit');
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM'); });
+  await waitFor(() => output.includes('mock-api-ready') && output.includes('mock-vite-ready'));
+  assert.match(output, /Artist pages: on/);
+  child.kill('SIGINT'); const [code] = await finished;
+  assert.equal(code, 0, output); assert.equal(output.includes('sk_test_fixture'), false); assert.equal(output.includes('fake@'), false);
+});
+
+test('artist discography is a separate opt-in that requires artist pages', async () => {
+  const off = wt.buildEnvironments(profile(), { apiPort: 3101, webPort: 5201 }, { ARTIST_DISCOGRAPHY_ENABLED: 'true' }, { artistPages: true });
+  assert.equal(off.backend.ARTIST_DISCOGRAPHY_ENABLED, 'false');
+  const alone = wt.buildEnvironments(profile(), { apiPort: 3101, webPort: 5201 }, {}, { artistDiscography: true });
+  assert.equal(alone.backend.ARTIST_DISCOGRAPHY_ENABLED, 'false');
+  assert.equal(alone.backend.ARTIST_PAGES_ENABLED, 'false');
+  const on = wt.buildEnvironments(profile(), { apiPort: 3101, webPort: 5201 }, {}, { artistPages: true, artistDiscography: true });
+  assert.equal(on.backend.ARTIST_DISCOGRAPHY_ENABLED, 'true');
+  assert.equal(on.backend.EXTERNAL_ALBUM_SEARCH_ENABLED, 'false', 'suggestion prefill stays off');
+  assert.equal(on.backend.COMMUNITY_SUBMISSIONS_ENABLED, 'false');
+  assert.deepEqual(Object.keys(on.frontend).sort(), ['NODE_ENV', 'VITE_API_URL', 'VITE_CLERK_PUBLISHABLE_KEY']);
+  assert.deepEqual(wt.parseArgs(['start', '--profile', '/p.json', '--artist-pages', '--artist-discography']).options, { profile: '/p.json', artistPages: true, artistDiscography: true });
+  assert.throws(() => wt.parseArgs(['start', '--artist-discography', '--artist-discography']), /Duplicate/);
+  await assert.rejects(wt.main(['setup', '--artist-discography']), /not supported/);
+  await assert.rejects(wt.main(['start', '--profile', '/nonexistent/profile.json', '--artist-discography']), /requires --artist-pages/);
+});

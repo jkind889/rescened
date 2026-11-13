@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { CardLink, CardTitleLink } from "../../Components/CardLink";
+import ArtistCredits from "../artists/ArtistCredits";
 import { useAuth } from "@clerk/react";
 import { fetchProfileQueue, moveItem, normalizeQueue, useListenQueue } from "./queue";
 import "./queue.css";
@@ -11,11 +12,12 @@ function QueueCover({ album }) {
     : <span className="listen-queue-cover listen-queue-cover-empty" aria-hidden="true" />;
 }
 
-function AlbumCopy({ album }) {
+// Inside a draggable row, links must not start a link drag instead of a reorder.
+function AlbumCopy({ album, linkProps }) {
   return (
     <span className="listen-queue-copy">
-      <strong>{album.title || "Untitled album"}</strong>
-      <small>{album.artistDisplayName || "Artist unknown"}{album.releaseYear ? ` · ${album.releaseYear}` : ""}</small>
+      <strong><CardTitleLink to={`/album/${album.albumId}`} {...linkProps}>{album.title || "Untitled album"}</CardTitleLink></strong>
+      <small><ArtistCredits album={album} fallback="Artist unknown" linkProps={linkProps} />{album.releaseYear ? ` · ${album.releaseYear}` : ""}</small>
     </span>
   );
 }
@@ -73,10 +75,10 @@ export function ListenQueueEditor({ emptyHint = "Add albums from an album page t
               >
                 <span className="listen-queue-handle" aria-hidden="true">⋮⋮</span>
                 <span className="listen-queue-position">{index + 1}</span>
-                <Link className="listen-queue-album" to={`/album/${albumId}`} draggable={false}>
+                <CardLink className="listen-queue-album">
                   <QueueCover album={album} />
-                  <AlbumCopy album={album} />
-                </Link>
+                  <AlbumCopy album={album} linkProps={{ draggable: false }} />
+                </CardLink>
                 <span className="listen-queue-controls">
                   <button type="button" onClick={() => updateOrder(moveItem(order, index, index - 1))} disabled={isSaving || index === 0} aria-label={`Move ${label} up`}>↑</button>
                   <button type="button" onClick={() => updateOrder(moveItem(order, index, index + 1))} disabled={isSaving || index === order.length - 1} aria-label={`Move ${label} down`}>↓</button>
@@ -134,10 +136,10 @@ export function UpNextList({ userId, preview = [], count = 0 }) {
         {albums.map((album, index) => (
           <li key={album.albumId} className="listen-queue-row">
             <span className="listen-queue-position">{index + 1}</span>
-            <Link className="listen-queue-album" to={`/album/${album.albumId}`}>
+            <CardLink className="listen-queue-album">
               <QueueCover album={album} />
               <AlbumCopy album={album} />
-            </Link>
+            </CardLink>
           </li>
         ))}
       </ol>

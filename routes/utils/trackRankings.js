@@ -245,8 +245,8 @@ async function albumTopTrack(album) {
 function albumSummary(album) {
   const normalized = normalizeCatalogAlbum(album);
   if (!normalized?.albumId) return null;
-  const { albumId, title, artistDisplayName, releaseYear, cover } = normalized;
-  return { albumId, title, artistDisplayName, releaseYear, cover };
+  const { albumId, title, artistDisplayName, artistCredits, releaseYear, cover } = normalized;
+  return { albumId, title, artistDisplayName, artistCredits, releaseYear, cover };
 }
 
 // A stored ranking read against the album's current tracklist, as a profile or
