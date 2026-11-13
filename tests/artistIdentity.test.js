@@ -16,6 +16,7 @@ const {
 } = require("../lib/artists/identity");
 const {
   ArtistBackfillError,
+  applyPlan,
   buildPlan,
   buildSourceIndex,
   parseBackfillArgs,
@@ -507,6 +508,35 @@ test("sealed plans detect edits and require the reviewed checksum", () => {
   assert.throws(() => verifySealedPlan(tampered, plan.planSha256), (error) => error.code === "PLAN_CHECKSUM_MISMATCH");
   assert.throws(() => verifySealedPlan(plan, "0".repeat(64)), (error) => error.code === "PLAN_CHECKSUM_MISMATCH");
   assert.throws(() => verifySealedPlan({ ...plan, kind: "other" }, plan.planSha256), (error) => error.code === "INVALID_PLAN");
+});
+
+test("apply refuses a re-sealed plan that changes more than artist identity, before any write", async () => {
+  const plan = buildPlan({
+    albums: [catalogAlbum()],
+    validations: [backfillValidation([datasetRow()])],
+    artistsByMbid: new Map(),
+    artistsById: new Map(),
+    databaseName: "rescened_test",
+    now: new Date("2026-11-10T00:00:00.000Z"),
+    newArtistId: sequentialIds(),
+  });
+  const touched = [];
+  const trap = (name) => new Proxy({}, { get: () => { touched.push(name); throw new Error(`${name} must not be used`); } });
+  const attempt = (edit) => {
+    const edited = clone(plan);
+    edit(edited);
+    const sealed = sealPlan(edited);
+    return applyPlan({
+      plan: sealed, expectedSha256: sealed.planSha256, confirmTarget: "rescened_test", databaseName: "rescened_test",
+      AlbumCatalog: trap("AlbumCatalog"), Artist: trap("Artist"), mongoose: trap("mongoose"),
+    });
+  };
+  const invalid = (error) => error.code === "INVALID_PLAN";
+  await assert.rejects(attempt((p) => { p.albumUpdates[0].afterCredits[0].name = "Changed"; }), invalid);
+  await assert.rejects(attempt((p) => { p.albumUpdates[0].afterCredits[0].role = "featured"; }), invalid);
+  await assert.rejects(attempt((p) => { p.albumUpdates[0].afterCredits[0].artistId = "00000000-0000-4000-8000-000000000000"; }), invalid);
+  await assert.rejects(attempt((p) => { p.albumUpdates[0].afterCredits.push(clone(p.albumUpdates[0].afterCredits[0])); }), invalid);
+  assert.deepEqual(touched, [], "a refused plan touches no model");
 });
 
 test("the checked-in seed dataset indexes cleanly as a backfill source", () => {
