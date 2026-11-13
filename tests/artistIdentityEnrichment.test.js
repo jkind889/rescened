@@ -513,3 +513,21 @@ test("CLI exits 2 for deferred-only evidence, 1 for a mismatched plan digest, an
   assert.equal(await cli.main(["--ids-file", idsFile, "--cache-dir", path.join(directory, "cache"), "--out", path.join(directory, "sig.json")], { output, process: fakeProcess, runReleaseGroupEnrichment: blocking }), 1);
   assert.ok(signalOf);
 });
+
+test("a short pause still in force after a published run is recorded for the rerun", async (context) => {
+  const directory = tempDir(context);
+  const time = clock();
+  const { fetchFn } = server(time, { [RG1]: releaseGroup(RG1), [RG2]: () => json({}, { status: 503, headers: { "Retry-After": "20" } }) });
+  const result = await runReleaseGroupEnrichment({ ...runOptions(time, directory, fetchFn), ids: [RG1, RG2] });
+  assert.equal(result.evidence.counts.deferred, 1);
+  assert.ok(Date.parse(result.notBefore) > time.nowMs());
+  const cooldown = JSON.parse(fs.readFileSync(path.join(directory, "cache", COOLDOWN_FILE), "utf8"));
+  assert.equal(cooldown.reason, "RETRY_AFTER_PENDING");
+  const rerun = server(time, { [RG2]: releaseGroup(RG2) });
+  await assert.rejects(runReleaseGroupEnrichment({ ...runOptions(time, directory, rerun.fetchFn), outPath: path.join(directory, "rerun.json"), ids: [RG1, RG2] }), { code: "COOLDOWN_ACTIVE" });
+  assert.equal(rerun.calls.length, 0);
+  time.advance(20_000);
+  const later = await runReleaseGroupEnrichment({ ...runOptions(time, directory, rerun.fetchFn), outPath: path.join(directory, "later.json"), ids: [RG1, RG2] });
+  assert.equal(later.evidence.counts.resolved, 2);
+  assert.equal(later.notBefore, undefined);
+});

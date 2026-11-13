@@ -109,6 +109,8 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
       counts: evidence.counts,
       failureReasons: evidence.failureReasons,
     }, null, 2));
+    if (result.notBefore) output.error(`MusicBrainz asked for a pause; do not rerun before ${result.notBefore}.`);
+    if (result.cooldownWriteError) output.error(`Could not record the cooldown (${result.cooldownWriteError}); wait before rerunning.`);
     output.log(`Review ${result.outPath}, then plan with:\n  npm run catalog:backfill-artists -- --enrichment ${result.outPath} --out <new-plan.json>`);
     return evidenceExitCode(evidence);
   } catch (error) {
