@@ -126,7 +126,6 @@ export function ArtistCoverCycle({ covers, artistName }) {
         </div>
         <figcaption aria-atomic="true" aria-live={multiple && !auto ? "polite" : "off"} className="artist-cover-caption">
           <Link to={`/album/${cover.albumId}`}>{coverCaption(cover)}</Link>
-          <span className="artist-cover-note">Cover art from this artist&rsquo;s releases</span>
         </figcaption>
       </figure>
       {multiple ? (

@@ -120,7 +120,7 @@ test("the component and styles keep the motion, pause, and fallback contract and
   for (const required of [
     "(prefers-reduced-motion: reduce)", "visibilitychange", "if (!cover) return null;", "aria-live={multiple && !auto ? \"polite\" : \"off\"}",
     "aria-roledescription", "Pause cover cycle", "Play cover cycle", "Previous cover", "Next cover", "reducedMotion ? null", "eager",
-    ":focus-visible", "event.pointerType === \"mouse\"", "setFailed(", "Cover art from this artist",
+    ":focus-visible", "event.pointerType === \"mouse\"", "setFailed(", "Cover art from releases by",
   ]) assert.ok(component.includes(required), required);
   assert.equal(/fetch\(|wikipedia|wikidata|commons|upload\.wikimedia|XMLHttpRequest/i.test(component), false, "the cycle reads only the covers it was given");
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)\s*\{[^}]*\.artist-cover-frame\.is-moving \.artist-cover-image\s*\{\s*animation: none;/);

@@ -65,7 +65,8 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><MemoryRout
       assert.equal(await page.locator('.artist-cover-image').getAttribute('alt'), 'Release 1 cover');
       assert.equal(await caption(page), 'Release 1 (2000)');
       assert.equal(await page.locator('.artist-cover-caption a').getAttribute('href'), '/album/album-1');
-      assert.equal(await page.getByText("Cover art from this artist’s releases").count(), 1, 'it says this is release art');
+      assert.equal(await page.getByText("Cover art from this artist’s releases").count(), 0, 'no secondary caption');
+      assert.equal(await page.getByRole("region", { name: "Cover art from releases by Fixture Artist" }).count(), 1, 'accessible release-art label remains');
       assert.equal(await page.locator('.artist-cover-caption').getAttribute('aria-live'), 'off', 'no live announcements while it advances itself');
       assert.equal(await page.locator('section[aria-roledescription="carousel"]').count(), 1);
 

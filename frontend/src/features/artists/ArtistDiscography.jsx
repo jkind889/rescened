@@ -111,9 +111,6 @@ export function ArtistDiscography({ artistId }) {
     <section className="artist-releases artist-discography" aria-labelledby="artist-discography-heading">
       <div className="artist-releases-heading">
         <h2 id="artist-discography-heading">On MusicBrainz</h2>
-        <p className="genre-form-muted">
-          Release groups MusicBrainz credits to this artist, including collaborations, from its default website view. That view leaves out groups whose releases are all promotional, bootleg, or pseudo-releases, but it is not limited to official releases. Ones already in the catalog link to their Rescened album; the rest are not in Rescened.
-        </p>
       </div>
 
       <div className="genre-page-sort artist-release-filters" role="group" aria-label="Filter MusicBrainz release groups">
@@ -123,11 +120,6 @@ export function ArtistDiscography({ artistId }) {
           </button>
         ))}
       </div>
-      {["album", "ep", "single"].includes(filter) ? (
-        <p className="genre-form-muted artist-discography-note">
-          MusicBrainz {filter === "ep" ? "EP" : filter} release groups with no secondary type such as live, compilation, or remix. This is not a guarantee of official studio releases.
-        </p>
-      ) : null}
 
       {current.loading ? <p className="genre-form-muted" role="status">Loading MusicBrainz discography…</p> : null}
       {current.error ? (

@@ -58,3 +58,15 @@ test("artist header keeps About beside the cover without secondary identity text
   const css = fs.readFileSync(path.join(__dirname, '../frontend/src/features/artists/ArtistPage.css'), 'utf8');
   assert.equal(css.includes('grid-row: 1 / span 6'), false);
 });
+
+
+test("only the On Rescened section keeps its explanatory header text", () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const discography = fs.readFileSync(path.join(__dirname, '../frontend/src/features/artists/ArtistDiscography.jsx'), 'utf8');
+  assert.equal(discography.includes('Release groups MusicBrainz credits'), false);
+  assert.equal(discography.includes('artist-discography-note'), false);
+  const cover = fs.readFileSync(path.join(__dirname, '../frontend/src/features/artists/ArtistCoverCycle.jsx'), 'utf8');
+  assert.equal(cover.includes('artist-cover-note'), false);
+  const page = fs.readFileSync(path.join(__dirname, '../frontend/src/Pages/ArtistPage.jsx'), 'utf8');
+  assert.ok(page.includes('This is not a complete discography.'));
+});
