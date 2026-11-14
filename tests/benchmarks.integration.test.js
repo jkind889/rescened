@@ -72,3 +72,29 @@ test('isolated real-route benchmarks preserve search, social counts and cleanup'
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+// An empty database makes implicit model initialization writes observable.
+// The child must settle model initialization before announcing readiness.
+test('benchmark API startup and reads do not create unseeded collections', { skip: !enabled }, async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rescened-benchmark-isolation-'));
+  let repl; let connection; let api;
+  try {
+    repl = await MongoMemoryReplSet.create({ replSet: { count: 1, ip: '127.0.0.1' } });
+    const uri = repl.getUri('rescened_bench_empty');
+    connection = mongoose.createConnection(uri, { autoIndex: false, autoCreate: false });
+    await connection.asPromise();
+    api = await startServer(uri, path.resolve(__dirname, '../routes/search.js'), path.join(directory, 'api.log'));
+    const collections = async () => (await connection.db.listCollections().toArray()).map(row => row.name).sort();
+    assert.deepEqual(await collections(), [], 'Startup must not create collections for imported models');
+    const response = await fetch(`${api.url}/search/search?q=synthetic`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), []);
+    assert.deepEqual(await collections(), [], 'Search reads must not create collections');
+  } finally {
+    try { await stopChild(api?.child); }
+    finally {
+      try { if (connection) await connection.close(); }
+      finally { if (repl) await repl.stop(); fs.rmSync(directory, { recursive: true, force: true }); }
+    }
+  }
+});

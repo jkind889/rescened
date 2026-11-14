@@ -49,8 +49,10 @@ async function main() {
   if (!process.send) throw new Error('Launch this server through the benchmark runner');
   const [uri, sourcePath] = process.argv.slice(2);
   assertLocalUri(uri);
-  await mongoose.connect(uri, { autoIndex: false, maxPoolSize: 100 });
+  await mongoose.connect(uri, { autoIndex: false, autoCreate: false, maxPoolSize: 100 });
   const app = createApp(fs.readFileSync(sourcePath, 'utf8'));
+  // Settle initialization before readiness so fixture isolation is observable.
+  await Promise.all(Object.values(mongoose.models).map(model => model.init()));
   const server = app.listen(0, '127.0.0.1', () => process.send({ port: server.address().port }));
   let stopping = false;
   async function stop() {

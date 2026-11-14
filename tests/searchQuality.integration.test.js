@@ -140,6 +140,8 @@ test('search quality executes real routes and indexes with stable independent ju
       const first = await evaluate(context.url, data);
       const second = await evaluate(context.url, data);
       assert.deepEqual(first, second, 'Unchanged run must produce identical ranking and scores');
+      assert.deepEqual((await context.connection.db.listCollections().toArray()).map(c => c.name), ['albumcatalogs'],
+        'Search evaluation must preserve the explicitly seeded collection set');
       assert.equal(first.length, 30);
       const long = first.find(q => q.id === 'artist-discography');
       // Independent hand-selected membership, sorted with Mongo's binary string ordering.
