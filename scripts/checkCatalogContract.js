@@ -63,9 +63,18 @@ for (const file of roots.flatMap(filesIn)) {
     });
   }
 }
+// Keep the existing catalog checks and enforce source boundaries in the same
+// aggregate-gate stage. No source module is executed by this AST inspection.
+try {
+  const { checkProject } = require('./checkArchitecture');
+  const architecture = checkProject(process.cwd());
+  for (const { file, line, rule, message } of architecture.findings) violations.push(`${file}:${line} [${rule}] ${message}`);
+} catch (error) {
+  violations.push(`Architecture check unavailable: ${error.message}`);
+}
 if (violations.length) {
   console.error(violations.join("\n"));
   process.exitCode = 1;
 } else {
-  console.log("Catalog contract clean: no provider identity or Spotify API dependencies found.");
+  console.log("Catalog contract and architecture boundaries clean: no detected violations.");
 }

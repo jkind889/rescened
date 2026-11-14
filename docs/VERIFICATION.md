@@ -44,3 +44,17 @@ Each run prints a unique temporary artifact directory containing TAP output, Pla
 Browser checks are deliberately separate from `npm run verify` and its GitHub workflow. A green aggregate gate does not claim browser coverage. Run this explicit command for relevant UI changes and report its result separately. Normal `npm test` keeps the opt-in fixtures skipped.
 
 SIGINT/SIGTERM stops the runner's own test process group on POSIX, with a five-second escalation to SIGKILL; unrelated previews are untouched. Windows only guarantees termination of the immediate child, as with the aggregate runner. An interrupted run is a failure and may have only partial artifacts.
+
+## Targeted architecture rules
+
+`npm run check:architecture` checks direct source boundaries with the pinned Espree parser; `-- --help` prints usage. The same checker is enforced by `npm run check:catalog-contract`, including its existing stage in `npm run verify` and CI. Frontend ESLint retains its existing React rules; no blanket effect/timer/comment restrictions are added.
+
+The scan covers JavaScript/JSX under `frontend/src` and `routes` recursively. Diagnostics include file, line, rule, and remediation:
+
+- `ARCH_FRONTEND`: literal imports, re-exports, `require`, and dynamic imports in frontend source cannot escape the frontend package or import Node built-ins, Express, MongoDB/Mongoose, dotenv, or server Clerk packages. Keep browser helpers inside frontend and call the API for server behavior.
+- `ARCH_ROUTE_NETWORK`: routes (including route utilities) cannot call `fetch`/`global.fetch`/`globalThis.fetch` directly or import known HTTP clients (`http`, `https`, `http2`, `undici`, `axios`, `node-fetch`, `got`, `superagent`). Remote calls belong in the existing `lib` adapter/service boundaries; provider source URLs and attribution strings remain allowed.
+- `ARCH_DELEGATED_PERSISTENCE`: only the existing `artistBiographyModeration.js` and `commentModeration.js` routes are barred from importing models or MongoDB/Mongoose directly. They already delegate to biography/comment moderation services. Other routes currently mix reads/writes with orchestration and are not subject to a newly invented service-layer rule.
+
+Computed module specifiers, parse errors, missing scan roots, and source symlinks fail closed. Ordinary comments and strings are not interpreted as imports. There are no production-code exceptions needed by the current checkout. The checker uses CommonJS syntax for routes and ES modules/JSX for frontend source.
+
+These are direct syntactic/lexical boundaries, not whole-program analysis: aliases, indirect/re-exported dependencies, custom import resolvers, computed network access, new client packages, and arbitrary persistence helpers are not exhaustively traced. The two route restrictions do not prove that a command calls the right service, authenticates a viewer, enforces a feature flag, conditions a write, or uses a transaction. Authorization/concurrency behavior still needs route/service review and executable tests. This milestone adds architecture-tooling regressions, not a new invariant-test or security-audit suite.
