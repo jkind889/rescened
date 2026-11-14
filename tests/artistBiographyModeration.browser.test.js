@@ -22,17 +22,18 @@ const getToken = async () => 'fixture-token';
 export function useAuth() { const snapshot = useSyncExternalStore((listener) => { listeners.add(listener); return () => listeners.delete(listener); }, () => state); return { ...snapshot, getToken }; }`;
 const stub = `
 const record = (revision, suppressed) => ({ artistId: '${ARTIST}', revision, identity: { state: 'verified', qid: 'Q1', reasons: [] }, moderation: { suppressed, suppressedReason: suppressed ? 'r' : '' }, display: !suppressed,
-  accepted: { text: 'Synthetic band excerpt for the moderation test.', shortened: true, license: { name: 'CC BY-SA 4.0', url: 'https://creativecommons.org/licenses/by-sa/4.0/' }, article: { title: 'Synthetic', url: 'https://example.invalid/a', revisionId: 5, revisionUrl: 'https://example.invalid/r' } },
+  accepted: { text: revision === 3 ? 'Reloaded authoritative biography.' : 'Synthetic band excerpt for the moderation test.', shortened: true, license: { name: 'CC BY-SA 4.0', url: 'https://creativecommons.org/licenses/by-sa/4.0/' }, article: { title: 'Synthetic', url: 'https://example.invalid/a', revisionId: 5, revisionUrl: 'https://example.invalid/r' } },
   pendingRevision: revision === 1 ? { text: 'Unreviewed changed lead from a newer revision.', shortened: false, license: { name: 'CC BY-SA 4.0', url: 'https://creativecommons.org/licenses/by-sa/4.0/' }, article: { title: 'Synthetic', url: 'https://example.invalid/a', revisionId: 6, revisionUrl: 'https://example.invalid/r6' } } : null,
   candidate: null, manual: null, fetch: {}, history: [] });
-window.__aborts = 0; window.__pending = []; window.__posts = [];
+window.__aborts = 0; window.__pending = []; window.__posts = []; window.__revision = 1; window.__conflict = false;
 window.__release = () => { const next = window.__pending.shift(); if (next) next(); };
 window.fetch = (input, init = {}) => {
   const url = String(input);
   const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
   if (url.endsWith('/access')) return Promise.resolve(json({ moderator: true }));
-  if ((init.method || 'GET') === 'GET') return Promise.resolve(json({ biography: record(1, false) }));
+  if ((init.method || 'GET') === 'GET') return Promise.resolve(json({ biography: record(window.__revision, false) }));
   window.__posts.push({ url, body: JSON.parse(init.body || '{}') });
+  if (window.__conflict) { window.__conflict = false; window.__revision = 3; return Promise.resolve(new Response(JSON.stringify({ code: 'BIOGRAPHY_REVISION_CONFLICT', error: 'Changed' }), { status: 409, headers: { 'content-type': 'application/json' } })); }
   return new Promise((resolve, reject) => {
     init.signal?.addEventListener('abort', () => { window.__aborts += 1; reject(new DOMException('aborted', 'AbortError')); });
     window.__pending.push(() => resolve(json({ biography: record(2, true) })));
@@ -40,10 +41,10 @@ window.fetch = (input, init = {}) => {
 };`;
 
 test('signing out cancels a pending biography command and leaves no stale state', { skip: enabled ? false : 'Set RUN_FRONTEND_BROWSER_TESTS=true with an available Playwright installation', timeout: 60000 }, async () => {
-  const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+  const { chromium } = require('./browser-support/chromium');
   const frontend = path.resolve(__dirname, '../frontend');
   const requireFrontend = createRequire(path.join(frontend, 'package.json'));
-  const { createServer } = await import(pathToFileURL(requireFrontend.resolve('vite')).href);
+  const { createFixtureServer } = require('./browser-support/server');
   const { default: react } = await import(pathToFileURL(requireFrontend.resolve('@vitejs/plugin-react')).href);
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'rescened-bio-moderation-browser-'));
   let server; let browser;
@@ -54,11 +55,11 @@ test('signing out cancels a pending biography command and leaves no stale state'
     await fs.writeFile(path.join(directory, 'entry.jsx'), `import './stub.js'; import React from 'react'; import { createRoot } from 'react-dom/client';
 import ArtistBiographyModeration from ${JSON.stringify(path.join(frontend, 'src/features/artists/ArtistBiographyModeration.jsx'))};
 createRoot(document.getElementById('root')).render(<React.StrictMode><ArtistBiographyModeration artistId="${ARTIST}" onChanged={() => { window.__changed = (window.__changed || 0) + 1; }} /></React.StrictMode>);`);
-    server = await createServer({ configFile: false, root: directory, envDir: false, plugins: [react()],
+    server = await createFixtureServer({ configFile: false, root: directory, envDir: false, plugins: [react()],
       define: { 'import.meta.env.VITE_API_URL': JSON.stringify('http://fixture.invalid') },
       resolve: { alias: { '@clerk/react': path.join(directory, 'auth.js'), react: path.dirname(requireFrontend.resolve('react/package.json')), 'react-dom': path.dirname(requireFrontend.resolve('react-dom/package.json')) } },
       // No HMR or file watcher: a late watcher event can re-run the entry module and trigger a duplicate createRoot warning.
-      server: { host: '127.0.0.1', port: 0, hmr: false, watch: null, fs: { allow: [directory, frontend, await fs.realpath(path.join(frontend, 'node_modules'))] } },
+      server: { hmr: false, watch: null, fs: { allow: [directory, frontend, await fs.realpath(path.join(frontend, 'node_modules'))] } },
     });
     await server.listen();
     browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {}) });
@@ -102,6 +103,16 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><ArtistBiog
     await page.evaluate(() => window.__release());
     await page.getByText('Saved.').waitFor();
     assert.equal(await page.getByText("Wikipedia's lead changed").count(), 0, 'the staged text is gone once published');
+    // A stale edit reloads authoritative revision; a deliberate retry uses it.
+    await page.evaluate(() => { window.__conflict = true; });
+    await page.getByRole('button', { name: 'Save correction', exact: true }).click();
+    await page.getByText('The record changed. It has been reloaded; review it and try again.', { exact: true }).waitFor();
+    await page.waitForFunction(() => document.querySelector('textarea')?.value === 'Reloaded authoritative biography.');
+    await page.getByRole('button', { name: 'Save correction', exact: true }).click();
+    const retry = await page.evaluate(() => window.__posts.at(-1));
+    assert.equal(retry.body.expectedRevision, 3);
+    await page.evaluate(() => window.__release());
+    await page.getByText('Saved.', { exact: true }).waitFor();
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

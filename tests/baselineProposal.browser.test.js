@@ -10,10 +10,10 @@ const { pathToFileURL } = require('node:url');
 
 const enabled = process.env.RUN_FRONTEND_BROWSER_TESTS === 'true';
 test('moderator proposal evidence remains visible with discovery disabled', { skip: enabled ? false : 'Set RUN_FRONTEND_BROWSER_TESTS=true with an available Playwright installation', timeout: 60000 }, async (t) => {
-  const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+  const { chromium } = require('./browser-support/chromium');
   const frontend = path.resolve(__dirname, '../frontend');
   const requireFrontend = createRequire(path.join(frontend, 'package.json'));
-  const { createServer } = await import(pathToFileURL(requireFrontend.resolve('vite')).href);
+  const { createFixtureServer } = require('./browser-support/server');
   const { default: react } = await import(pathToFileURL(requireFrontend.resolve('@vitejs/plugin-react')).href);
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'rescened-baseline-browser-'));
   let server; let browser;
@@ -21,10 +21,10 @@ test('moderator proposal evidence remains visible with discovery disabled', { sk
     await fs.writeFile(path.join(directory, 'index.html'), '<!doctype html><html><head><title>Baseline review fixture</title><link rel="icon" href="data:,"></head><body><div id="root"></div><script type="module" src="/entry.jsx"></script></body></html>');
     await fs.writeFile(path.join(directory, 'auth.js'), 'const getToken = async () => "fixture-token"; export function useAuth() { return { getToken, isLoaded: true, isSignedIn: true }; }');
     await fs.writeFile(path.join(directory, 'entry.jsx'), `import React from 'react'; import { createRoot } from 'react-dom/client'; import ${JSON.stringify(path.join(frontend, 'src/reset.css'))}; import ${JSON.stringify(path.join(frontend, 'src/index.css'))}; import ${JSON.stringify(path.join(frontend, 'src/App.css'))}; import BaselineReviewPanel from ${JSON.stringify(path.join(frontend, 'src/Components/Community/BaselineReviewPanel.jsx'))}; createRoot(document.getElementById('root')).render(<BaselineReviewPanel kind="submissions" id="11111111-1111-4111-8111-111111111111" />);`);
-    server = await createServer({ configFile: false, root: directory, envDir: false, plugins: [react()],
+    server = await createFixtureServer({ configFile: false, root: directory, envDir: false, plugins: [react()],
       define: { 'import.meta.env.VITE_API_URL': JSON.stringify('http://fixture.invalid') },
       resolve: { alias: { '@clerk/react': path.join(directory, 'auth.js'), react: path.dirname(requireFrontend.resolve('react/package.json')), 'react-dom': path.dirname(requireFrontend.resolve('react-dom/package.json')) } },
-      server: { host: '127.0.0.1', port: 0, fs: { allow: [directory, frontend, await fs.realpath(path.join(frontend, 'node_modules'))] } },
+      server: { fs: { allow: [directory, frontend, await fs.realpath(path.join(frontend, 'node_modules'))] } },
     });
     await server.listen();
     const url = `http://127.0.0.1:${server.httpServer.address().port}`;

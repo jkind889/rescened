@@ -57,6 +57,8 @@ npm --prefix frontend run lint
 npm --prefix frontend run build
 ```
 
+For explicit offline rendered component coverage, run `npm run test:browser` after preparing its pinned Chromium; see the coverage and gaps in [verification guidance](../../../docs/VERIFICATION.md#explicit-synthetic-browser-suite). This is separate from the aggregate gate and CI.
+
 The MongoDB integration runner enables `RUN_MONGO_INTEGRATION=true` and exercises the replica-set suites listed in [the runner](../../../scripts/runIntegrationTests.js). The aggregate gate disables runtime binary downloads and requires an already cached `mongodb-memory-server` binary. The standalone integration command may provision one on its first run; provisioning is separate from offline verification. If provisioning is unavailable, report an infrastructure-blocked check rather than a product pass or a product regression.
 
 ## Keep live provider checks explicit
