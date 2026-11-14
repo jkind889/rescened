@@ -68,3 +68,7 @@ The existing integration gate also runs these bounded invariants against disposa
 - `tests/artistBiographies.integration.test.js`: pause a real refresh at a controlled fixture-source barrier, suppress while it waits, and check stale-write rejection, duplicate-command conflicts without extra audits, and continued public suppression through later content and identity refreshes.
 
 These extend existing concurrency tests; they do not exhaust transaction schedules, arbitrary board sizes, network failure modes, or browser/auth flows. The discarded-response case models a committed write whose caller received no usable response; it does not inject a Mongo driver commit-acknowledgement failure. Run them via `npm run test:integration` (or `npm run verify`); ordinary `npm test` skips their Mongo cases.
+
+## Dependency/security snapshots
+
+Dependency audits require current online advisory data and remain separate from the offline gate. See the [2026-11-14 dependency/security review](DEPENDENCY_SECURITY_REVIEW.md) for the reviewed paths, compatible lock updates, residual development advisory, runtime recommendation, install-script policy, and validation limits. A green test gate does not clear unresolved advisories.
