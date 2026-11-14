@@ -42,9 +42,10 @@ async function withCatalog(data, directory, work, { signal } = {}) {
     repl = await MongoMemoryReplSet.create({ replSet: { count: 1, ip: '127.0.0.1' } });
     checkAbort(signal);
     const uri = repl.getUri(`rescened_bench_search_${process.pid}_${Date.now()}`);
-    connection = mongoose.createConnection(uri, { autoIndex: false });
+    connection = mongoose.createConnection(uri, { autoIndex: false, autoCreate: false });
     await connection.asPromise();
     const Album = connection.model('AlbumCatalog', AlbumCatalog.schema);
+    await Album.init();
     const documents = data.albums.map(item => {
       const document = new Album({ ...item, createdAt: new Date('2026-09-01T00:00:00Z'), updatedAt: new Date('2026-09-01T00:00:00Z') });
       const error = document.validateSync();

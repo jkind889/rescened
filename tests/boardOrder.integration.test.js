@@ -159,6 +159,46 @@ integration("owners switch to custom order, reorder, and new albums go to the bo
   assert.equal(rankedDated.body.code, "INVALID_BOARD_ORDER");
 });
 
+// All 4! orders, independent of randomly generated public IDs.
+function permutations(items) {
+  if (!items.length) return [[]];
+  return items.flatMap((item, index) => permutations(items.filter((_, i) => i !== index)).map(rest => [item, ...rest]));
+}
+
+integration("every four-album permutation preserves membership through retries and remove/rejoin", async () => {
+  const boardId = await createBoard();
+  await seedSaves(boardId, albums);
+  await setSettings(boardId, { orderMode: "manual" });
+  const internal = await Board.findOne({ boardId });
+  let membership = await BoardItem.find({ boardId: internal._id }).sort({ _id: 1 }).lean();
+  const publicToInternal = new Map(albums.map(album => [album.albumId, String(album._id)]));
+  for (const order of permutations(ids(albums))) {
+    const before = await getBoard(boardId);
+    const changed = await reorder(boardId, order, before.body.revision);
+    assert.equal(changed.status, 200, JSON.stringify(changed.body));
+    const after = await getBoard(boardId);
+    assert.deepEqual(ids(after.body.albums), order);
+    assert.deepEqual(ids(after.body.previewAlbums), order);
+    assert.equal(after.body.revision, before.body.revision + 1);
+    assert.deepEqual((await Board.findOne({ boardId })).albumOrder.map(String), order.map(id => publicToInternal.get(id)));
+    assert.deepEqual(await BoardItem.find({ boardId: internal._id }).sort({ _id: 1 }).lean(), membership, "reorder must not rewrite membership or savedAt");
+    const retry = await reorder(boardId, order, before.body.revision);
+    assert.deepEqual([retry.status, retry.body.code], [409, "BOARD_CHANGED"]);
+    assert.deepEqual((await getBoard(boardId)).body, after.body, "stale retry must not change order or revision");
+
+    const removed = order[1];
+    assert.equal((await request("DELETE", `/boards/${boardId}/albums/${removed}`)).status, 200);
+    assert.deepEqual(ids((await getBoard(boardId)).body.albums), order.filter(id => id !== removed));
+    await save(boardId, albums.find(album => album.albumId === removed));
+    const rejoined = await getBoard(boardId);
+    assert.deepEqual(ids(rejoined.body.albums), [...order.filter(id => id !== removed), removed]);
+    assert.equal(new Set(ids(rejoined.body.albums)).size, albums.length);
+    assert.equal(await BoardItem.countDocuments({ boardId: internal._id }), albums.length);
+    // The next permutation compares against the new membership timestamps.
+    membership = await BoardItem.find({ boardId: internal._id }).sort({ _id: 1 }).lean();
+  }
+});
+
 integration("a remove racing a reorder drawn before it yields exactly one 409", async () => {
   const boardId = await createBoard();
   for (const album of albums) await save(boardId, album);

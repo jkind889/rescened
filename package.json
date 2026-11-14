@@ -11,6 +11,7 @@
     "benchmark:explain": "node benchmarks/run.cjs --mode explain",
     "benchmark:report": "node benchmarks/report.cjs",
     "test": "node --test",
+    "verify": "node scripts/verify.js",
     "test:integration": "node scripts/runIntegrationTests.js",
     "test:catalog-live": "RUN_LIVE_CATALOG_FETCH=true node --test tests/listenBrainzCatalog.live.test.js",
     "start": "node server.js",
@@ -43,7 +44,9 @@
     "review:clear-episodes": "node scripts/clearReviewEpisodes.js",
     "test:listening-study-live": "RUN_LIVE_LASTFM_STUDY=true node scripts/lastfmStudy.js",
     "worktree": "node scripts/worktree.cjs",
-    "test:worktree": "node --test tests/worktree.test.js"
+    "test:worktree": "node --test tests/worktree.test.js",
+    "test:browser": "node scripts/runBrowserTests.js",
+    "check:architecture": "node scripts/checkArchitecture.js"
   },
   "repository": {
     "type": "git",
@@ -59,18 +62,20 @@
   "dependencies": {
     "@clerk/express": "^2.1.21",
     "ajv": "^8.20.0",
-    "compression": "^1.8.1",
+    "compression": "^1.8.2",
     "cors": "^2.8.6",
     "dotenv": "^17.4.1",
     "express": "^5.2.1",
     "mongodb": "^7.2.0",
-    "mongoose": "^9.6.2",
+    "mongoose": "^9.11.4",
     "rate-limiter-flexible": "^11.2.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
   "devDependencies": {
+    "espree": "10.4.0",
     "mongodb-memory-server": "^10.4.3",
-    "nodemon": "^3.1.14"
+    "nodemon": "^3.1.14",
+    "playwright": "1.58.2"
   }
 }

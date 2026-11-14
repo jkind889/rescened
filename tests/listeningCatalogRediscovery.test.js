@@ -85,8 +85,12 @@ function harness(t) {
   const scan = (override = {}) => scheduleCatalogRediscoveryJobs({ env, state, clock: () => now, ...override });
   const addAlbum = (fields = {}) => {
     // Unique IDs within the same second are distinct publication observations.
-    const id = new mongoose.Types.ObjectId(); const bytes = id.id;
-    bytes.writeUInt32BE(Math.floor(now.getTime() / 1000), 0);
+    // BSON may return a copy from ObjectId.id; construct from the changed bytes.
+    const bytes = new mongoose.Types.ObjectId().id;
+    const seconds = Math.floor(now.getTime() / 1000);
+    bytes.writeUInt32BE(seconds, 0);
+    const id = new mongoose.Types.ObjectId(bytes);
+    assert.equal(id.getTimestamp().getTime(), seconds * 1000);
     const row = { _id: id, albumId: crypto.randomUUID(), title: "Album", artistDisplayName: "Artist", artistCredits: [], ...fields };
     albums.push(row); return row;
   };

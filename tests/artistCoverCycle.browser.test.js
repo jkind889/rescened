@@ -1,6 +1,6 @@
 // Explicit offline browser regression for the artist header cover cycle.
 // Uses installed Playwright when requested (RUN_FRONTEND_BROWSER_TESTS=true,
-// optionally PLAYWRIGHT_MODULE and PLAYWRIGHT_CHROMIUM_EXECUTABLE). Images
+// optionally PLAYWRIGHT_CHROMIUM_EXECUTABLE for direct invocation). Images
 // are answered by route stubs and time is controlled by Playwright's clock,
 // so no API server, database, provider, or real wait is involved.
 const test = require('node:test');
@@ -16,10 +16,10 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 const covers = (n) => Array.from({ length: n }, (_, i) => ({ albumId: `album-${i + 1}`, title: `Release ${i + 1}`, releaseYear: 2000 + i, cover: `https://img.test/${i + 1}.png` }));
 
 test('the cover cycle advances, pauses, respects reduced motion, and drops broken covers', { skip: enabled ? false : 'Set RUN_FRONTEND_BROWSER_TESTS=true with an available Playwright installation', timeout: 120000 }, async () => {
-  const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+  const { chromium } = require('./browser-support/chromium');
   const frontend = path.resolve(__dirname, '../frontend');
   const requireFrontend = createRequire(path.join(frontend, 'package.json'));
-  const { createServer } = await import(pathToFileURL(requireFrontend.resolve('vite')).href);
+  const { createFixtureServer } = require('./browser-support/server');
   const { default: react } = await import(pathToFileURL(requireFrontend.resolve('@vitejs/plugin-react')).href);
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'rescened-cover-cycle-browser-'));
   let server; let browser;
@@ -30,10 +30,10 @@ import ArtistCoverCycle from ${JSON.stringify(path.join(frontend, 'src/features/
 import ${JSON.stringify(path.join(frontend, 'src/features/artists/ArtistPage.css'))};
 const covers = JSON.parse(new URLSearchParams(location.search).get('covers'));
 createRoot(document.getElementById('root')).render(<React.StrictMode><MemoryRouter><ArtistCoverCycle artistName="Fixture Artist" covers={covers} /></MemoryRouter></React.StrictMode>);`);
-    server = await createServer({ configFile: false, root: directory, envDir: false, plugins: [react()],
+    server = await createFixtureServer({ configFile: false, root: directory, envDir: false, plugins: [react()],
       resolve: { alias: { react: path.dirname(requireFrontend.resolve('react/package.json')), 'react-dom': path.dirname(requireFrontend.resolve('react-dom/package.json')), 'react-router-dom': path.dirname(requireFrontend.resolve('react-router-dom/package.json')) } },
       // No HMR or file watcher: a late watcher event can re-run the entry module and trigger a duplicate createRoot warning.
-      server: { host: '127.0.0.1', port: 0, hmr: false, watch: null, fs: { allow: [directory, frontend, await fs.realpath(path.join(frontend, 'node_modules'))] } },
+      server: { hmr: false, watch: null, fs: { allow: [directory, frontend, await fs.realpath(path.join(frontend, 'node_modules'))] } },
     });
     await server.listen();
     const origin = `http://127.0.0.1:${server.httpServer.address().port}`;

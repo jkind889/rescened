@@ -1,0 +1,94 @@
+name: Verification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Full gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      RUN_LIVE_CATALOG_FETCH: 'false'
+      RUN_LIVE_LASTFM_STUDY: 'false'
+      MONGOMS_RUNTIME_DOWNLOAD: 'false'
+      MONGOMS_MD5_CHECK: 'true'
+    steps:
+      - name: Check out code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      # PR code is untrusted: no lifecycle scripts, saved credentials, or caches.
+      - name: Install locked backend dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install locked frontend dependencies
+        run: npm --prefix frontend ci --ignore-scripts --no-audit --no-fund
+
+      # Only preparation may download. Use the locked harness's default version
+      # and normal cache path, which the offline gate will also resolve.
+      - name: Prepare disposable MongoDB binary
+        timeout-minutes: 5
+        env:
+          MONGOMS_RUNTIME_DOWNLOAD: 'true'
+        run: |
+          node <<'NODE'
+          const { MongoBinary } = require('mongodb-memory-server');
+          MongoBinary.getPath({ checkMD5: true }).then(
+            (binary) => console.log(`Prepared MongoDB binary: ${binary}`),
+            (error) => { console.error(error); process.exitCode = 1; },
+          );
+          NODE
+
+      - name: Run full verification gate
+        run: npm run verify
+
+  browser:
+    name: Browser fixtures
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      # Keep both lockfile installs script-free; provisioning is explicit below.
+      - name: Install locked backend dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install locked frontend dependencies
+        run: npm --prefix frontend ci --ignore-scripts --no-audit --no-fund
+
+      # Invoke the installed, locked CLI directly: never download a fallback CLI.
+      # --with-deps uses apt/sudo only on this disposable Ubuntu runner.
+      - name: Prepare pinned Chromium and Linux dependencies
+        timeout-minutes: 5
+        run: env -i HOME="$HOME" PATH="$PATH" node node_modules/playwright/cli.js install --with-deps chromium
+
+      - name: Run browser fixtures
+        timeout-minutes: 5
+        run: env -i HOME="$HOME" PATH="$PATH" npm run test:browser
