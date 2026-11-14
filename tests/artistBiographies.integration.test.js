@@ -315,6 +315,62 @@ integration("a refresh that raced a moderator command is discarded and the comma
   assert.deepEqual([refreshed.moderation.suppressed, refreshed.accepted.article.revisionId], [true, F.REVISION + 3]);
 });
 
+test("suppression survives an in-flight refresh, command retries, and later content/identity refreshes", { skip: !enabled, timeout: 15000 }, async () => {
+  await publish();
+  const original = await record();
+  assert.ok((await call("GET", `/artists/${artist.artistId}/biography`)).body.biography, "the fixture starts publicly visible");
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const changedSources = (pause = false) => fakeSources({
+    page: async () => {
+      if (pause) { entered.resolve(); await release.promise; }
+      return F.wpPage({ lastrevid: F.REVISION + 1 });
+    },
+    parse: url => F.wpParse({ revid: Number(url.searchParams.get("oldid")), html: F.LEAD_HTML.replace("are an English", "are a celebrated") }),
+  });
+  const later = days => new Date(NOW.getTime() + days * 86400000);
+  const refreshing = refreshBiographies({ sources: changedSources(true), now: later(8) });
+  const path = `/moderation/artist-biographies/${artist.artistId}/suppress`;
+  const body = { expectedRevision: original.revision, reason: "Identity under review" };
+  let barrierTimeout;
+  try {
+    // Bound a missing source call as well as the complete test; always release.
+    await Promise.race([entered.promise, new Promise((_, reject) => {
+      barrierTimeout = setTimeout(() => reject(new Error("Refresh never reached the fixture barrier")), 5000);
+    })]); // Refresh has read its snapshot and is awaiting fixture data.
+    const suppressed = await call("POST", path, { user: "user_mod", body });
+    assert.equal(suppressed.status, 200, JSON.stringify(suppressed.body));
+  } finally {
+    clearTimeout(barrierTimeout);
+    release.resolve();
+    await refreshing;
+  }
+  assert.deepEqual((await refreshing).map(row => row.result), ["stale"]);
+  const committed = await record();
+  assert.equal(committed.revision, original.revision + 1);
+  assert.equal(committed.moderation.suppressed, true);
+  assert.equal((await call("GET", `/artists/${artist.artistId}/biography`)).body.biography, null);
+  assert.deepEqual(committed.accepted, original.accepted);
+  assert.deepEqual(committed.history.slice(0, -1), original.history);
+  assert.equal(committed.history.at(-1).action, "suppress");
+  // The suppression committed but its caller may have lost the response.
+  for (const width of [1, 3]) {
+    const retries = await Promise.all(Array.from({ length: width }, () => call("POST", path, { user: "user_mod", body })));
+    assert.deepEqual(retries.map(row => [row.status, row.body.code]), Array.from({ length: width }, () => [409, "BIOGRAPHY_REVISION_CONFLICT"]));
+    assert.deepEqual(await record(), committed, "failed retries append no audit and change no revision");
+  }
+  for (const [day, mode] of [[9, "content"], [40, "resolve"]]) {
+    const rows = await refreshBiographies({ sources: changedSources(), now: later(day) });
+    assert.deepEqual(rows.map(row => [row.mode, row.result]), [[mode, "written"]]);
+    const stored = await record();
+    assert.deepEqual(stored.moderation, committed.moderation);
+    assert.deepEqual(stored.history.filter(event => event.actorType === "moderator"), committed.history.filter(event => event.actorType === "moderator"));
+    assert.equal(stored.accepted.article.revisionId, F.REVISION);
+    assert.equal(stored.pendingRevision.article.revisionId, F.REVISION + 1);
+    assert.equal((await call("GET", `/artists/${artist.artistId}/biography`)).body.biography, null);
+  }
+});
+
 integration("moderator corrections, rejection, and their audit trail survive refresh", async () => {
   await publish();
   const path = `/moderation/artist-biographies/${artist.artistId}`;

@@ -58,3 +58,13 @@ The scan covers JavaScript/JSX under `frontend/src` and `routes` recursively. Di
 Computed module specifiers, parse errors, missing scan roots, and source symlinks fail closed. Ordinary comments and strings are not interpreted as imports. There are no production-code exceptions needed by the current checkout. The checker uses CommonJS syntax for routes and ES modules/JSX for frontend source.
 
 These are direct syntactic/lexical boundaries, not whole-program analysis: aliases, indirect/re-exported dependencies, custom import resolvers, computed network access, new client packages, and arbitrary persistence helpers are not exhaustively traced. The two route restrictions do not prove that a command calls the right service, authenticates a viewer, enforces a feature flag, conditions a write, or uses a transaction. Authorization/concurrency behavior still needs route/service review and executable tests. This milestone adds architecture-tooling regressions, not a new invariant-test or security-audit suite.
+
+## Deterministic persistence invariants
+
+The existing integration gate also runs these bounded invariants against disposable Mongo replica sets, with synthetic biography sources and no live provider calls:
+
+- `tests/moderation.integration.test.js`: discard a committed catalog-correction response, retry in bursts of 1/3/2, and compare persisted catalog/submission records, revision, audit history, notifications, and row counts. A retry after a later correction must preserve that later correction.
+- `tests/boardOrder.integration.test.js`: exercise all 24 permutations of four albums through the API; check persisted order, unchanged membership/saved times, previews, stale-retry conflicts, and remove/rejoin order after each permutation.
+- `tests/artistBiographies.integration.test.js`: pause a real refresh at a controlled fixture-source barrier, suppress while it waits, and check stale-write rejection, duplicate-command conflicts without extra audits, and continued public suppression through later content and identity refreshes.
+
+These extend existing concurrency tests; they do not exhaust transaction schedules, arbitrary board sizes, network failure modes, or browser/auth flows. The discarded-response case models a committed write whose caller received no usable response; it does not inject a Mongo driver commit-acknowledgement failure. Run them via `npm run test:integration` (or `npm run verify`); ordinary `npm test` skips their Mongo cases.

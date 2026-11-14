@@ -369,6 +369,46 @@ async function correctionApprovalTest() {
   assert.deepEqual(updatedSubmission.moderationHistory.at(-1).application.unappliedFields, ["label"]);
 }
 
+// Simulate a committed response lost to the caller, then burst retries with
+// the original decision. Reload persisted state rather than trusting responses.
+async function ambiguousCorrectionRetryTest() {
+  const target = await AlbumCatalog.create({
+    albumId: crypto.randomUUID(), title: "Retry correction target",
+    artistDisplayName: "Retry Artist", catalogSource: "manual", catalogRevision: 1,
+  });
+  const submission = await createCorrection(target, { title: "Reviewed correction" });
+  const command = { submissionId: submission.submissionId, actorUserId: "first-moderator", applyFields: ["title"], reason: "Reviewed" };
+  await approveAlbumSubmission(command); // Commit succeeded; deliberately discard its response.
+  const snapshot = async () => ({
+    album: await AlbumCatalog.findById(target._id).lean(),
+    submission: await AlbumSubmission.findById(submission._id).lean(),
+    notifications: await Notification.find({ submissionId: submission._id }).sort({ _id: 1 }).lean(),
+    albumCount: await AlbumCatalog.countDocuments(),
+    submissionCount: await AlbumSubmission.countDocuments(),
+  });
+  const committed = await snapshot();
+  assert.equal(committed.album.catalogRevision, 2);
+  assert.equal(committed.submission.moderationHistory.filter(event => event.action === "approved").length, 1);
+  assert.equal(committed.notifications.length, 1);
+  for (const width of [1, 3, 2]) {
+    const retries = await Promise.all(Array.from({ length: width }, (_, index) =>
+      approveAlbumSubmission({ ...command, actorUserId: `retry-moderator-${index}` })));
+    for (const retry of retries) {
+      assert.equal(retry.idempotent, true);
+      assert.equal(retry.album.albumId, target.albumId);
+    }
+    assert.deepEqual(await snapshot(), committed, `retry burst ${width} must not alter committed records or audits`);
+  }
+  // An old retry must not overwrite a later, separately approved correction.
+  const next = await createCorrection(await AlbumCatalog.findById(target._id), { title: "Later correction" });
+  await approveAlbumSubmission({ submissionId: next.submissionId, actorUserId: "later-moderator", applyFields: ["title"] });
+  const later = await snapshot();
+  assert.equal(later.album.catalogRevision, 3);
+  assert.equal(later.album.title, "Later correction");
+  await approveAlbumSubmission(command);
+  assert.deepEqual(await snapshot(), later);
+}
+
 async function staleCorrectionTest() {
   const target = await AlbumCatalog.create({
     albumId: crypto.randomUUID(),
@@ -439,12 +479,14 @@ if (integrationEnabled) {
   test("approval rollback leaves no public catalog row", rollbackTest);
   test("submission query updates preserve status and append-only invariants", modelInvariantTest);
   test("catalog corrections apply selected fields and record the result revision", correctionApprovalTest);
+  test("ambiguous correction success and burst retries preserve records, revision, and audits", ambiguousCorrectionRetryTest);
   test("stale catalog corrections are rejected without changing the submission", staleCorrectionTest);
   test("corrections apply to legacy albums without a stored catalog revision", legacyRevisionCorrectionTest);
   test("bulk approval commits eligible items and leaves failures untouched", bulkPartialFailureTest);
   test("bulk approval rechecks duplicates inside each item's transaction", bulkSameFingerprintTest);
   test("bulk and single approval of one suggestion publish one album and one notification", bulkConcurrentWithSingleTest);
 } else {
+  test("ambiguous correction success and burst retries preserve records, revision, and audits", { skip: "Set RUN_MONGO_INTEGRATION=true in an environment that permits local Mongo processes" }, () => {});
   test("transactional approval publishes a usable catalog album and keeps pending data private", { skip: "Set RUN_MONGO_INTEGRATION=true in an environment that permits local Mongo processes" }, () => {});
   test("concurrent approval retries are idempotent and create one album", { skip: "Set RUN_MONGO_INTEGRATION=true in an environment that permits local Mongo processes" }, () => {});
   test("approval persists mocked Cover Art Archive resolution and exact references", { skip: "Set RUN_MONGO_INTEGRATION=true in an environment that permits local Mongo processes" }, () => {});
