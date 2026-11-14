@@ -100,7 +100,7 @@ ReScened is a place to keep track of the music you listen to, share reviews, org
 - MongoDB transaction, concurrency, import, approval, backfill, or migration changes: `npm run test:integration` in addition to focused tests.
 - Catalog identity, provider, importer, search, or album-bearing surface changes: `npm run check:catalog-contract`.
 - Frontend changes: `npm --prefix frontend run lint` and `npm --prefix frontend run build`.
-- A full release/readiness gate is: `npm test`, `npm run test:integration`, `npm run check:catalog-contract`, `npm --prefix frontend run lint`, and `npm --prefix frontend run build`.
+- Run the full release/readiness gate with `npm run verify`; see [verification guidance](docs/VERIFICATION.md) for prerequisites and result semantics. It wraps `npm test`, `npm run test:integration`, `npm run check:catalog-contract`, `npm --prefix frontend run lint`, and `npm --prefix frontend run build`.
 - Do not treat a dated checked-in report, old test count, or successful server startup as proof of the current database state. When running locally, `/health` must report `status: "ok"`, not `degraded`.
 
 ## Documentation

@@ -42,7 +42,7 @@ const files = [
   "tests/genreVocabulary.integration.test.js",
   "tests/genreBrowse.integration.test.js",
 ];
-const result = spawnSync(process.execPath, ["--test", ...files], {
+const result = spawnSync(process.execPath, ["--test", ...(process.argv.includes("--verify") ? ["--test-reporter=tap"] : []), ...files], {
   stdio: "inherit",
   env: { ...process.env, RUN_MONGO_INTEGRATION: "true" },
 });
