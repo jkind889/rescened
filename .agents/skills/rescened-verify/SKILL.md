@@ -59,7 +59,7 @@ npm --prefix frontend run build
 
 The catalog-contract stage also enforces the targeted AST architecture rules in `scripts/checkArchitecture.js`; `npm run check:architecture` runs those rules alone. See [their scope and limitations](../../../docs/VERIFICATION.md#targeted-architecture-rules). Static boundaries do not prove authorization or concurrency behavior.
 
-For explicit offline rendered component coverage, run `npm run test:browser` after preparing its pinned Chromium; see the coverage and gaps in [verification guidance](../../../docs/VERIFICATION.md#explicit-synthetic-browser-suite). This is separate from the aggregate gate and CI.
+For explicit offline rendered component coverage, run `npm run test:browser` after preparing its pinned Chromium; see the coverage and gaps in [verification guidance](../../../docs/VERIFICATION.md#explicit-synthetic-browser-suite). This is separate from the aggregate gate; the Verification workflow runs it in its independent Browser fixtures job. Use the installed `node node_modules/playwright/cli.js` for provisioning, not a fallback npx/latest CLI. Hosted Linux provisioning must be verified by the published workflow.
 
 The MongoDB integration runner enables `RUN_MONGO_INTEGRATION=true` and exercises the replica-set suites listed in [the runner](../../../scripts/runIntegrationTests.js). The aggregate gate disables runtime binary downloads and requires an already cached `mongodb-memory-server` binary. The standalone integration command may provision one on its first run; provisioning is separate from offline verification. If provisioning is unavailable, report an infrastructure-blocked check rather than a product pass or a product regression.
 

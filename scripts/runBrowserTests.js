@@ -11,7 +11,7 @@ function prerequisites(cwd, executable) {
     if (!fs.existsSync(path.join(cwd, dir, 'node_modules'))) throw new Error(`Install locked ${dir} dependencies first.`);
     if (fs.readdirSync(path.join(cwd, dir)).some(name => /^\.env(?:\.|$)/.test(name) && !/\.(example|sample|template)$/.test(name))) throw new Error(`Refusing ${dir}/.env files.`);
   }
-  if (!fs.existsSync(executable)) throw new Error('Missing pinned Chromium. Prepare explicitly with npx playwright install chromium; no automatic download or skip.');
+  if (!fs.existsSync(executable)) throw new Error('Missing pinned Chromium. Prepare explicitly with node node_modules/playwright/cli.js install chromium; no automatic download or skip.');
 }
 // Resolve in a fresh process: Playwright caches browser discovery on import.
 // Preflight and test execution must see the exact same sanitized environment.
