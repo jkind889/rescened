@@ -61,7 +61,7 @@ test("draft rows restore with identity; legacy or malformed credit drafts are ig
   assert.equal(creditRowsFromDraft("Tyler, The Creator"), null, "the old comma-joined draft cannot be split reliably");
   assert.equal(creditRowsFromDraft([]), null);
   assert.equal(creditRowsFromDraft([{ role: "main" }]), null);
-  assert.equal(creditRowsFromDraft(Array.from({ length: 21 }, () => ({ name: "x" }))), null);
+  assert.equal(creditRowsFromDraft(Array.from({ length: 21 }, (_, i) => ({ name: `Artist ${i + 1}` }))).length, 21, "a draft of a longer album keeps every row");
   assert.deepEqual(creditsFromRows(creditRowsFromDraft([{ name: "X", role: 7, identity: { name: "X", artistId: "  " } }])), [{ name: "X", role: "main" }]);
 });
 
@@ -72,12 +72,23 @@ test("rows are validated before submission", async () => {
   assert.deepEqual(creditRowProblems([creditRow({ name: "A" }), creditRow({ name: "  " })]), ["Artist 2 needs a name."]);
   assert.deepEqual(creditRowProblems([creditRow({ name: "x".repeat(201) })]), ["Artist 1 name must be 200 characters or fewer."]);
   assert.deepEqual(creditRowProblems([creditRow({ name: "A", role: "r".repeat(81) })]), ["Artist 1 role must be 80 characters or fewer."]);
-  assert.equal(creditRowProblems(Array.from({ length: 21 }, () => creditRow({ name: "A" }))).length, 1);
+  const tooMany = creditRowProblems(Array.from({ length: 21 }, () => creditRow({ name: "A" })));
+  assert.equal(tooMany.length, 1);
+  assert.match(tooMany[0], /at most 20 artist credits, and this form has 21/);
 });
 
-test("the correction form no longer joins or splits credit names", () => {
+test("the correction form no longer uses the comma splitter", () => {
   const form = fs.readFileSync(path.join(__dirname, "../frontend/src/Components/Community/CorrectionForm.jsx"), "utf8");
   assert.doesNotMatch(form, /creditsFromNames/);
-  assert.doesNotMatch(form, /\.join\(", "\)/);
   assert.doesNotMatch(source, /split\(","\)/);
+});
+
+test("an album with more than twenty credits loads every credit and is blocked, not truncated", async () => {
+  const { creditRowsFromCredits, creditRowProblems, creditsFromRows, MAX_CREDIT_ROWS } = await helpers;
+  const stored = Array.from({ length: MAX_CREDIT_ROWS + 1 }, (_, i) => ({ name: `Artist ${i + 1}`, role: i === 20 ? "featured" : "main", ...(i === 20 ? { artistId: ARTIST_ID } : {}) }));
+  const rows = creditRowsFromCredits(stored);
+  assert.equal(rows.length, 21, "no loaded credit is dropped");
+  assert.deepEqual(creditsFromRows(rows), stored, "the last credit keeps its role and identity");
+  assert.equal(creditRowProblems(rows).length, 1, "the submission limit is reported, so the credits are never sent truncated");
+  assert.deepEqual(creditRowProblems(rows.slice(0, 20)), [], "only an explicit removal gets under the limit");
 });

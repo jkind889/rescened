@@ -238,6 +238,70 @@ window.__unmount = () => root.render(null);
       });
     });
 
+    await t.test('an album with 21 credits keeps all of them and blocks submission instead of truncating', async () => {
+      const many = { ...album, artistCredits: Array.from({ length: 21 }, (_, i) => ({ name: `Artist, ${i + 1}`, role: i === 20 ? 'featured' : 'main', ...(i === 20 ? { artistId: GUEST } : {}) })) };
+      const longAlbum = { initialValue: { targetAlbumId: ALBUM_ID, targetAlbum: many }, draftKey: '' };
+      await fixture(longAlbum, async page => {
+        await group(page, 'Artists').check();
+        assert.equal((await names(page)).length, 21, 'every credit loads');
+        assert.equal(await page.getByRole('textbox', { name: 'Artist 21 name' }).inputValue(), 'Artist, 21');
+        assert.equal(await page.getByRole('textbox', { name: 'Artist 21 role' }).inputValue(), 'featured');
+        await page.getByText(/This album has 21 artist credits\. A correction can carry at most 20/).waitFor();
+        assert.equal(await page.getByRole('button', { name: '+ Add artist credit' }).isDisabled(), true);
+        await send(page);
+        await page.getByText(/at most 20 artist credits, and this form has 21/).waitFor();
+        assert.deepEqual(await submits(page), [], 'nothing is submitted with a credit silently missing');
+        // Only an explicit removal gets under the limit.
+        await page.getByRole('button', { name: 'Remove artist 21' }).click();
+        await page.getByRole('button', { name: 'Send correction for review' }).click();
+        const [payload] = await submits(page);
+        assert.equal(payload.proposedChanges.artists.artistCredits.length, 20);
+        assert.equal(payload.proposedChanges.artists.artistCredits[19].name, 'Artist, 20');
+      });
+      // The limit applies to the Artists group only; other groups are unaffected.
+      await fixture(longAlbum, async page => {
+        await group(page, 'Label').check();
+        await page.getByRole('textbox', { name: /Label/ }).fill('Odd Future');
+        await send(page);
+        assert.deepEqual((await submits(page))[0].proposedChanges, { label: 'Odd Future' });
+      });
+      // A saved draft of the long album keeps all rows too.
+      const draftKey = 'rescened:suggestion-draft:v1:fixture:long';
+      await fixture({ ...longAlbum, draftKey }, async page => {
+        await group(page, 'Artists').check();
+        await page.getByRole('textbox', { name: 'Artist 1 name' }).fill('Edited, First');
+        await page.waitForTimeout(700);
+        await page.evaluate(() => window.__unmount());
+        await page.evaluate(props => window.__mount(props), { ...longAlbum, draftKey });
+        await page.getByText(/Restored your unsent draft/).waitFor();
+        assert.equal((await names(page)).length, 21);
+        assert.equal(await page.getByRole('textbox', { name: 'Artist 1 name' }).inputValue(), 'Edited, First');
+      });
+    });
+
+    await t.test('a legacy draft with credit edits says they were not restored; an unedited one does not', async () => {
+      const keyFor = name => `rescened:suggestion-draft:v1:fixture:${name}`;
+      async function restoreLegacy(page, name, credits) {
+        await page.evaluate(({ key, value }) => localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value })), {
+          key: keyFor(name), value: { enabledFields: ['artists'], values: { artistDisplayName: album.artistDisplayName, artistCredits: credits }, source },
+        });
+        await page.evaluate(() => window.__unmount());
+        await page.evaluate(props => window.__mount(props), { ...fresh, draftKey: keyFor(name) });
+        await page.getByText(/Restored your unsent draft/).waitFor();
+      }
+      await fixture(fresh, async page => {
+        await restoreLegacy(page, 'legacy-edited', 'Tyler, The Creator, Someone New');
+        await page.getByText(/artist credit edits in that draft could not be restored/).waitFor();
+        assert.deepEqual(await names(page), ['Tyler, The Creator', 'Guest', 'Unlinked']);
+        await page.getByRole('button', { name: 'Discard draft' }).click();
+        assert.equal(await page.getByText(/could not be restored/).count(), 0, 'discarding clears the note');
+      });
+      await fixture(fresh, async page => {
+        await restoreLegacy(page, 'legacy-same', 'Tyler, The Creator, Guest, Unlinked');
+        assert.equal(await page.getByText(/could not be restored/).count(), 0, 'no edits were lost, so nothing is disclosed');
+      });
+    });
+
     await t.test('credit rows fit a phone width', async () => {
       await fixture(fresh, async page => {
         await group(page, 'Artists').check();

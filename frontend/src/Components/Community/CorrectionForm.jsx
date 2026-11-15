@@ -68,18 +68,32 @@ function initialSource(initialValue) {
   return initialValue?.supportingSources?.[0] || DEFAULT_SOURCE;
 }
 
+// An old comma-joined credits draft that only repeats the current names holds no edits.
+function isUnchangedCreditText(text, rows) {
+  return typeof text === "string" && text.trim() === rows.map((row) => row.name).join(", ");
+}
+
 // A stored draft restores only the field groups it selected; everything else
 // comes from the album as it is now.
 function restoredState(initialValue, stored) {
   const values = currentValues(initialValue);
   if (!stored || typeof stored !== "object") {
-    return { enabledFields: initialFields(initialValue), values, source: initialSource(initialValue) };
+    return { enabledFields: initialFields(initialValue), values, source: initialSource(initialValue), creditsNotRestored: false };
   }
+  let creditsNotRestored = false;
   const fields = (Array.isArray(stored.enabledFields) ? stored.enabledFields : []).filter((field) => FIELD_ORDER.includes(field));
   for (const field of fields) {
     for (const key of FIELD_VALUE_KEYS[field]) {
       if (key === "artistCredits") {
-        values.artistCredits = creditRowsFromDraft(stored.values?.artistCredits) || values.artistCredits;
+        const storedCredits = stored.values?.artistCredits;
+        const restoredCredits = creditRowsFromDraft(storedCredits);
+        if (restoredCredits) {
+          values.artistCredits = restoredCredits;
+        } else if (storedCredits !== undefined && !isUnchangedCreditText(storedCredits, values.artistCredits)) {
+          // An older draft stored the credits as one comma-joined string, which
+          // cannot be split reliably. The form says so instead of dropping edits silently.
+          creditsNotRestored = true;
+        }
       } else if (typeof stored.values?.[key] === "string") {
         values[key] = stored.values[key];
       }
@@ -89,6 +103,7 @@ function restoredState(initialValue, stored) {
   return {
     enabledFields: new Set(fields),
     values,
+    creditsNotRestored,
     source: {
       type: typeof source.type === "string" && source.type ? source.type : DEFAULT_SOURCE.type,
       url: typeof source.url === "string" ? source.url : "",
@@ -126,6 +141,7 @@ export function CorrectionForm({
   const [storedDraft] = useState(() => readDraft(draftKey));
   const [initialState] = useState(() => restoredState(initialValue, storedDraft?.value));
   const [restoredAt, setRestoredAt] = useState(storedDraft?.savedAt || null);
+  const [creditsNotRestored, setCreditsNotRestored] = useState(initialState.creditsNotRestored);
   const [enabledFields, setEnabledFields] = useState(initialState.enabledFields);
   const [values, setValues] = useState(initialState.values);
   const [source, setSource] = useState(initialState.source);
@@ -185,6 +201,7 @@ export function CorrectionForm({
     setSource(start.source);
     setClientError("");
     setRestoredAt(null);
+    setCreditsNotRestored(false);
   }
 
   function submit(event) {
@@ -253,7 +270,12 @@ export function CorrectionForm({
 
   return (
     <form className="community-form correction-form" id={formId} onSubmit={submit} noValidate>
-      <DraftNotice savedAt={restoredAt} onDiscard={discardDraft} disabled={isSubmitting} />
+      <DraftNotice
+        savedAt={restoredAt}
+        onDiscard={discardDraft}
+        disabled={isSubmitting}
+        note={creditsNotRestored ? "Your artist credit edits in that draft could not be restored, so the credits shown are the current ones. Re-enter any changes you still want." : ""}
+      />
       <fieldset className="correction-fieldset">
         <legend>Choose the catalog fields to correct</legend>
         <p className="correction-help">Each selected group is reviewed independently. Unselected fields remain exactly as they are.</p>
@@ -278,6 +300,11 @@ export function CorrectionForm({
             <label htmlFor={`${fieldPrefix}-artist`}>Artist display name</label>
             <input id={`${fieldPrefix}-artist`} onChange={(event) => updateValue("artistDisplayName", event.target.value)} value={values.artistDisplayName} />
           </div>
+          {values.artistCredits.length > MAX_CREDIT_ROWS ? (
+            <p className="community-message community-message-error" role="status">
+              This album has {values.artistCredits.length} artist credits. A correction can carry at most {MAX_CREDIT_ROWS}, and every credit is kept here until you remove it. Deselect Artists to correct other fields without changing credits.
+            </p>
+          ) : null}
           <p className="correction-help">One row per credited artist, so a name with a comma stays a single credit. Changing a name removes its link to an artist.</p>
           <div className="suggestion-form-repeater">
             {values.artistCredits.map((credit, index) => {
