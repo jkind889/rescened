@@ -47,6 +47,8 @@ This is rendered component integration with synthetic callbacks, not full applic
 
 Each run prints a unique temporary artifact directory containing TAP output, Playwright traces, final screenshots, and DOM snapshots from fixture contexts, including assertion failures before cleanup. Use `node node_modules/playwright/cli.js show-trace /path/to/trace.zip` to inspect a trace. Artifacts remain outside the checkout; remove them when no longer needed. CI retains console/TAP output in the job log but does not upload traces, screenshots or DOM files; temporary artifacts disappear with the hosted runner. Missing-browser failures occur before browser artifacts can be captured.
 
+`npm run preview:artist-suggestions` serves a synthetic, fixture-backed preview of the artist suggestion pages for manual inspection; it is not part of either gate and proves nothing about the real server.
+
 Browser checks remain separate from `npm run verify`; the GitHub workflow runs them in the independent Browser fixtures job. A green aggregate job does not imply a green browser job. Run this explicit command locally for relevant UI changes and report its result separately. Normal `npm test` keeps the opt-in fixtures skipped.
 
 SIGINT/SIGTERM stops the runner's own test process group on POSIX, with a five-second escalation to SIGKILL; unrelated previews are untouched. Windows only guarantees termination of the immediate child, as with the aggregate runner. An interrupted run is a failure and may have only partial artifacts.

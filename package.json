@@ -46,7 +46,8 @@
     "worktree": "node scripts/worktree.cjs",
     "test:worktree": "node --test tests/worktree.test.js",
     "test:browser": "node scripts/runBrowserTests.js",
-    "check:architecture": "node scripts/checkArchitecture.js"
+    "check:architecture": "node scripts/checkArchitecture.js",
+    "preview:artist-suggestions": "node scripts/artistSuggestionsPreview.cjs"
   },
   "repository": {
     "type": "git",
