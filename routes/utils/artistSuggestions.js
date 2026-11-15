@@ -128,15 +128,29 @@ async function prepareStoredProposals(proposals, { previous = null } = {}) {
   }
 }
 
-// Digest of the normalized client input for request-key comparison. It
-// excludes server-prepared observations, which can differ between attempts.
-function creationDigest({ payload, work, editionPreviewId }) {
+// Client-side normalization only: strings trimmed and NFC-normalized at any
+// depth, so the digest does not depend on registry or provider data.
+function normalizedClientValue(value) {
+  if (typeof value === "string") return value.normalize("NFC").trim();
+  if (Array.isArray(value)) return value.map(normalizedClientValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, normalizedClientValue(entry)]));
+  }
+  return value;
+}
+
+// Digest of the normalized client input for request-key comparison. Every
+// part comes from the request itself (`clientPayload` is the database-free
+// normalizeSubmissionPayload result), never from hydrated registry names,
+// edition previews, or provider observations, which can change or expire
+// between attempts.
+function creationDigest({ clientPayload, work, editionPreviewId }) {
   return payloadDigest({
-    proposedMetadata: payload.proposedMetadata,
-    supportingSources: payload.supportingSources,
-    externalReferences: payload.externalReferences,
-    genreChanges: payload.genreChanges || null,
-    editionPreviewId: editionPreviewId || null,
+    proposedMetadata: clientPayload.proposedMetadata,
+    supportingSources: clientPayload.supportingSources,
+    externalReferences: clientPayload.externalReferences,
+    proposedGenres: clientPayload.proposedGenres === undefined ? null : normalizedClientValue(clientPayload.proposedGenres),
+    editionPreviewId: typeof editionPreviewId === "string" ? editionPreviewId.trim().toLowerCase() : null,
     artistProposals: work?.proposals || [],
     artistSelections: work?.selections || [],
   });

@@ -60,9 +60,59 @@ test("stored selections restore onto credit positions for a revision", async () 
   };
   const links = linksFromSubmission(source);
   assert.equal(links.length, 3, "out-of-range positions are ignored");
-  assert.deepEqual(links[1], { kind: "musicbrainz", artistMbid: MBID_B, name: "Guest Canonical", disambiguation: "US", type: "", country: "" });
-  assert.deepEqual(links[2], { kind: "community", canonicalName: "New Band", evidence: [{ url: "https://example.com/band" }] });
+  assert.deepEqual(links[1], { kind: "musicbrainz", proposalKey: "mb-1", artistMbid: MBID_B, name: "Guest Canonical", disambiguation: "US", type: "", country: "" });
+  assert.deepEqual(links[2], { kind: "community", proposalKey: "new-1", canonicalName: "New Band", evidence: [{ url: "https://example.com/band" }] });
   assert.deepEqual(artistRequestFields(links).artistSelections.map((selection) => selection.position), [0, 1, 2], "restored links resubmit unchanged");
+});
+
+test("an explicitly shared community proposal stays one proposal across a revision", async () => {
+  const { linksFromSubmission, artistRequestFields } = await load("features/artists/artistLinkPayload.js");
+  const source = {
+    proposedMetadata: { artistCredits: [{ name: "Band" }, { name: "Band (as remixer)" }, { name: "Band" }] },
+    artistProposals: [
+      { proposalKey: "shared", kind: "community", canonicalName: "Band", evidence: [{ url: "https://example.com/band", description: "" }] },
+      { proposalKey: "other", kind: "community", canonicalName: "Band", evidence: [{ url: "https://example.com/other-band", description: "" }] },
+    ],
+    artistSelections: [
+      { position: 0, kind: "proposal", proposalKey: "shared" },
+      { position: 1, kind: "proposal", proposalKey: "shared" },
+      { position: 2, kind: "proposal", proposalKey: "other" },
+    ],
+  };
+  const fields = artistRequestFields(linksFromSubmission(source));
+  assert.deepEqual(fields.artistProposals.map((proposal) => proposal.proposalKey), ["shared", "other"], "explicit sharing survives; a same-name proposal stays separate");
+  assert.deepEqual(fields.artistSelections, [
+    { position: 0, kind: "proposal", proposalKey: "shared" },
+    { position: 1, kind: "proposal", proposalKey: "shared" },
+    { position: 2, kind: "proposal", proposalKey: "other" },
+  ]);
+  const proposals = normalizeArtistProposals(fields.artistProposals);
+  assert.equal(normalizeArtistSelections(fields.artistSelections, proposals, { creditCount: 3 }).length, 3);
+});
+
+test("new picker choices never reuse a restored proposal key", async () => {
+  const { artistRequestFields } = await load("features/artists/artistLinkPayload.js");
+  const fields = artistRequestFields([
+    { kind: "community", canonicalName: "Picked", evidence: [{ url: "https://example.com/p" }] },
+    { kind: "community", proposalKey: "new-1", canonicalName: "Restored", evidence: [{ url: "https://example.com/r" }] },
+    { kind: "musicbrainz", artistMbid: MBID_A, name: "Picked MB" },
+    { kind: "musicbrainz", proposalKey: "mb-7", artistMbid: MBID_A, name: "Restored MB" },
+    { kind: "community", proposalKey: "mb-7", canonicalName: "Kind clash", evidence: [{ url: "https://example.com/k" }] },
+  ]);
+  assert.deepEqual(fields.artistProposals.map(({ proposalKey, kind }) => [proposalKey, kind]), [
+    ["new-2", "community"],
+    ["new-1", "community"],
+    ["mb-1", "musicbrainz"],
+    ["mb-7", "community"],
+  ], "fresh keys skip restored ones, and one MBID shares one proposal (mb-7 was not used by the shared MusicBrainz proposal, so the community link keeps it)");
+  assert.deepEqual(fields.artistSelections.map((selection) => selection.proposalKey), ["new-2", "new-1", "mb-1", "mb-1", "mb-7"]);
+  const clash = artistRequestFields([
+    { kind: "musicbrainz", proposalKey: "k", artistMbid: MBID_A, name: "MB" },
+    { kind: "community", proposalKey: "k", canonicalName: "Kind clash", evidence: [{ url: "https://example.com/k" }] },
+  ]);
+  assert.deepEqual(clash.artistProposals.map(({ proposalKey, kind }) => [proposalKey, kind]), [["k", "musicbrainz"], ["new-1", "community"]], "a key is never reused across kinds");
+  const proposals = normalizeArtistProposals(fields.artistProposals);
+  assert.equal(normalizeArtistSelections(fields.artistSelections, proposals, { creditCount: 5 }).length, 5);
 });
 
 test("SuggestionForm sends links beside unchanged credit wording, roles, and order", async () => {

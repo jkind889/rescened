@@ -14,6 +14,14 @@ const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
 const Artist = require("../models/Artist");
 const Notification = require("../models/Notification");
+const Preview = require("../models/ContributorEditionPreview");
+const { Genre, GenreEvent } = require("../models/Genre");
+const { validateGenreName } = require("../lib/genres/vocabulary");
+const editions = require("../lib/contributorEditions/service");
+const discovery = require("../lib/baselines/discovery");
+const { hashCandidateTracklist } = require("../lib/baselines/musicBrainz");
+const fs = require("node:fs");
+const path = require("node:path");
 const musicBrainz = require("../lib/musicBrainzSearch");
 const { artistMbidOf, newArtistDocument, newCommunityArtistDocument } = require("../lib/artists/identity");
 const { searchArtists } = require("../lib/artists/read");
@@ -28,6 +36,8 @@ const ENV = {
   COMMUNITY_SUBMISSIONS_ENABLED: "true",
   COMMUNITY_MODERATION_ENABLED: "true",
   ARTIST_SUGGESTIONS_ENABLED: "true",
+  GENRES_ENABLED: "true",
+  CONTRIBUTOR_EDITIONS_ENABLED: "true",
   MODERATOR_USER_IDS: MODERATOR,
 };
 const MBID_REGISTERED = "a74b1b7f-71a5-4011-9441-d0b5e4122711";
@@ -119,7 +129,7 @@ test.before(async () => {
   if (!enabled) return;
   replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(replSet.getUri(), { dbName: "rescened_artist_suggestions" });
-  await Promise.all([AlbumCatalog, AlbumSubmission, Artist, Notification].map((model) => model.syncIndexes()));
+  await Promise.all([AlbumCatalog, AlbumSubmission, Artist, Notification, Preview, Genre, GenreEvent].map((model) => model.syncIndexes()));
   registered = await Artist.create(newArtistDocument({ name: "Registry Name", artistMbid: MBID_REGISTERED, source: "import" }));
   localArtist = await Artist.create(newCommunityArtistDocument({ canonicalName: "Local Artist", provenance: { source: "manual" } }));
 
@@ -391,6 +401,115 @@ integration("a revision keeps observations for unchanged MBIDs and appends a new
   assert.deepEqual(stored.artistProposals.find((proposal) => proposal.artistMbid === MBID_NEW).observation.observedAt, firstObservation.observedAt);
   const withKey = await call("POST", `/suggestions/${submissionId}/revise`, user, { ...body, requestKey: crypto.randomUUID() });
   assert.equal(withKey.status, 409, "a pending suggestion cannot be revised again");
+});
+
+// The frontend's own restore-and-resubmit mapping, loaded as plain ESM.
+function frontendLinkPayload() {
+  const source = fs.readFileSync(path.join(__dirname, "../frontend/src/features/artists/artistLinkPayload.js"), "utf8");
+  return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+}
+
+integration("an explicitly shared community proposal is still one artist after a revision round trip", async () => {
+  const user = contributor();
+  const credits = [{ name: "Shared Band", role: "main" }, { name: "Shared Band (remix)", role: "remixer" }, { name: "Shared Band", role: "featured" }];
+  const created = await call("POST", "/suggestions", user, suggestionBody(`Shared ${crypto.randomUUID()}`, credits, {
+    artistProposals: [
+      { proposalKey: "shared", kind: "community", canonicalName: "Shared Band", evidence: [{ url: "https://example.com/shared-band" }] },
+      { proposalKey: "separate", kind: "community", canonicalName: "Shared Band", evidence: [{ url: "https://example.com/other-shared-band" }] },
+    ],
+    artistSelections: [
+      { position: 0, kind: "proposal", proposalKey: "shared" },
+      { position: 1, kind: "proposal", proposalKey: "shared" },
+      { position: 2, kind: "proposal", proposalKey: "separate" },
+    ],
+    requestKey: crypto.randomUUID(),
+  }));
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const { submissionId } = created.body;
+  await applyModerationCommand({ submissionId, actorUserId: MODERATOR, action: "request_changes", body: { reason: "Fix the title", expectedRevision: 1 } });
+
+  // Revise exactly as the form would: restore links from the owner's detail
+  // and map them back to request fields.
+  const detail = (await call("GET", `/suggestions/${submissionId}`, user)).body;
+  const { artistRequestFields, linksFromSubmission } = await frontendLinkPayload();
+  const fields = artistRequestFields(linksFromSubmission(detail));
+  assert.deepEqual(fields.artistProposals.map((proposal) => proposal.proposalKey), ["shared", "separate"]);
+  const revised = await call("POST", `/suggestions/${submissionId}/revise`, user, {
+    proposedMetadata: { ...detail.proposedMetadata, title: `${detail.proposedMetadata.title} (fixed)` },
+    supportingSources: detail.supportingSources,
+    externalReferences: detail.externalReferences,
+    ...fields,
+  });
+  assert.equal(revised.status, 200, JSON.stringify(revised.body));
+  const before = await artistCount();
+  const approved = await approveRoute(submissionId, { confirmPossibleDuplicate: true, expectedRevision: 2 });
+  assert.equal(approved.status, 200, JSON.stringify(approved.body));
+  const album = await AlbumCatalog.findOne({ albumId: approved.body.album.albumId }).lean();
+  assert.equal(album.artistCredits[0].artistId, album.artistCredits[1].artistId, "the shared proposal is one artist");
+  assert.notEqual(album.artistCredits[0].artistId, album.artistCredits[2].artistId, "the separate same-name proposal stays its own artist");
+  assert.equal(await artistCount(), before + 2);
+});
+
+integration("a request-key replay ignores later genre renames and expired edition previews", async () => {
+  // Genres: the digest covers the client's genre choice, not the registry
+  // name the server resolved it to.
+  const genre = await Genre.create({ genreId: crypto.randomUUID(), ...validateGenreName(`Replay Genre ${crypto.randomUUID().slice(0, 6)}`), origin: { source: "seed" } });
+  const user = contributor();
+  const body = {
+    ...mixedBody(`Genre replay ${crypto.randomUUID()}`),
+    proposedGenres: { add: [{ genreId: genre.genreId }], note: "  Context  " },
+    requestKey: crypto.randomUUID(),
+  };
+  const first = await call("POST", "/suggestions", user, body);
+  assert.equal(first.status, 201, JSON.stringify(first.body));
+  await Genre.updateOne({ _id: genre._id }, { $set: validateGenreName(`Renamed ${crypto.randomUUID().slice(0, 6)}`) });
+  lookups.length = 0;
+  const replay = await call("POST", "/suggestions", user, body);
+  assert.equal(replay.status, 200, JSON.stringify(replay.body));
+  assert.equal(replay.body.submissionId, first.body.submissionId);
+  assert.equal(lookups.length, 0, "a replay never calls the provider");
+  const changedGenre = await call("POST", "/suggestions", user, { ...body, proposedGenres: { add: [{ genreId: genre.genreId }], note: "Different" } });
+  assert.equal(changedGenre.status, 409, "a different client genre choice is a different request");
+  assert.equal(changedGenre.body.code, "REQUEST_KEY_CONFLICT");
+
+  // Edition previews expire; a saved request must still replay.
+  const releaseMbid = crypto.randomUUID();
+  const value = {
+    releaseMbid, releaseGroupMbid: crypto.randomUUID(), title: `Edition ${crypto.randomUUID()}`, artistDisplayName: "Artist", date: "2026", country: "US", formats: ["CD"],
+    disambiguation: "", status: "Official", retrievedAt: new Date(), sourceUrl: `https://musicbrainz.org/release/${releaseMbid}`, license: "CC0",
+    tracks: [{ discNumber: 1, trackNumber: 1, title: "One", durationMs: 1000, artistDisplayName: "Artist", releaseTrackMbid: crypto.randomUUID(), recordingMbid: crypto.randomUUID() }],
+  };
+  const candidate = { ...value, tracklistHash: hashCandidateTracklist(value) };
+  const editionUser = contributor();
+  const originalPreview = discovery.preview;
+  discovery.preview = async () => candidate;
+  let preview;
+  try {
+    preview = await editions.preview({ releaseGroupMbid: candidate.releaseGroupMbid, releaseMbid: candidate.releaseMbid }, editionUser);
+  } finally {
+    discovery.preview = originalPreview;
+  }
+  const editionBody = {
+    editionPreviewId: preview.previewId,
+    proposedMetadata: { title: candidate.title, artistCredits: [{ name: "Artist, Edition" }], releaseType: "album", releaseDate: "2026", coverSourceUrl: "https://example.com/cover.jpg" },
+    supportingSources: [{ type: "musicbrainz", url: candidate.sourceUrl }],
+    externalReferences: [],
+    requestKey: crypto.randomUUID(),
+  };
+  const editionFirst = await call("POST", "/suggestions", editionUser, editionBody);
+  assert.equal(editionFirst.status, 201, JSON.stringify(editionFirst.body));
+  await Preview.deleteMany({ previewId: preview.previewId });
+  const editionReplay = await call("POST", "/suggestions", editionUser, editionBody);
+  assert.equal(editionReplay.status, 200, JSON.stringify(editionReplay.body));
+  assert.equal(editionReplay.body.submissionId, editionFirst.body.submissionId);
+
+  // A replay still requires the owner and a valid body shape.
+  const otherUser = await call("POST", "/suggestions", contributor(), editionBody);
+  assert.equal(otherUser.status, 409, "another contributor's key is not shared; the expired preview blocks a new create");
+  assert.equal(otherUser.body.code, "EDITION_PREVIEW_UNAVAILABLE");
+  const badShape = await call("POST", "/suggestions", editionUser, { ...editionBody, unexpected: true });
+  assert.equal(badShape.status, 400, "the body shape is validated before any replay");
+  assert.equal(await AlbumSubmission.countDocuments({ submittedByUserId: editionUser }), 1);
 });
 
 async function pendingLinked(title) {

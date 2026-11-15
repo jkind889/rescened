@@ -11,7 +11,7 @@ import { creditIdentity, creditPayload, musicBrainzArtistUrl } from "../../featu
 import ContributorEditionPicker from "./ContributorEditionPicker";
 import { ArtistPicker } from "../../features/artists/ArtistPicker.jsx";
 import { artistRequestFields, linksFromSubmission } from "../../features/artists/artistLinkPayload.js";
-import { useArtistLinkingEnabled } from "../../features/artists/useArtistLinking";
+import { useArtistLinkingState } from "../../features/artists/useArtistLinking";
 
 const MAX_ARTISTS = 20;
 const MAX_SOURCES = 10;
@@ -367,7 +367,8 @@ export function SuggestionForm({
   useDraftAutosave(draftKey, draft, draftFingerprint(draft) === initialFingerprint);
   const [validationErrors, setValidationErrors] = useState([]);
   const [editionBusy, setEditionBusy] = useState(false);
-  const artistLinking = useArtistLinkingEnabled(getToken);
+  const linkingState = useArtistLinkingState(getToken);
+  const artistLinking = linkingState === "enabled";
   const validationSummaryRef = useRef(null);
   const serverErrorRef = useRef(null);
   const controlsDisabled = disabled || isSubmitting || editionBusy;
@@ -480,6 +481,15 @@ export function SuggestionForm({
     const errors = validateDraft(draft);
     if (draft.proposedGenres?.note?.trim() && !draft.proposedGenres?.add?.length) {
       errors.push("Choose a genre for your moderator note, or clear the note to submit without genres.");
+    }
+    // Links are sent only after the server confirms linking is on. While that
+    // is unknown, submitting would silently drop them (a revision without
+    // links clears its stored links), so the form waits instead.
+    const hasLinks = draft.proposedMetadata.artistCredits.some((artist) => artist.link && !hasActiveIdentity(artist));
+    if (hasLinks && linkingState === "loading") {
+      errors.push("Still checking whether artist linking is available. Try again in a moment so your artist links are kept.");
+    } else if (hasLinks && linkingState === "unavailable") {
+      errors.push("Could not check whether artist linking is available, so your artist links cannot be sent. Reload the page to try again, or remove the links.");
     }
     setValidationErrors(errors);
 
@@ -713,8 +723,14 @@ export function SuggestionForm({
                     />
                   </div>
                 ) : null}
-                {!artistLinking && artist.link ? (
-                  <span className="suggestion-form-hint suggestion-form-artist-link-note">Artist linking is turned off, so this credit&rsquo;s artist link will not be sent.</span>
+                {!artistLinking && artist.link && !hasActiveIdentity(artist) ? (
+                  <span className="suggestion-form-hint suggestion-form-artist-link-note">
+                    {linkingState === "loading"
+                      ? "Checking whether artist linking is available. This credit’s artist link is kept."
+                      : linkingState === "unavailable"
+                        ? "Artist linking could not be checked, so this credit’s artist link cannot be sent until you reload."
+                        : "Artist linking is turned off, so this credit’s artist link will not be sent."}
+                  </span>
                 ) : null}
                 <button
                   className="suggestion-form-remove"

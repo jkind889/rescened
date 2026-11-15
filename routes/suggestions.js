@@ -21,6 +21,7 @@ const {
   isSubmissionsEnabled,
   assertCreditIdentities,
   normalizeCorrectionPayload,
+  normalizeSubmissionPayload,
   correctionSnapshot,
   plain,
   serializeApprovedFeedItem,
@@ -223,19 +224,26 @@ router.post("/", auth, submissionsEnabled, submissionCreateRateLimit, async (req
     const { rest, artist, requestKey: rawRequestKey } = splitArtistRequest(req.body);
     if (artist.present) assertArtistSuggestionsEnabled();
     const requestKey = normalizeRequestKey(rawRequestKey, { required: artist.present });
-    const payload = await editions.normalize(rest, req.userId);
-    await assertCreditIdentities(payload.proposedMetadata.artistCredits);
-    payload.genreChanges = await normalizeAlbumGenreProposal(payload.proposedGenres);
-    const work = normalizeArtistWork(artist, payload.proposedMetadata.artistCredits);
-    if (work) await assertExistingSelections(work.selections);
-    const digest = requestKey ? creationDigest({ payload, work, editionPreviewId: rest?.editionPreviewId }) : "";
+    // The request shape is validated without any database, preview, or
+    // provider read, and the request key is compared against that normalized
+    // client input, so a replay of a saved request is answered even after an
+    // edition preview expires or a referenced genre is renamed.
+    const { editionPreviewId, ...clientBody } = rest && typeof rest === "object" && !Array.isArray(rest) ? rest : {};
+    const clientPayload = normalizeSubmissionPayload(rest && typeof rest === "object" && !Array.isArray(rest) ? clientBody : rest);
+    const clientWork = normalizeArtistWork(artist, clientPayload.proposedMetadata.artistCredits);
+    const digest = requestKey ? creationDigest({ clientPayload, work: clientWork, editionPreviewId }) : "";
     const { document: submission, idempotent } = await createWithRequestKey({
       Model: AlbumSubmission,
       userId: req.userId,
       requestKey,
       digest,
       create: async () => {
-        // Provider validation runs only for a new request, never for a replay.
+        // Everything below runs only for a new request, never for a replay.
+        const payload = await editions.normalize(rest, req.userId);
+        await assertCreditIdentities(payload.proposedMetadata.artistCredits);
+        payload.genreChanges = await normalizeAlbumGenreProposal(payload.proposedGenres);
+        const work = normalizeArtistWork(artist, payload.proposedMetadata.artistCredits);
+        if (work) await assertExistingSelections(work.selections);
         if (work) Object.assign(payload, artistWorkFields(work, await prepareStoredProposals(work.proposals)));
         const duplicate = await findDuplicateSignals(payload);
         const submittedAt = new Date();

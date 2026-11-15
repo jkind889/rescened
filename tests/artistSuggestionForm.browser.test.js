@@ -80,7 +80,11 @@ window.fetch = async (input, init = {}) => {
   const url = new URL(String(input));
   window.__requests.push(url.pathname);
   const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-  if (url.pathname === '/artist-discovery/capabilities') return json(200, { enabled: window.__linking });
+  if (url.pathname === '/artist-discovery/capabilities') {
+    if (window.__capabilityHold) await new Promise(resolveHold => { window.__releaseCapabilities = resolveHold; });
+    if (window.__capabilityError) return json(500, { error: 'capability check failed' });
+    return json(200, { enabled: window.__linking });
+  }
   if (url.pathname === '/artist-discovery/local') return json(200, ${JSON.stringify(LOCAL_RESULTS)});
   if (url.pathname === '/artist-discovery/musicbrainz') return json(200, ${JSON.stringify(PROVIDER_RESULTS)});
   if (url.pathname.endsWith('/capabilities')) return json(200, { enabled: false });
@@ -219,6 +223,52 @@ window.__mountReview = (submission, props = {}) => root.render(<MemoryRouter>
         const [payload] = await page.evaluate(() => window.__payloads);
         assert.deepEqual(payload.artistSelections.map(selection => selection.position), [0, 1, 2]);
         assert.deepEqual(payload.artistProposals[1], { proposalKey: 'new-1', kind: 'community', canonicalName: 'New Band', evidence: [{ url: EVIDENCE }] });
+      });
+    });
+
+    await t.test('a revision waits for the capability answer instead of dropping its stored links', async () => {
+      await fixture(async page => {
+        await page.evaluate(() => { window.__capabilityHold = true; });
+        await page.evaluate(value => window.__mountForm(value), linkedSubmission());
+        await page.getByText('Checking whether artist linking is available. This credit’s artist link is kept.').first().waitFor();
+        await page.getByRole('button', { name: 'Send for review' }).click();
+        await page.getByText('Still checking whether artist linking is available. Try again in a moment so your artist links are kept.').waitFor();
+        assert.deepEqual(await page.evaluate(() => window.__payloads), [], 'nothing is submitted while the answer is unknown');
+        await page.evaluate(() => window.__releaseCapabilities());
+        await row(page, 2).getByRole('button', { name: 'Remove link to Guest Canonical' }).waitFor();
+        await page.getByRole('button', { name: 'Send for review' }).click();
+        const [payload] = await page.evaluate(() => window.__payloads);
+        assert.deepEqual(payload.artistSelections.map(selection => selection.position), [0, 1, 2], 'the stored links are sent once linking is confirmed');
+      });
+    });
+
+    await t.test('a failed capability check blocks a linked revision; legacy suggestions still send', async () => {
+      await fixture(async page => {
+        await page.evaluate(() => { window.__capabilityError = true; });
+        await page.evaluate(value => window.__mountForm(value), linkedSubmission());
+        await page.getByText('Artist linking could not be checked, so this credit’s artist link cannot be sent until you reload.').first().waitFor();
+        await page.getByRole('button', { name: 'Send for review' }).click();
+        await page.getByText(/Could not check whether artist linking is available, so your artist links cannot be sent/).waitFor();
+        assert.deepEqual(await page.evaluate(() => window.__payloads), []);
+      });
+      await fixture(async page => {
+        await page.evaluate(() => { window.__capabilityError = true; });
+        await page.evaluate(value => window.__mountForm(value), initial);
+        await page.waitForFunction(() => window.__requests.includes('/artist-discovery/capabilities'));
+        await page.getByRole('button', { name: 'Send for review' }).click();
+        const [payload] = await page.evaluate(() => window.__payloads);
+        assert.equal('artistSelections' in payload, false, 'a suggestion without links is not blocked by the capability check');
+      });
+    });
+
+    await t.test('a confirmed "off" says the links will not be sent before omitting them', async () => {
+      await fixture(async page => {
+        await page.evaluate(() => { window.__linking = false; });
+        await page.evaluate(value => window.__mountForm(value), linkedSubmission());
+        await page.getByText('Artist linking is turned off, so this credit’s artist link will not be sent.').first().waitFor();
+        await page.getByRole('button', { name: 'Send for review' }).click();
+        const [payload] = await page.evaluate(() => window.__payloads);
+        assert.equal('artistSelections' in payload, false);
       });
     });
 
