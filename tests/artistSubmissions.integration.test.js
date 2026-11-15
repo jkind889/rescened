@@ -180,6 +180,49 @@ integration("a community artist suggestion is private until approval creates a z
   assert.equal(stored.moderationHistory.filter((event) => event.action === "approved").length, 1);
 });
 
+integration("every suggestion, including an older one needing changes, stays reachable through owner-scoped pages", async () => {
+  const user = contributor();
+  // Seeded directly (the create rate limit allows ten per window), oldest
+  // first, with distinct creation times and two sharing one timestamp.
+  const base = Date.parse("2026-01-01T00:00:00.000Z");
+  const rows = Array.from({ length: 21 }, (_, index) => {
+    const createdAt = new Date(base + (index === 6 ? 5 : index) * 1000);
+    const proposal = { proposalKey: "artist", kind: "community", canonicalName: `Paged Band ${index}`, evidence: [{ url: `https://example.com/paged-${index}`, description: "" }] };
+    return {
+      submissionId: crypto.randomUUID(), submittedByUserId: user, status: "pending", currentRevision: 1, proposal, note: "",
+      revisions: [{ revision: 1, submittedAt: createdAt, proposal, note: "" }],
+      moderationHistory: [{ actorUserId: user, action: "submitted", reason: "", revision: 1, createdAt }],
+      approvedArtistId: null, duplicateOfArtistId: null, approvedAt: null, createdAt, updatedAt: createdAt,
+    };
+  });
+  await ArtistSubmission.collection.insertMany(rows);
+  const ids = rows.map((row) => row.submissionId);
+  const oldest = ids[0];
+  await moderate(oldest, "request-changes", { expectedRevision: 1, reason: "Add a label page" });
+  const other = contributor();
+  await suggest(other, community("Someone Else's Band"));
+
+  const first = await call("GET", "/artist-suggestions/mine", user);
+  assert.equal(first.status, 200);
+  assert.equal(first.body.suggestions.length, 20);
+  assert.equal(first.body.suggestions.some((row) => row.submissionId === oldest), false, "the oldest is past the first page");
+  assert.ok(first.body.nextCursor, "a cursor continues the list");
+  const second = await call("GET", `/artist-suggestions/mine?cursor=${encodeURIComponent(first.body.nextCursor)}`, user);
+  assert.deepEqual(second.body.suggestions.map((row) => [row.submissionId, row.status]), [[oldest, "needs_changes"]]);
+  assert.equal(second.body.nextCursor, null);
+  const all = [...first.body.suggestions, ...second.body.suggestions].map((row) => row.submissionId);
+  assert.equal(new Set(all).size, 21, "no suggestion is repeated or skipped");
+  assert.deepEqual(new Set(all), new Set(ids));
+
+  const borrowed = await call("GET", `/artist-suggestions/mine?cursor=${encodeURIComponent(first.body.nextCursor)}`, other);
+  assert.equal(borrowed.body.suggestions.some((row) => ids.includes(row.submissionId)), false, "a cursor never reveals another contributor's suggestions");
+  const small = await call("GET", "/artist-suggestions/mine?limit=5", user);
+  assert.equal(small.body.suggestions.length, 5);
+  assert.equal((await call("GET", "/artist-suggestions/mine?limit=500", user)).body.suggestions.length, 21, "the limit is capped at 50");
+  assert.equal((await call("GET", "/artist-suggestions/mine?cursor=not-a-cursor", user)).body.code, "INVALID_CURSOR");
+  assert.equal((await call("GET", "/artist-suggestions/mine?status=pending", user)).status, 400);
+});
+
 integration("MusicBrainz suggestions keep a server observation; an exact MBID already on Rescened points to that artist", async () => {
   const user = contributor();
   lookups.length = 0;

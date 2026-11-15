@@ -12,20 +12,36 @@ const BASE = `${API_BASE_URL}/artist-suggestions`;
 // Contributor page for standalone artist suggestions: suggest an artist,
 // list your suggestions, and open one to revise or withdraw it. Every
 // command names the revision shown on the page.
+// The panel is keyed by user and route, so opening another suggestion (or
+// the list) remounts it: a command still in flight for the previous route
+// completes into an unmounted panel and is dropped, success or error.
 export function ArtistSuggestions() {
   const { userId } = useAuth();
-  return <ArtistSuggestionsPanel key={userId || "signed-out"} />;
+  const { submissionId } = useParams();
+  return <ArtistSuggestionsPanel key={`${userId || "signed-out"}:${submissionId || "index"}`} submissionId={submissionId} />;
 }
 
-function ArtistSuggestionsPanel() {
+function ArtistSuggestionsPanel({ submissionId }) {
   const { getToken } = useAuth();
-  const { submissionId } = useParams();
   const navigate = useNavigate();
-  const [list, setList] = useState({ status: "loading", rows: [], error: null });
+  const [list, setList] = useState({ status: "loading", rows: [], nextCursor: null, loadingMore: false, moreError: null, error: null });
   const [detail, setDetail] = useState({ status: "idle", data: null, error: null });
   const [mutation, setMutation] = useState({ status: "idle", error: null });
   const [refresh, setRefresh] = useState(0);
   const requestKey = useRef(null);
+  const alive = useRef(true);
+  // Advanced whenever the list is (re)loaded, so a "Show more" page fetched
+  // for an older list is not appended to a newer one.
+  const listGeneration = useRef(0);
+  const moreRequest = useRef(null);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      moreRequest.current?.abort();
+    };
+  }, []);
 
   const request = useCallback(async (path, options = {}) => {
     const token = await getToken();
@@ -35,11 +51,38 @@ function ArtistSuggestionsPanel() {
   useEffect(() => {
     if (submissionId) return undefined;
     const controller = new AbortController();
+    listGeneration.current += 1;
+    moreRequest.current?.abort();
     request("/mine", { signal: controller.signal })
-      .then((data) => { if (!controller.signal.aborted) setList({ status: "ready", rows: data.suggestions || [], error: null }); })
-      .catch((error) => { if (!controller.signal.aborted) setList({ status: "error", rows: [], error: communityErrorFrom(error) }); });
+      .then((data) => {
+        if (!controller.signal.aborted) setList({ status: "ready", rows: data.suggestions || [], nextCursor: data.nextCursor || null, loadingMore: false, moreError: null, error: null });
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setList({ status: "error", rows: [], nextCursor: null, loadingMore: false, moreError: null, error: communityErrorFrom(error) });
+      });
     return () => controller.abort();
   }, [request, submissionId, refresh]);
+
+  async function loadMore() {
+    if (!list.nextCursor || list.loadingMore) return;
+    const generation = listGeneration.current;
+    const controller = new AbortController();
+    moreRequest.current = controller;
+    setList((current) => ({ ...current, loadingMore: true, moreError: null }));
+    try {
+      const data = await request(`/mine?cursor=${encodeURIComponent(list.nextCursor)}`, { signal: controller.signal });
+      if (!alive.current || generation !== listGeneration.current || controller.signal.aborted) return;
+      setList((current) => {
+        const seen = new Set(current.rows.map((row) => row.submissionId));
+        return { ...current, rows: [...current.rows, ...(data.suggestions || []).filter((row) => !seen.has(row.submissionId))], nextCursor: data.nextCursor || null, loadingMore: false };
+      });
+    } catch (error) {
+      if (!alive.current || generation !== listGeneration.current || controller.signal.aborted) return;
+      setList((current) => ({ ...current, loadingMore: false, moreError: communityErrorFrom(error) }));
+    } finally {
+      if (moreRequest.current === controller) moreRequest.current = null;
+    }
+  }
 
   useEffect(() => {
     if (!submissionId) return undefined;
@@ -57,13 +100,16 @@ function ArtistSuggestionsPanel() {
     return { ...payload, requestKey: requestKey.current.key };
   }
 
+  // Completes only while this panel (this route) is still mounted.
   async function mutate(work) {
     setMutation({ status: "loading", error: null });
     try {
       const data = await work();
+      if (!alive.current) return null;
       setMutation({ status: "idle", error: null });
       return data;
     } catch (error) {
+      if (!alive.current) return null;
       setMutation({ status: "error", error: communityErrorFrom(error) });
       if (error?.status === 409 && error?.code !== "ARTIST_ALREADY_EXISTS") setRefresh((value) => value + 1);
       return null;
@@ -139,6 +185,12 @@ function ArtistSuggestionsPanel() {
           </li>
         ))}
       </ul>
+      {list.moreError ? <p className="community-message community-message-error" role="alert">{list.moreError.message || "Could not load more artist suggestions."}</p> : null}
+      {list.nextCursor ? (
+        <button className="community-text-button" type="button" onClick={loadMore} disabled={list.loadingMore}>
+          {list.loadingMore ? "Loading…" : "Show older suggestions"}
+        </button>
+      ) : null}
     </section>
   );
 }

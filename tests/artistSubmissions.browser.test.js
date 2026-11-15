@@ -68,9 +68,16 @@ window.fetch = async (input, init = {}) => {
   if (url.pathname === '/artist-discovery/local') return json(200, ${JSON.stringify(PICKER.local)});
   if (url.pathname === '/artist-discovery/musicbrainz') return json(200, ${JSON.stringify(PICKER.musicbrainz)});
   const route = window.__routes[method + ' ' + url.pathname];
-  const next = Array.isArray(route?.[0]) ? route.shift() : route;
+  let next = Array.isArray(route?.[0]) || (Array.isArray(route) && route[0]?.hold) ? route.shift() : route;
+  // { hold: name, response } waits until the test calls window.__release(name).
+  if (next && !Array.isArray(next) && next.hold) {
+    const held = next;
+    await new Promise(resolveHold => { window.__holds = { ...(window.__holds || {}), [held.hold]: resolveHold }; });
+    next = held.response;
+  }
   return next ? json(next[0], next[1]) : json(404, { error: 'not stubbed', code: 'NOT_FOUND' });
 };
+window.__release = name => window.__holds?.[name]?.();
 function Where() { const location = useLocation(); window.__location = location.pathname; return null; }
 const root = createRoot(document.getElementById('root'));
 window.__mount = (entry) => root.render(<MemoryRouter initialEntries={[entry]}><Where /><Routes>
@@ -210,6 +217,73 @@ window.__mount = (entry) => root.render(<MemoryRouter initialEntries={[entry]}><
           ['request-changes', { expectedRevision: 2, reason: 'Add a label page' }],
           ['mark-duplicate', { expectedRevision: 2, reason: 'Add a label page', duplicateOfArtistId: LOCAL }],
         ]);
+      });
+    });
+
+    const OTHER = '33333333-3333-4333-8333-333333333333';
+    const other = suggestion({ submissionId: OTHER, currentRevision: 1, proposal: { proposalKey: 'artist', kind: 'community', canonicalName: 'Other Band', evidence: [{ url: 'https://example.com/other', description: '' }] } });
+    for (const [label, response] of [['success', [200, suggestion({ status: 'withdrawn', currentRevision: 3 })]], ['error', [409, { error: 'Stale withdrawal for the first suggestion', code: 'STATE_CONFLICT' }]]]) {
+      await t.test(`a delayed command ${label} for one suggestion never replaces another suggestion's page`, async () => {
+        await fixture({ entry: `/artist-suggestions/${SUBMISSION}`, routes: {
+          [`GET /artist-suggestions/${SUBMISSION}`]: [200, suggestion()],
+          [`POST /artist-suggestions/${SUBMISSION}/withdraw`]: [{ hold: 'withdraw', response }],
+          'GET /artist-suggestions/mine': [200, { suggestions: [suggestion(), other], nextCursor: null }],
+          [`GET /artist-suggestions/${OTHER}`]: [200, other],
+        } }, async page => {
+          await page.getByRole('button', { name: 'Withdraw' }).click();
+          await page.waitForFunction(() => Boolean(window.__holds?.withdraw));
+          await page.getByRole('link', { name: 'All artist suggestions' }).click();
+          await page.getByRole('link', { name: 'Other Band' }).click();
+          await page.getByRole('heading', { name: 'Other Band' }).waitFor();
+          await page.evaluate(() => window.__release('withdraw'));
+          await page.evaluate(() => new Promise(done => setTimeout(done, 150)));
+          assert.equal(await page.getByRole('heading', { name: 'Other Band' }).count(), 1, 'the open suggestion stays on screen');
+          assert.equal(await page.getByText('Loading…').count(), 0);
+          assert.equal(await page.getByText('Stale withdrawal for the first suggestion').count(), 0, 'no error from the other suggestion');
+          assert.equal(await page.evaluate(() => window.__location), `/artist-suggestions/${OTHER}`);
+          assert.equal(await page.getByText('Withdrawn').count(), 0);
+        });
+      });
+    }
+
+    await t.test('older suggestions stay reachable with Show older suggestions', async () => {
+      const older = suggestion({ submissionId: OTHER, status: 'needs_changes', proposal: { proposalKey: 'artist', kind: 'community', canonicalName: 'Older Band', evidence: [] } });
+      await fixture({ entry: '/artist-suggestions', routes: {
+        'GET /artist-suggestions/mine': [[200, { suggestions: [suggestion()], nextCursor: 'cursor-1' }], [200, { suggestions: [older, suggestion()], nextCursor: null }]],
+        [`GET /artist-suggestions/${OTHER}`]: [200, older],
+      } }, async page => {
+        await page.getByRole('link', { name: 'Brand New Band' }).waitFor();
+        await page.getByRole('button', { name: 'Show older suggestions' }).click();
+        await page.getByRole('link', { name: 'Older Band' }).waitFor();
+        assert.equal(await page.getByRole('link', { name: 'Brand New Band' }).count(), 1, 'a repeated row is not duplicated');
+        assert.equal(await page.getByRole('button', { name: 'Show older suggestions' }).count(), 0, 'the end of the list has no more button');
+        const more = await page.evaluate(() => window.__requests.filter(request => request.path === '/artist-suggestions/mine').map(request => request.search));
+        assert.deepEqual(more, ['', '?cursor=cursor-1']);
+        await page.getByRole('link', { name: 'Older Band' }).click();
+        await page.getByText('Changes requested').first().waitFor();
+        await page.getByRole('button', { name: 'Send revision' }).waitFor();
+      });
+    });
+
+    await t.test('a delayed moderator decision never lands on another suggestion', async () => {
+      const pending = suggestion({ currentRevision: 2 });
+      await fixture({ entry: `/moderation/artist-suggestions/${SUBMISSION}`, routes: {
+        'GET /moderation/artist-suggestions': [200, { suggestions: [pending, other] }],
+        [`GET /moderation/artist-suggestions/${SUBMISSION}`]: [200, { suggestion: pending, context: { registeredArtist: null, sameNameArtists: [] } }],
+        [`GET /moderation/artist-suggestions/${OTHER}`]: [200, { suggestion: other, context: { registeredArtist: null, sameNameArtists: [] } }],
+        [`POST /moderation/artist-suggestions/${SUBMISSION}/reject`]: [{ hold: 'reject', response: [409, { error: 'Stale decision for the first suggestion', code: 'STATE_CONFLICT' }] }],
+      } }, async page => {
+        await page.getByRole('radio', { name: /Reject/ }).check();
+        await page.getByLabel(/^Reason/).fill('No evidence');
+        await page.getByRole('button', { name: 'Apply decision' }).click();
+        await page.waitForFunction(() => Boolean(window.__holds?.reject));
+        await page.getByRole('link', { name: 'Other Band' }).click();
+        await page.getByRole('heading', { name: 'Other Band' }).waitFor();
+        await page.evaluate(() => window.__release('reject'));
+        await page.evaluate(() => new Promise(done => setTimeout(done, 150)));
+        assert.equal(await page.getByText('Stale decision for the first suggestion').count(), 0);
+        assert.equal(await page.getByRole('button', { name: 'Apply decision' }).isDisabled(), false, 'the other suggestion is not left pending');
+        assert.equal(await page.getByRole('heading', { name: 'Other Band' }).count(), 1);
       });
     });
 

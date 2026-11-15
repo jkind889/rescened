@@ -1,7 +1,7 @@
 const express = require("express");
 const { getAuth } = require("@clerk/express");
 const ArtistSubmission = require("../models/ArtistSubmission");
-const { isModerator, isSubmissionsEnabled } = require("./utils/submissions");
+const { cursorFilter, decodeCursor, encodeCursor, getPageLimit, isModerator, isSubmissionsEnabled } = require("./utils/submissions");
 const { isArtistSuggestionsEnabled } = require("./utils/serverConfig");
 const { artistSuggestionCreateRateLimit, submissionMutationRateLimit } = require("./utils/rateLimit");
 const { sendArtistSuggestionError } = require("./utils/artistSuggestionErrors");
@@ -36,12 +36,28 @@ function mutationsEnabled(req, res, next) {
   return next();
 }
 
-const PAGE_LIMIT = 20;
-
+// The viewer's suggestions, newest first, in pages of at most 50 (20 by
+// default). `nextCursor` continues the same owner's list by (createdAt, _id),
+// so every older suggestion stays reachable.
 router.get("/mine", auth, async (req, res) => {
   try {
-    const rows = await ArtistSubmission.find({ submittedByUserId: req.userId }).sort({ createdAt: -1, _id: -1 }).limit(PAGE_LIMIT);
-    return res.json({ suggestions: rows.map((row) => serializeArtistSuggestion(row)) });
+    const query = req.query || {};
+    for (const key of Object.keys(query)) {
+      if (!["cursor", "limit"].includes(key) || typeof query[key] !== "string") {
+        return res.status(400).json({ error: `Unsupported query field ${key}`, code: "INVALID_ARTIST_SUGGESTION" });
+      }
+    }
+    const limit = getPageLimit(query.limit);
+    const cursor = decodeCursor(query.cursor);
+    const rows = await ArtistSubmission.find({ submittedByUserId: req.userId, ...cursorFilter(cursor) })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit + 1);
+    const page = rows.slice(0, limit);
+    const last = page[page.length - 1];
+    return res.json({
+      suggestions: page.map((row) => serializeArtistSuggestion(row)),
+      nextCursor: rows.length > limit && last ? encodeCursor(last.createdAt, last._id) : null,
+    });
   } catch (error) {
     return sendArtistSuggestionError(res, error, "Failed to fetch artist suggestions");
   }

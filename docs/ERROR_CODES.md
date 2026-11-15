@@ -225,7 +225,8 @@ See [artist identity](ARTIST_IDENTITY.md#artist-links-on-album-suggestions).
 | `UNAUTHORIZED` / `MODERATOR_REQUIRED` | `401` / `403` | Not signed in, or not an allowlisted moderator on a moderator route. |
 | `ARTIST_SUGGESTION_NOT_FOUND` | `404` | No such suggestion, or another contributor's suggestion. |
 | `SUBMISSIONS_DISABLED`, `MODERATION_DISABLED`, `ARTIST_SUGGESTIONS_DISABLED` | `503` | A mutation while the matching flag is off. Reads still work. |
-| `INVALID_ARTIST_SUGGESTION`, `INVALID_ARTIST_PROPOSAL`, `INVALID_REQUEST_KEY` | `400` | The body breaks the strict contract, or a create has no `requestKey`. |
+| `INVALID_ARTIST_SUGGESTION`, `INVALID_ARTIST_PROPOSAL`, `INVALID_REQUEST_KEY` | `400` | The body or query breaks the strict contract, or a create has no `requestKey`. |
+| `INVALID_CURSOR` | `400` | `GET /artist-suggestions/mine` got a malformed `cursor`. |
 | `EXPECTED_REVISION_REQUIRED` | `400` | A revision, withdrawal, or moderator command did not name the reviewed revision. |
 | `REVISION_CONFLICT`, `STATE_CONFLICT` | `409` | The suggestion changed since it was loaded. |
 | `INVALID_SUBMISSION_STATE` | `409` | The command is not allowed in the current state. |

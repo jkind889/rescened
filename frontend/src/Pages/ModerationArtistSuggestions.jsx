@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/react";
 import { Link, useParams } from "react-router-dom";
 import { API_BASE_URL } from "../config/api";
@@ -23,7 +23,13 @@ function ModerationPanel() {
   const [status, setStatus] = useState("pending");
   const [queue, setQueue] = useState({ state: "loading", rows: [], error: null });
   const [detail, setDetail] = useState({ submissionId: "", data: null, error: null });
-  const [command, setCommand] = useState({ pending: false, error: null });
+  // Command state belongs to the suggestion it was sent for; a result that
+  // arrives after the moderator opened another suggestion is dropped.
+  const [command, setCommand] = useState({ submissionId: "", pending: false, error: null });
+  const activeSubmission = useRef(submissionId);
+  useEffect(() => {
+    activeSubmission.current = submissionId;
+  }, [submissionId]);
   const [queueRefresh, setQueueRefresh] = useState(0);
   const [detailRefresh, setDetailRefresh] = useState(0);
 
@@ -49,18 +55,33 @@ function ModerationPanel() {
     return () => controller.abort();
   }, [request, submissionId, detailRefresh]);
 
+  // A command finished after the moderator moved on: clear its pending
+  // state (the suggestion reloads when reopened) and show nothing.
+  function settleElsewhere(target) {
+    setCommand((current) => (current.submissionId === target ? { submissionId: target, pending: false, error: null } : current));
+    setQueueRefresh((value) => value + 1);
+  }
+
   async function decide(action, body) {
     const target = detail.data?.suggestion?.submissionId;
     if (!target) return;
-    setCommand({ pending: true, error: null });
+    setCommand({ submissionId: target, pending: true, error: null });
     try {
       const data = await request(`/${encodeURIComponent(target)}/${PATHS[action]}`, { method: "POST", body: JSON.stringify(body) });
+      if (activeSubmission.current !== target) {
+        settleElsewhere(target);
+        return;
+      }
       setDetail((current) => (current.submissionId === target ? { submissionId: target, data, error: null } : current));
-      setCommand({ pending: false, error: null });
+      setCommand({ submissionId: target, pending: false, error: null });
       // The response is the new detail; only the queue needs reloading.
       setQueueRefresh((value) => value + 1);
     } catch (error) {
-      setCommand({ pending: false, error: communityErrorFrom(error) });
+      if (activeSubmission.current !== target) {
+        settleElsewhere(target);
+        return;
+      }
+      setCommand({ submissionId: target, pending: false, error: communityErrorFrom(error) });
       // A conflict means the shown revision is stale: reload both.
       if (error?.status === 409) {
         setQueueRefresh((value) => value + 1);
@@ -70,6 +91,7 @@ function ModerationPanel() {
   }
 
   const shown = detail.submissionId === submissionId ? detail.data : null;
+  const shownCommand = command.submissionId === submissionId ? command : { pending: false, error: null };
   return (
     <section className="community-page moderation-artist-suggestions">
       <h1>Artist suggestions</h1>
@@ -99,8 +121,8 @@ function ModerationPanel() {
             key={`${shown.suggestion.submissionId}:${shown.suggestion.currentRevision}:${shown.suggestion.status}`}
             suggestion={shown.suggestion}
             context={shown.context}
-            pending={command.pending}
-            error={command.error}
+            pending={shownCommand.pending}
+            error={shownCommand.error}
             onCommand={decide}
           />
         </>
