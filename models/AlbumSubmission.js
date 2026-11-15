@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const { ARTIST_ID_PATTERN, MBID_PATTERN } = require("../lib/artists/identity");
 
 const candidateSchema = require("./schemas/providerEdition");
+const { artistProposalsField, artistSelectionsField } = require("./schemas/artistProposal");
 const editionProposalSchema = new mongoose.Schema({
   previewId: { type: String, required: true, match: /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i },
   candidate: { type: candidateSchema, required: true },
@@ -404,6 +405,10 @@ const revisionSchema = new mongoose.Schema(
     proposedChanges: { type: correctionChangesSchema, default: null },
     genreBaseline: { type: genreBaselineSchema, default: null },
     genreChanges: { type: genreChangesSchema, default: null },
+    // Private artist proposals for this revision's credits, as prepared by
+    // the server (MusicBrainz observations included). New-album only.
+    artistProposals: artistProposalsField,
+    artistSelections: artistSelectionsField,
   },
   { _id: false, strict: "throw" },
 );
@@ -456,6 +461,9 @@ const albumSubmissionSchema = new mongoose.Schema(
     proposedChanges: { type: correctionChangesSchema, default: null },
     genreBaseline: { type: genreBaselineSchema, default: null },
     genreChanges: { type: genreChangesSchema, default: null },
+    // The current revision's private artist proposals and credit links.
+    artistProposals: artistProposalsField,
+    artistSelections: artistSelectionsField,
     // Public, server-authored links between an album proposal and its later
     // genre review. Both are private submission records, not catalog fields.
     linkedGenreSubmissionId: { type: String, default: null, match: /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i },

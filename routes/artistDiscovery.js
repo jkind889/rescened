@@ -45,6 +45,13 @@ function createArtistDiscoveryRouter({
 } = {}) {
   const router = express.Router();
 
+  // Whether artist linking is on, for signed-in forms. Answers even when the
+  // flag is off, so the suggestion form can simply hide the picker.
+  router.get("/capabilities", (req, res) => {
+    if (!viewer(req)) return res.status(401).json({ error: "Sign in to search for artists", code: "UNAUTHORIZED" });
+    return res.json({ enabled: enabled() === true });
+  });
+
   router.use((req, res, next) => {
     const userId = viewer(req);
     if (!userId) return res.status(401).json({ error: "Sign in to search for artists", code: "UNAUTHORIZED" });

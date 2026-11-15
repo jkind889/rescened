@@ -198,7 +198,7 @@ test("a failed moderation transition leaves neither the status change nor the no
 test("approval writes exactly one notification across retries and concurrent approvals", { skip: !enabled }, async () => {
   const submission = await createSubmission("Notified Album", "contributor-approved");
   const approve = (actorUserId) => approveAlbumSubmission({
-    submissionId: submission.submissionId, actorUserId, confirmPossibleDuplicate: true, coverResolver: null,
+    submissionId: submission.submissionId, actorUserId, expectedRevision: 1, confirmPossibleDuplicate: true, coverResolver: null,
   });
   const results = await Promise.all([approve("moderator-a"), approve("moderator-b")]);
   await approve("moderator-a");

@@ -198,6 +198,24 @@ The `/artists` routes are public reads. See [artist identity](ARTIST_IDENTITY.md
 | `ARTIST_DISCOVERY_UNAVAILABLE` | `502` | MusicBrainz failed, timed out, or returned data that could not be normalized or exceeded the size limit. Adds `category`, `upstreamStatus`, and `requestId` as for external search. |
 | `RATE_LIMITED` | `429` | The per-user picker budget (60 local or 15 MusicBrainz searches a minute) is spent. |
 
+### Artist links on album suggestions
+
+See [artist identity](ARTIST_IDENTITY.md#artist-links-on-album-suggestions).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `ARTIST_SUGGESTIONS_DISABLED` | `503` | A suggestion create or revision carries artist links, or an artist-linked suggestion is approved, while `ARTIST_SUGGESTIONS_ENABLED` is off. |
+| `INVALID_REQUEST_KEY` | `400` | A create with artist links has no `requestKey`, or the key is not a UUID v4. |
+| `REQUEST_KEY_CONFLICT` | `409` | The contributor already used this `requestKey` for a different suggestion body. |
+| `INVALID_ARTIST_PROPOSAL`, `DUPLICATE_ARTIST_PROPOSAL`, `UNKNOWN_ARTIST_PROPOSAL`, `UNATTACHED_ARTIST_PROPOSAL`, `DUPLICATE_ARTIST_SELECTION`, `ARTIST_SELECTION_OUT_OF_RANGE` | `400` | The proposals or selections break the strict contract; `details` names the field. |
+| `CREDIT_ALREADY_LINKED` | `400` | A selected credit also carries an `artistId` or `artistMbid`. |
+| `ARTIST_NOT_FOUND` | `400` | An existing-artist selection names an `artistId` the registry does not have. |
+| `ARTIST_MBID_NOT_FOUND`, `ARTIST_MBID_REDIRECTED`, `ARTIST_OBSERVATION_INVALID` | `400` | MusicBrainz has no artist for the selected MBID, serves it under a different MBID (merged upstream; choose the current artist), or returned no usable name. |
+| `ARTIST_LOOKUP_UNAVAILABLE` | `503` | MusicBrainz could not confirm a selected MBID; nothing was saved. Sends `Retry-After` and `retryAfterSeconds`. |
+| `EXPECTED_REVISION_REQUIRED` | `400` | A new-album approval did not name the reviewed revision. |
+| `ARTIST_LINKS_REQUIRE_NEW_ALBUM` | `400` | An artist-linked suggestion was approved with `albumId`. |
+| `ARTIST_IDENTITY_CONFLICT` | `409` | At approval, a linked artist is missing or a registration raced; nothing was published. |
+
 ### Artist biographies
 
 See [artist biographies](ARTIST_BIOGRAPHIES.md).

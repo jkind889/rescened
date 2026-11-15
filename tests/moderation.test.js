@@ -455,7 +455,7 @@ test("approval creates a catalog album transactionally and is idempotent", async
   mongoose.startSession = async () => session;
   const first = await callRoute(state.router, "post", "/:submissionId/approve", {
     params: { submissionId: document.submissionId },
-    body: { confirmPossibleDuplicate: true, reason: "Evidence verified" },
+    body: { confirmPossibleDuplicate: true, reason: "Evidence verified", expectedRevision: 1 },
   });
   assert.equal(first.status, 200);
   assert.equal(first.body.suggestion.status, "approved");
@@ -466,7 +466,7 @@ test("approval creates a catalog album transactionally and is idempotent", async
 
   const second = await callRoute(state.router, "post", "/:submissionId/approve", {
     params: { submissionId: document.submissionId },
-    body: {},
+    body: { expectedRevision: 1 },
   });
   assert.equal(second.status, 200);
   assert.equal(second.body.idempotent, true);
@@ -502,7 +502,7 @@ test("approval publishes a moderator-reviewed direct cover URL without fetching 
   mongoose.startSession = async () => ({ async withTransaction(callback) { await callback(); }, async endSession() {} });
   const result = await callRoute(state.router, "post", "/:submissionId/approve", {
     params: { submissionId: document.submissionId },
-    body: { confirmPossibleDuplicate: true },
+    body: { confirmPossibleDuplicate: true, expectedRevision: 1 },
   });
   assert.equal(result.status, 200);
   assert.equal(result.body.album.cover, directUrl);
@@ -522,6 +522,7 @@ test("approval applies an injected Cover Art Archive result and derived MusicBra
   const automatic = await approveAlbumSubmission({
     submissionId: secondDocument.submissionId,
     actorUserId: "user_mod",
+    expectedRevision: 1,
     confirmPossibleDuplicate: true,
     coverResolver: async (candidate) => {
       input = candidate;
@@ -555,6 +556,7 @@ test("approval retains exact resolver references when CAA has no usable artwork"
   const result = await approveAlbumSubmission({
     submissionId: document.submissionId,
     actorUserId: "user_mod",
+    expectedRevision: 1,
     confirmPossibleDuplicate: true,
     coverResolver: async () => ({
       status: "unresolved",
@@ -590,6 +592,7 @@ test("artwork lookup failures do not block approval and linked albums stay uncha
   const failed = await approveAlbumSubmission({
     submissionId: document.submissionId,
     actorUserId: "user_mod",
+    expectedRevision: 1,
     confirmPossibleDuplicate: true,
     coverResolver: async () => { lookupCount += 1; throw new Error("provider unavailable"); },
   });
@@ -601,6 +604,7 @@ test("artwork lookup failures do not block approval and linked albums stay uncha
   const linked = await approveAlbumSubmission({
     submissionId: linkedDocument.submissionId,
     actorUserId: "user_mod",
+    expectedRevision: 1,
     albumId: catalog.albumId,
     coverResolver: async () => { throw new Error("must not resolve linked album"); },
   });
@@ -617,6 +621,7 @@ test("approval rejects artwork resolved against a stale submission revision", as
     approveAlbumSubmission({
       submissionId: document.submissionId,
       actorUserId: "user_mod",
+      expectedRevision: 1,
       confirmPossibleDuplicate: true,
       coverResolver: async () => {
         document.currentRevision = 2;
@@ -636,7 +641,7 @@ test("approval reports unavailable when Mongo cannot start a transaction", async
     async withTransaction() { const error = new Error("Transaction numbers are only allowed on a replica set member"); error.code = 20; throw error; },
     async endSession() {},
   });
-  const result = await callRoute(state.router, "post", "/:submissionId/approve", { params: { submissionId: document.submissionId }, body: {} });
+  const result = await callRoute(state.router, "post", "/:submissionId/approve", { params: { submissionId: document.submissionId }, body: { expectedRevision: 1 } });
   assert.equal(result.status, 503);
   assert.equal(result.body.code, "APPROVAL_UNAVAILABLE");
   assert.equal(state.documents[0].status, "pending");
@@ -660,7 +665,7 @@ test("approval links an explicitly selected catalog album and rejects an exact m
   mongoose.startSession = async () => ({ async withTransaction(callback) { await callback(); }, async endSession() {} });
   const linkedResult = await callRoute(state.router, "post", "/:submissionId/approve", {
     params: { submissionId: linked.submissionId },
-    body: { albumId: catalog.albumId },
+    body: { albumId: catalog.albumId, expectedRevision: 1 },
   });
   assert.equal(linkedResult.status, 200);
   assert.equal(linkedResult.body.album.albumId, catalog.albumId);
@@ -669,9 +674,30 @@ test("approval links an explicitly selected catalog album and rejects an exact m
   const exact = makeSubmission({ externalReferences: [{ provider: "musicbrainz", entityType: "release-group", externalId: "kind-of-blue" }] });
   const exactState = installMocks({ documents: [exact], catalogs: [catalog] });
   mongoose.startSession = async () => ({ async withTransaction(callback) { await callback(); }, async endSession() {} });
-  const exactResult = await callRoute(exactState.router, "post", "/:submissionId/approve", { params: { submissionId: exact.submissionId }, body: { confirmPossibleDuplicate: true } });
+  const exactResult = await callRoute(exactState.router, "post", "/:submissionId/approve", { params: { submissionId: exact.submissionId }, body: { confirmPossibleDuplicate: true, expectedRevision: 1 } });
   assert.equal(exactResult.status, 409);
   assert.equal(exactResult.body.code, "EXACT_CATALOG_MATCH");
+});
+
+test("every individual album approval names the reviewed revision", async () => {
+  const document = makeSubmission({ currentRevision: 2, proposedMetadata: { ...validMetadata(), coverSourceUrl: "https://example.com/cover.jpg" } });
+  const state = installMocks({ documents: [document] });
+  let sessions = 0;
+  mongoose.startSession = async () => { sessions += 1; return { async withTransaction(callback) { await callback(); }, async endSession() {} }; };
+  const missing = await callRoute(state.router, "post", "/:submissionId/approve", { params: { submissionId: document.submissionId }, body: { confirmPossibleDuplicate: true } });
+  assert.equal(missing.status, 400);
+  assert.equal(missing.body.code, "EXPECTED_REVISION_REQUIRED");
+  const stale = await callRoute(state.router, "post", "/:submissionId/approve", { params: { submissionId: document.submissionId }, body: { confirmPossibleDuplicate: true, expectedRevision: 1 } });
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.code, "STATE_CONFLICT");
+  assert.equal(sessions, 0, "missing and stale revisions are refused before any transaction");
+  assert.equal(state.catalogs.length, 0);
+  assert.equal(state.documents[0].status, "pending");
+  const reviewed = await callRoute(state.router, "post", "/:submissionId/approve", { params: { submissionId: document.submissionId }, body: { confirmPossibleDuplicate: true, expectedRevision: 2 } });
+  assert.equal(reviewed.status, 200);
+  const retryWithout = await callRoute(state.router, "post", "/:submissionId/approve", { params: { submissionId: document.submissionId }, body: {} });
+  assert.equal(retryWithout.status, 400, "a retry must also name the revision");
+  assert.equal(retryWithout.body.code, "EXPECTED_REVISION_REQUIRED");
 });
 
 test("moderator mutation rate limiting happens before persistence", async () => {

@@ -108,3 +108,33 @@ export function creditRowProblems(rows) {
 export function creditsFromRows(rows) {
   return rows.map((row) => creditPayload(row.name.trim(), row.role.trim() || "main", row.identity));
 }
+
+// Artist links on a suggestion revision (owner and moderator detail only):
+// position -> { selection, proposal, resolution }. Selections name credit
+// positions; proposals belong to the same revision; resolutions come from an
+// approved suggestion's receipt.
+export function artistLinksByPosition(source, resolutions = null) {
+  const links = new Map();
+  const proposals = new Map((Array.isArray(source?.artistProposals) ? source.artistProposals : [])
+    .filter((proposal) => proposal?.proposalKey)
+    .map((proposal) => [proposal.proposalKey, proposal]));
+  for (const selection of Array.isArray(source?.artistSelections) ? source.artistSelections : []) {
+    if (!Number.isInteger(selection?.position)) continue;
+    links.set(selection.position, {
+      selection,
+      proposal: selection.kind === "proposal" ? proposals.get(selection.proposalKey) || null : null,
+      resolution: null,
+    });
+  }
+  for (const resolution of Array.isArray(resolutions) ? resolutions : []) {
+    const link = links.get(resolution?.position);
+    if (link) link.resolution = resolution;
+  }
+  return links;
+}
+
+const RESOLUTION_LABELS = { linked: "Linked to", created: "Added as", reused: "Linked to existing" };
+
+export function resolutionLabel(resolution) {
+  return RESOLUTION_LABELS[resolution?.outcome] || "Linked to";
+}

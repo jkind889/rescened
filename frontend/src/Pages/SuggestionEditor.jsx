@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import SuggestionForm from "../Components/Community/SuggestionForm";
@@ -57,6 +57,7 @@ export function SuggestionEditor({ mode = "create" }) {
   const [mutationStatus, setMutationStatus] = useState("idle");
   const [mutationError, setMutationError] = useState(null);
   const [refreshIndex, setRefreshIndex] = useState(0);
+  const requestKeyRef = useRef(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -162,11 +163,25 @@ export function SuggestionEditor({ mode = "create" }) {
     : externalMbid ? `create:mbid:${externalMbid}` : "create";
   const draftKey = suggestionDraftKey(userId, draftContext);
 
+  // A new suggestion with artist links carries a request key so an ambiguous
+  // retry (the response was lost) returns the original suggestion instead of
+  // creating a second one. The key is reused only for the identical payload.
+  function withRequestKey(payload) {
+    if (isRevision || isCorrection || isGenreCreate || !payload.artistSelections?.length) return payload;
+    const fingerprint = JSON.stringify(payload);
+    if (requestKeyRef.current?.fingerprint !== fingerprint) {
+      if (!globalThis.crypto?.randomUUID) throw Object.assign(new Error("This browser cannot create a request key. Update it and try again."), { code: "REQUEST_KEY_UNAVAILABLE" });
+      requestKeyRef.current = { fingerprint, key: globalThis.crypto.randomUUID() };
+    }
+    return { ...payload, requestKey: requestKeyRef.current.key };
+  }
+
   async function submitSuggestion(payload) {
     setMutationStatus("loading");
     setMutationError(null);
 
     try {
+      const body = withRequestKey(payload);
       const token = await getToken();
       const endpoint = isGenreCreate
         ? `${API_BASE_URL}/suggestions/genres`
@@ -180,7 +195,7 @@ export function SuggestionEditor({ mode = "create" }) {
         {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(body),
         },
         isGenreCreate ? "Could not send this genre suggestion." : isCorrection ? "Could not submit this correction." : isRevision ? "Could not submit this revision." : "Could not create this suggestion.",
       );

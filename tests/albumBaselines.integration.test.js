@@ -103,7 +103,7 @@ test("catalog revision changes invalidate readiness transactionally", { skip: !e
 test("reviewed submission selection publishes atomically with approval and fills missing tracks", { skip: !enabled }, async () => {
   const group = mbid(); const submission = await createSubmission(group); const candidate = makeCandidate({ releaseGroupMbid: group, title: "Submitted Pilot" });
   await storeCandidate("submissions", submission, candidate); await command("submissions", submission.submissionId, "confirm", 0, 1, candidate);
-  const approved = await approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "integration-moderator", confirmPossibleDuplicate: true, reason: "Metadata and standard release reviewed", coverResolver: null });
+  const approved = await approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "integration-moderator", expectedRevision: 1, confirmPossibleDuplicate: true, reason: "Metadata and standard release reviewed", coverResolver: null });
   const album = await AlbumCatalog.findOne({ albumId: approved.album.albumId }); const active = await baselineForAlbum(album);
   assert.equal(album.tracks.length, 1); assert.equal(active.tracklistHash, candidate.tracklistHash);
   assert.equal((await Models.Head.findOne({ targetKind: "submissions", targetId: submission.submissionId })).status, "revoked");
@@ -161,7 +161,7 @@ test("mixtape submission baselines publish with approval and enter the reviewed 
   await command("submissions", submission.submissionId, "confirm", 0, 1, candidate);
   assert.equal((await reviewStatusCounts()).submissions.reviewed, 1);
   assert.equal(await AlbumCatalog.countDocuments({}), 0, "a reviewed submission is still private");
-  const approved = await approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "integration-moderator", confirmPossibleDuplicate: true, coverResolver: null });
+  const approved = await approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "integration-moderator", expectedRevision: 1, confirmPossibleDuplicate: true, coverResolver: null });
   const album = await AlbumCatalog.findOne({ albumId: approved.album.albumId });
   assert.equal(album.releaseType, "mixtape");
   assert.equal((await baselineForAlbum(album)).tracklistHash, candidate.tracklistHash);
@@ -356,7 +356,7 @@ test("a suggestion revised after its baseline selection is approved without that
   const duplicate = await findDuplicateSignals(payload); const revisedAt = new Date();
   await AlbumSubmission.updateOne({ submissionId: submission.submissionId, currentRevision: 1 }, { $set: { proposedMetadata: payload.proposedMetadata, normalizedFingerprint: duplicate.fingerprint, currentRevision: 2, status: "pending" }, $push: { revisions: snapshotForSubmission(payload, duplicate, revisedAt, 2), moderationHistory: { actorUserId: "integration-user", action: "revised", reason: "", createdAt: revisedAt } } });
   assert.equal((await list({ status: "stale" })).items.some((item) => item.kind === "submissions" && item.id === submission.submissionId), true);
-  const approved = await approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "integration-moderator", confirmPossibleDuplicate: true, reason: "Revised metadata reviewed", coverResolver: null });
+  const approved = await approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "integration-moderator", expectedRevision: 2, confirmPossibleDuplicate: true, reason: "Revised metadata reviewed", coverResolver: null });
   const album = await AlbumCatalog.findOne({ albumId: approved.album.albumId });
   assert.equal(album.tracks.length, 0, "the stale selection's tracks are not published");
   assert.equal(await baselineForAlbum(album), null);
@@ -370,7 +370,7 @@ test("linking a suggestion to an existing album never applies its baseline or tr
   const emptyAlbum = await AlbumCatalog.create(albumInput({ releaseGroupMbid: group }));
   const submission = await createSubmission(group); const candidate = makeCandidate({ releaseGroupMbid: group, title: "Submitted Pilot" });
   await storeCandidate("submissions", submission, candidate); await command("submissions", submission.submissionId, "confirm", 0, 1, candidate);
-  const approved = await approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "integration-moderator", albumId: emptyAlbum.albumId, reason: "Existing catalog match", coverResolver: null });
+  const approved = await approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "integration-moderator", expectedRevision: 1, albumId: emptyAlbum.albumId, reason: "Existing catalog match", coverResolver: null });
   assert.equal(approved.album.albumId, emptyAlbum.albumId);
   const album = await AlbumCatalog.findOne({ albumId: emptyAlbum.albumId });
   assert.equal(album.tracks.length, 0, "empty tracks stay empty on a linked album");

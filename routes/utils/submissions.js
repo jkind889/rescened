@@ -664,6 +664,7 @@ async function findDuplicateSignals(payload, { excludeSubmissionId, session } = 
 
 function snapshotForSubmission(payload, duplicate, submittedAt, revision) {
   return {
+    ...(payload.artistSelections?.length ? { artistProposals: payload.artistProposals || [], artistSelections: payload.artistSelections } : {}),
     revision,
     submittedAt,
     submissionType: "new_album",
@@ -681,6 +682,16 @@ function snapshotForSubmission(payload, duplicate, submittedAt, revision) {
 
 function plain(value) {
   return typeof value?.toObject === "function" ? value.toObject() : value;
+}
+
+function artistDetailFields(source) {
+  // eslint-disable-next-line global-require
+  return require("./artistSuggestions").artistDetailFields(source);
+}
+
+function artistResolutionFields(source) {
+  // eslint-disable-next-line global-require
+  return require("./artistSuggestions").artistResolutionFields(source);
 }
 
 function publicAlbumId(value) {
@@ -724,6 +735,7 @@ function publicSnapshot(value) {
   if (result.submissionType === "new_album" && source.genreChanges) {
     result.proposedGenres = publicGenreChanges(source.genreChanges);
   }
+  if (result.submissionType === "new_album") Object.assign(result, artistDetailFields(source));
   if (result.submissionType === "catalog_correction") {
     result.targetAlbumId = publicAlbumId(source.targetAlbumCatalogId) || undefined;
     result.baseCatalogRevision = source.baseCatalogRevision;
@@ -784,6 +796,10 @@ function serializeSubmission(value, { detail = false, moderator = false } = {}) 
     result.baseGenres = publicGenreBaseline(source.genreBaseline);
     result.genreChanges = publicGenreChanges(source.genreChanges);
     if (source.targetAlbumCatalogId?.albumId) result.targetAlbum = normalizeCatalogAlbum(source.targetAlbumCatalogId);
+  }
+  if (detail && submissionType === "new_album") {
+    // Private: detail responses reach only the owner and moderators.
+    Object.assign(result, artistDetailFields(source), artistResolutionFields(source));
   }
   if (detail) {
     result.revisions = (source.revisions || []).map(publicSnapshot);

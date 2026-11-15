@@ -3,6 +3,8 @@ const AlbumCatalog = require("../../models/AlbumCatalog");
 const AlbumSubmission = require("../../models/AlbumSubmission");
 const Artist = require("../../models/Artist");
 const { ArtistIdentityError, resolveCreditIdentities } = require("../../lib/artists/identity");
+const { resolveArtistSelections } = require("../../lib/artists/proposals");
+const { assertArtistSuggestionsEnabled, isArtistBearing } = require("./artistSuggestions");
 const {
   createCatalogAlbum,
   normalizeCatalogAlbum,
@@ -675,6 +677,36 @@ async function resolveApprovalCredits(credits, submission, actorUserId, approved
   }
 }
 
+// Resolves a suggestion's reviewed artist links inside the approval
+// transaction: existing artists are linked, exact MusicBrainz MBIDs reuse
+// their registered artist, and other proposals register artists from the
+// reviewed revision (MusicBrainz observation or community name). Credit
+// wording, roles and order are unchanged. Nothing calls a provider.
+async function resolveArtistLinks(submission, actorUserId, approvedAt, session) {
+  try {
+    return await resolveArtistSelections({
+      credits: submission.proposedMetadata?.artistCredits,
+      proposals: submission.artistProposals || [],
+      selections: submission.artistSelections || [],
+    }, {
+      Artist,
+      session,
+      provenance: {
+        source: "community",
+        submissionId: submission.submissionId,
+        revision: submission.currentRevision,
+        approvedByUserId: actorUserId,
+        approvedAt,
+      },
+    });
+  } catch (error) {
+    if (error instanceof ArtistIdentityError) {
+      throw new ModerationConflictError(error.message, "ARTIST_IDENTITY_CONFLICT", error.details);
+    }
+    throw error;
+  }
+}
+
 function appliedFieldsChanged(left, right) {
   return JSON.stringify(left?.appliedFields || []) !== JSON.stringify(right?.appliedFields || []);
 }
@@ -700,6 +732,15 @@ async function approveAlbumSubmission({
     throw new ModerationConflictError("Suggestion not found", "SUGGESTION_NOT_FOUND");
   }
   const preliminary = plain(preliminarySubmission);
+  // An album suggestion is approved only as the revision the moderator
+  // reviewed: the detail page and bulk approval both send it, and a missing
+  // value is refused rather than defaulting to whatever is current.
+  if ((preliminary.submissionType || "new_album") === "new_album" && expectedRevision === undefined) {
+    throw new ModerationValidationError(
+      "expectedRevision is required to approve an album suggestion; approve the revision you reviewed",
+      "EXPECTED_REVISION_REQUIRED",
+    );
+  }
   // Bulk approval passes the revision the moderator saw. Every branch below
   // conditions its write on this preliminary revision, so a later revision
   // can't be approved in its place.
@@ -745,6 +786,19 @@ async function approveAlbumSubmission({
   if (applyFields !== undefined) {
     throw new ModerationValidationError("applyFields is only valid for catalog correction approvals");
   }
+  // Artist links create or reuse artists for a new album's credits. Linking
+  // the suggestion to an existing album would drop that work, so it is
+  // refused; use mark-duplicate, reject, or request changes instead.
+  const artistBearing = isArtistBearing(preliminary);
+  if (artistBearing) {
+    if (albumId) {
+      throw new ModerationValidationError(
+        "A suggestion with artist links cannot be linked to an existing album; mark it as a duplicate, reject it, or request changes",
+        "ARTIST_LINKS_REQUIRE_NEW_ALBUM",
+      );
+    }
+    assertArtistSuggestionsEnabled();
+  }
 
   // Resolve before opening Mongo's transaction. The transaction re-reads the
   // submission and rejects this result if the revision changed meanwhile.
@@ -787,7 +841,8 @@ async function approveAlbumSubmission({
         throw new ModerationConflictError("Only pending suggestions can be approved", "INVALID_SUBMISSION_STATE");
       }
       if (current.currentRevision !== preliminaryRevision
-        || (preliminaryUpdatedAt !== null && current.updatedAt && new Date(current.updatedAt).getTime() !== preliminaryUpdatedAt)) {
+        || (preliminaryUpdatedAt !== null && current.updatedAt && new Date(current.updatedAt).getTime() !== preliminaryUpdatedAt)
+        || isArtistBearing(current) !== artistBearing) {
         throw new ModerationConflictError("Suggestion changed while artwork was being resolved", "STATE_CONFLICT");
       }
 
@@ -821,12 +876,19 @@ async function approveAlbumSubmission({
 
       const approvedAt = new Date();
       let album;
+      let artistResolutions = [];
       if (albumId) {
         album = await findCatalogByPublicId(albumId, session);
         if (!album) throw new ModerationConflictError("Catalog album not found", "CATALOG_ALBUM_NOT_FOUND");
       } else {
+        let credits = current.proposedMetadata?.artistCredits;
+        if (artistBearing) {
+          const linked = await resolveArtistLinks(current, actorUserId, approvedAt, session);
+          credits = linked.credits;
+          artistResolutions = linked.resolutions;
+        }
         const resolvedArtistCredits = await resolveApprovalCredits(
-          current.proposedMetadata?.artistCredits,
+          credits,
           current,
           actorUserId,
           approvedAt,
@@ -859,6 +921,7 @@ async function approveAlbumSubmission({
               revision: current.currentRevision,
               publicationType: albumId ? "catalog_linked" : "catalog_created",
               album,
+              artistResolutions,
               approvedAt,
             }),
             ...(linkedGenreSubmissionId ? { linkedGenreSubmissionId } : {}),

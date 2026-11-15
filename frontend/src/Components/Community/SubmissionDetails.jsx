@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { describeGenreApplication } from "../../features/community/genres.js";
-import { musicBrainzArtistUrl, registryNameDiffers } from "../../features/community/artistCredits.js";
+import { artistLinksByPosition, musicBrainzArtistUrl, registryNameDiffers, resolutionLabel } from "../../features/community/artistCredits.js";
 import "./GenreSuggestion.css";
 import {
   formatCommunityAction,
@@ -111,11 +111,71 @@ function CreditIdentity({ credit, registry }) {
   );
 }
 
-function CreditList({ credits, registry }) {
+function observedDate(value) {
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? date.toISOString().slice(0, 10) : "";
+}
+
+// A credit's proposed artist link. Evidence links are private to the
+// contributor and moderators, who are the only readers of this detail.
+// `proposalRegistry` (moderators) says which MusicBrainz MBIDs approval reuses.
+function ArtistLink({ credit, link, registry, proposalRegistry }) {
+  const { selection, proposal, resolution } = link;
+  let summary;
+  if (selection.kind === "existing") {
+    const entry = registry?.artists?.[selection.artistId];
+    summary = (
+      <span className="suggestion-credit-role">
+        Linked to Rescened artist {entry?.name ? <strong>{entry.name}</strong> : <code>{selection.artistId}</code>}
+        {entry?.name && registryNameDiffers(credit.name, entry.name) ? " (credit keeps its wording)" : ""}
+      </span>
+    );
+  } else if (proposal?.kind === "musicbrainz") {
+    const observation = proposal.observation || {};
+    const known = proposalRegistry?.[proposal.artistMbid];
+    summary = (
+      <>
+        <span className="suggestion-credit-role">
+          Proposed MusicBrainz artist <strong>{observation.name || proposal.artistMbid}</strong>
+          {observation.disambiguation ? ` (${observation.disambiguation})` : ""}
+          {observedDate(observation.observedAt) ? `, checked ${observedDate(observation.observedAt)}` : ""}
+        </span>
+        {known ? <span className="suggestion-credit-role">Already on Rescened as <strong>{known.name}</strong>; approval reuses that artist</span> : null}
+        <a className="suggestion-external-link" href={`https://musicbrainz.org/artist/${proposal.artistMbid}`} target="_blank" rel="noreferrer">MusicBrainz artist</a>
+      </>
+    );
+  } else if (proposal?.kind === "community") {
+    summary = (
+      <>
+        <span className="suggestion-credit-role">Proposed new artist <strong>{proposal.canonicalName}</strong></span>
+        <span className="suggestion-credit-role">
+          Private evidence:{" "}
+          {(proposal.evidence || []).map((entry, index) => (
+            <span key={entry.url}>
+              {index ? ", " : ""}
+              <a className="suggestion-external-link" href={entry.url} target="_blank" rel="noopener noreferrer">link {index + 1}</a>
+            </span>
+          ))}
+        </span>
+      </>
+    );
+  } else {
+    summary = <span className="suggestion-credit-warning">Artist link could not be read</span>;
+  }
+  return (
+    <span className="suggestion-credit-link">
+      {summary}
+      {resolution ? <span className="suggestion-credit-role">{resolutionLabel(resolution)} <code>{resolution.artistId}</code></span> : null}
+    </span>
+  );
+}
+
+function CreditList({ credits, registry, links = null, proposalRegistry = null }) {
   return (
     <ul className="suggestion-credit-list">
       {credits.map((credit, index) => {
         const musicBrainzUrl = musicBrainzArtistUrl(credit) || musicBrainzArtistUrl(registry?.artists?.[credit.artistId]);
+        const link = links?.get(index);
         return (
           <li className="suggestion-credit-item" key={`${credit.name || "artist"}-${credit.role || "main"}-${index}`}>
             <span className="suggestion-credit-name">{credit.name || "Unnamed artist"}</span>
@@ -126,6 +186,7 @@ function CreditList({ credits, registry }) {
                 MusicBrainz artist
               </a>
             ) : null}
+            {link ? <ArtistLink credit={credit} link={link} registry={registry} proposalRegistry={proposalRegistry} /> : null}
           </li>
         );
       })}
@@ -133,7 +194,7 @@ function CreditList({ credits, registry }) {
   );
 }
 
-function MetadataBlock({ metadata = {}, compact = false, headingLevel = 4, registry = null }) {
+function MetadataBlock({ metadata = {}, compact = false, headingLevel = 4, registry = null, links = null, proposalRegistry = null }) {
   const artistCredits = values(metadata.artistCredits);
   const tracks = values(metadata.tracks);
   const SubheadingTag = `h${Math.min(Math.max(headingLevel, 1), 6)}`;
@@ -155,7 +216,7 @@ function MetadataBlock({ metadata = {}, compact = false, headingLevel = 4, regis
       {artistCredits.length ? (
         <div className="suggestion-detail-subsection">
           <SubheadingTag className="suggestion-detail-subheading">Artist credits</SubheadingTag>
-          <CreditList credits={artistCredits} registry={registry} />
+          <CreditList credits={artistCredits} registry={registry} links={links} proposalRegistry={proposalRegistry} />
         </div>
       ) : null}
 
@@ -429,7 +490,7 @@ function RevisionHistory({ revisions, headingLevel = 3, registry = null }) {
                 <GenreChangesBlock changes={revision.genreChanges} baseGenres={revision.baseGenres} compact />
               ) : (
                 <>
-                  <MetadataBlock registry={registry} metadata={revision.proposedMetadata} compact headingLevel={nestedHeadingLevel} />
+                  <MetadataBlock registry={registry} metadata={revision.proposedMetadata} links={artistLinksByPosition(revision)} compact headingLevel={nestedHeadingLevel} />
                   {revision.proposedGenres ? <GenreChangesBlock changes={revision.proposedGenres} compact /> : null}
                   <EvidenceBlock
                     supportingSources={revision.supportingSources}
@@ -503,6 +564,7 @@ export function SubmissionDetails({
   genreReview = null,
   artistRegistry = null,
   artistRegistryUnchecked = null,
+  artistProposalRegistry = null,
 }) {
   if (!submission) {
     return null;
@@ -595,7 +657,13 @@ export function SubmissionDetails({
               <p className="suggestion-detail-kicker">Current revision</p>
               <SectionHeadingTag className="suggestion-detail-section-title">Release metadata</SectionHeadingTag>
             </div>
-            <MetadataBlock registry={registry} metadata={metadata} headingLevel={nestedHeadingLevel} />
+            <MetadataBlock
+              registry={registry}
+              metadata={metadata}
+              links={submission.proposedMetadata ? artistLinksByPosition(submission, submission.artistResolutions) : null}
+              proposalRegistry={artistProposalRegistry}
+              headingLevel={nestedHeadingLevel}
+            />
           </section>
 
           <section className="suggestion-detail-section">

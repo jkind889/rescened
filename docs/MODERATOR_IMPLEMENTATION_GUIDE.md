@@ -210,7 +210,7 @@ The current duplicate-target check verifies approved status and a non-null album
 
 ## Approval in detail
 
-The route normalizes the small command body, then delegates all publication behavior to `approveAlbumSubmission()`. The service first reads the submission without a session. If it is already approved, the service returns the existing album with `idempotent: true` before cover work, type-specific body validation, or a new transaction. A first approval must still be pending.
+The route normalizes the small command body, then delegates all publication behavior to `approveAlbumSubmission()`. The service first reads the submission without a session. A new-album approval must name the reviewed `expectedRevision`; without it the service returns `400 EXPECTED_REVISION_REQUIRED`, and a pending suggestion at another revision returns `409 STATE_CONFLICT`. If it is already approved, the service returns the existing album with `idempotent: true` before cover work, type-specific body validation, or a new transaction. A first approval must still be pending.
 
 ### New-album create or link
 
@@ -284,7 +284,7 @@ Existing catalog rows must be reconciled to an explicit positive `catalogRevisio
 
 | Type | Bulk approval body | Refused when (`details`) |
 | --- | --- | --- |
-| `new_album` | `{}`: create a new album, never `albumId` or `confirmPossibleDuplicate` | The suggestion has stored duplicate signals (`possible_duplicate`), or a reviewed tracklist baseline was chosen for an older revision (`stale_baseline_selection`) |
+| `new_album` | `{}` plus the item's `expectedRevision`: create a new album, never `albumId` or `confirmPossibleDuplicate` | The suggestion has artist links (`artist_links`), stored duplicate signals (`possible_duplicate`), or a reviewed tracklist baseline was chosen for an older revision (`stale_baseline_selection`) |
 | `catalog_correction` | Every proposed field group as `applyFields` | It proposes no field groups (`no_proposed_fields`) |
 | `genre_suggestion` | Apply every addition, removal, and primary change. Each new name maps to the active genre whose name or alias matches it exactly, without adding an alias. | A new name has no exact active match (`unmatched_genre_name`). Bulk never creates a genre. |
 

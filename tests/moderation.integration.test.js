@@ -112,6 +112,7 @@ async function transactionalApprovalTest() {
   const result = await approveAlbumSubmission({
     submissionId: submission.submissionId,
     actorUserId: "moderator-user",
+    expectedRevision: 1,
     confirmPossibleDuplicate: true,
     reason: "Verified integration evidence",
     coverResolver: null,
@@ -134,8 +135,8 @@ async function transactionalApprovalTest() {
 async function concurrentApprovalTest() {
   const submission = await createSubmission("Concurrent Album");
   const results = await Promise.all([
-    approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "moderator-a", confirmPossibleDuplicate: true, coverResolver: null }),
-    approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "moderator-b", confirmPossibleDuplicate: true, coverResolver: null }),
+    approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "moderator-a", expectedRevision: 1, confirmPossibleDuplicate: true, coverResolver: null }),
+    approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "moderator-b", expectedRevision: 1, confirmPossibleDuplicate: true, coverResolver: null }),
   ]);
   assert.equal(results[0].album.albumId, results[1].album.albumId);
   assert.equal(await AlbumCatalog.countDocuments({ title: "Concurrent Album" }), 1);
@@ -180,6 +181,7 @@ async function automaticCoverApprovalTest() {
   const first = await approveAlbumSubmission({
     submissionId: submission.submissionId,
     actorUserId: "moderator-user",
+    expectedRevision: 1,
     confirmPossibleDuplicate: true,
     coverResolver: resolver.resolve,
   });
@@ -194,6 +196,7 @@ async function automaticCoverApprovalTest() {
   const retry = await approveAlbumSubmission({
     submissionId: submission.submissionId,
     actorUserId: "moderator-user",
+    expectedRevision: 1,
     coverResolver: async () => { throw new Error("idempotent retries must not resolve artwork"); },
   });
   assert.equal(retry.idempotent, true);
@@ -282,7 +285,7 @@ async function bulkConcurrentWithSingleTest() {
   const submission = await createSubmission("Bulk Concurrent Album");
   const [bulk, single] = await Promise.all([
     bulkApprove({ items: [bulkItem(submission)], actorUserId: "moderator-a", approve: approveWithoutArtwork }),
-    approveWithoutArtwork({ submissionId: submission.submissionId, actorUserId: "moderator-b" }),
+    approveWithoutArtwork({ submissionId: submission.submissionId, actorUserId: "moderator-b", expectedRevision: submission.currentRevision }),
   ]);
   assert.equal(bulk.results[0].ok, true, JSON.stringify(bulk.results[0]));
   assert.equal(bulk.results[0].albumId, single.album.albumId);
@@ -300,7 +303,7 @@ async function rollbackTest() {
   };
   try {
     await assert.rejects(
-      approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "moderator-user", confirmPossibleDuplicate: true, coverResolver: null }),
+      approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "moderator-user", expectedRevision: 1, confirmPossibleDuplicate: true, coverResolver: null }),
       /forced approval failure/,
     );
   } finally {

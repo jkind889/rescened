@@ -161,7 +161,7 @@ async function approvalResolvesIdentityTest() {
     { name: "Gamma", artistMbid: MBID_C },
     { name: "Unlinked Guest", role: "featured" },
   ]);
-  await approveAlbumSubmission({ submissionId: first.submissionId, actorUserId: "moderator", confirmPossibleDuplicate: true, coverResolver: null });
+  await approveAlbumSubmission({ submissionId: first.submissionId, actorUserId: "moderator", expectedRevision: 1, confirmPossibleDuplicate: true, coverResolver: null });
   const firstAlbum = await AlbumCatalog.findOne({ title: "Community Identity One" }).lean();
   const gamma = await Artist.findOne({ artistId: firstAlbum.artistCredits[0].artistId }).lean();
   assert.equal(artistMbidOf(gamma), MBID_C);
@@ -170,7 +170,7 @@ async function approvalResolvesIdentityTest() {
   assert.deepEqual(firstAlbum.artistCredits[1], { name: "Unlinked Guest", role: "featured" });
 
   const second = await createSubmission("Community Identity Two", [{ name: "Gamma (credited)", artistMbid: MBID_C }]);
-  await approveAlbumSubmission({ submissionId: second.submissionId, actorUserId: "moderator", confirmPossibleDuplicate: true, coverResolver: null });
+  await approveAlbumSubmission({ submissionId: second.submissionId, actorUserId: "moderator", expectedRevision: 1, confirmPossibleDuplicate: true, coverResolver: null });
   const secondAlbum = await AlbumCatalog.findOne({ title: "Community Identity Two" }).lean();
   assert.equal(secondAlbum.artistCredits[0].artistId, gamma.artistId, "the registered MBID is reused");
   assert.equal(secondAlbum.artistCredits[0].name, "Gamma (credited)", "credit names stay as submitted");

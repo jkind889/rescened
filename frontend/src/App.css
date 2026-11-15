@@ -8602,6 +8602,12 @@ html:has(.community-page) .site-header {
   grid-column: auto;
 }
 
+/* The optional artist picker spans the whole credit row. */
+.suggestion-form-repeater-row .suggestion-form-artist-link,
+.suggestion-form-repeater-row .suggestion-form-artist-link-note {
+  grid-column: 1 / -1;
+}
+
 .suggestion-form-repeater-row-source {
   grid-template-columns: 88px minmax(120px, 0.55fr) minmax(220px, 1.4fr) minmax(220px, 1fr) auto;
 }

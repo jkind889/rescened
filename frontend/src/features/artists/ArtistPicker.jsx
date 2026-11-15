@@ -19,10 +19,16 @@ import {
   selectionFromLocal,
   selectionName,
   selectionSourceLabel,
-} from "./artistPicker";
+} from "./pickerSelections.js";
 import "./ArtistPicker.css";
 
 const IDLE = { status: "idle", rows: [], error: null };
+
+function enterPressed(event) {
+  if (event.key !== "Enter" || event.nativeEvent?.isComposing) return false;
+  event.preventDefault();
+  return true;
+}
 
 // Links one credit to an artist by explicit choice: a Rescened artist, a
 // MusicBrainz artist, or a new community artist with supporting links.
@@ -103,8 +109,11 @@ function PickerPanel({ creditName = "", value = null, onChange, disabled = false
       });
   }, [cancel, getToken]);
 
-  function search(event) {
-    event?.preventDefault();
+  // The picker sits inside other forms (an album suggestion), so it uses no
+  // <form> of its own: Enter in its fields is handled here and never submits
+  // the surrounding form.
+
+  function search() {
     const problem = pickerQueryProblem(effectiveQuery);
     setQueryProblem(problem);
     if (problem) return;
@@ -148,8 +157,7 @@ function PickerPanel({ creditName = "", value = null, onChange, disabled = false
     setMode("search");
   }
 
-  function submitCommunity(event) {
-    event.preventDefault();
+  function submitCommunity() {
     const result = communitySelectionFrom(draft);
     if (result.problems) {
       setDraftProblems(result.problems);
@@ -184,7 +192,7 @@ function PickerPanel({ creditName = "", value = null, onChange, disabled = false
   if (mode === "community") {
     const evidenceProblems = draftProblems.evidence || [];
     return (
-      <form className="artist-picker artist-picker-community" onSubmit={submitCommunity} aria-label={`Propose a new artist for ${label}`} noValidate>
+      <div className="artist-picker artist-picker-community" role="group" aria-label={`Propose a new artist for ${label}`}>
         <p className="artist-picker-note">
           Propose an artist that is not on Rescened or MusicBrainz. A moderator reviews the name and your links; they stay private.
         </p>
@@ -198,6 +206,7 @@ function PickerPanel({ creditName = "", value = null, onChange, disabled = false
             aria-invalid={draftProblems.canonicalName ? "true" : undefined}
             aria-describedby={draftProblems.canonicalName ? `${id}-community-name-problem` : undefined}
             onChange={(event) => setDraft((current) => ({ ...current, canonicalName: event.target.value }))}
+            onKeyDown={(event) => { if (enterPressed(event)) submitCommunity(); }}
             disabled={disabled}
           />
         </label>
@@ -220,6 +229,7 @@ function PickerPanel({ creditName = "", value = null, onChange, disabled = false
                     ...current,
                     evidence: current.evidence.map((entry, entryIndex) => (entryIndex === index ? event.target.value : entry)),
                   }))}
+                  onKeyDown={(event) => { if (enterPressed(event)) submitCommunity(); }}
                   disabled={disabled}
                 />
               </label>
@@ -234,17 +244,17 @@ function PickerPanel({ creditName = "", value = null, onChange, disabled = false
         </fieldset>
         {draftProblems.form ? <p className="artist-picker-problem">{draftProblems.form}</p> : null}
         <div className="artist-picker-actions">
-          <button type="submit" className="artist-picker-button artist-picker-button-primary" disabled={disabled}>Use this new artist</button>
+          <button type="button" className="artist-picker-button artist-picker-button-primary" onClick={submitCommunity} disabled={disabled}>Use this new artist</button>
           <button type="button" className="artist-picker-button" onClick={closeCommunity} disabled={disabled}>Back to search</button>
         </div>
-      </form>
+      </div>
     );
   }
 
   const searched = Boolean(searchedQuery) && (local.status !== "idle" || provider.status !== "idle");
   return (
     <div className="artist-picker" role="group" aria-label={`${label} link`}>
-      <form className="artist-picker-search" onSubmit={search} role="search" aria-label={`Find an artist for ${label}`}>
+      <div className="artist-picker-search" role="search" aria-label={`Find an artist for ${label}`}>
         <label className="artist-picker-field" htmlFor={`${id}-query`}>
           <span>Find the artist</span>
           <input
@@ -254,13 +264,14 @@ function PickerPanel({ creditName = "", value = null, onChange, disabled = false
             value={effectiveQuery}
             maxLength={200}
             onChange={(event) => editQuery(event.target.value)}
+            onKeyDown={(event) => { if (enterPressed(event)) search(); }}
             aria-invalid={queryProblem ? "true" : undefined}
             aria-describedby={queryProblem ? `${id}-query-problem` : undefined}
             disabled={disabled}
           />
         </label>
-        <button type="submit" className="artist-picker-button artist-picker-button-primary" disabled={disabled}>Search artists</button>
-      </form>
+        <button type="button" className="artist-picker-button artist-picker-button-primary" onClick={search} disabled={disabled}>Search artists</button>
+      </div>
       {queryProblem ? <p className="artist-picker-problem" id={`${id}-query-problem`}>{queryProblem}</p> : null}
       <p className="artist-picker-status" role="status" aria-live="polite">
         {pickerStatusMessage({ searchedQuery, local, provider })}

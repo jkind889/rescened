@@ -10,6 +10,7 @@ const { Genre } = require("../../models/Genre");
 const BaselineModels = require("../../models/AlbumBaseline");
 const { approveAlbumSubmission } = require("./approval");
 const { CORRECTION_FIELD_GROUPS } = require("./submissions");
+const { isArtistBearing } = require("./artistSuggestions");
 const {
   ApprovalUnavailableError,
   ModerationValidationError,
@@ -26,6 +27,8 @@ const REVIEW_REASONS = {
   unmatchedGenreName: "unmatched_genre_name",
   staleBaselineSelection: "stale_baseline_selection",
   noProposedFields: "no_proposed_fields",
+  // Artist links need an individual review of each proposed identity.
+  artistLinks: "artist_links",
 };
 
 function plain(value) {
@@ -162,6 +165,8 @@ async function bulkApprovalPlans(values) {
       plan = applyFields.length
         ? { eligible: true, body: { applyFields } }
         : { eligible: false, reason: REVIEW_REASONS.noProposedFields };
+    } else if (isArtistBearing(source)) {
+      plan = { eligible: false, reason: REVIEW_REASONS.artistLinks };
     } else if (hasDuplicateSignals(source)) {
       plan = { eligible: false, reason: REVIEW_REASONS.possibleDuplicate };
     } else if (staleBaselines.has(source.submissionId)) {

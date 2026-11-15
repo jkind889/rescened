@@ -44,6 +44,19 @@ const {
 } = require("../lib/genres/suggestions");
 const { normalizeAlbumGenreProposal } = require("../lib/genres/albumSuggestions");
 const { buildSearchPattern } = require("./utils/catalogSearch");
+const {
+  ArtistSuggestionError,
+  artistWorkFields,
+  assertArtistSuggestionsEnabled,
+  assertExistingSelections,
+  creationDigest,
+  normalizeArtistWork,
+  normalizeRequestKey,
+  prepareStoredProposals,
+  splitArtistRequest,
+} = require("./utils/artistSuggestions");
+const { createWithRequestKey, requestKeyFields } = require("./utils/requestKeys");
+const { ArtistProposalValidationError } = require("../lib/artists/proposals");
 
 const router = express.Router();
 
@@ -70,6 +83,17 @@ function submissionsEnabled(req, res, next) {
 }
 
 function sendRouteError(res, error, fallback) {
+  if (error instanceof ArtistProposalValidationError) {
+    return res.status(400).json({ error: error.message, code: error.code, details: error.details });
+  }
+  if (error instanceof ArtistSuggestionError) {
+    if (Number.isInteger(error.retryAfterSeconds)) res.set("Retry-After", String(error.retryAfterSeconds));
+    return res.status(error.status).json({
+      error: error.message,
+      code: error.code,
+      ...(Number.isInteger(error.retryAfterSeconds) ? { retryAfterSeconds: error.retryAfterSeconds } : {}),
+    });
+  }
   if (error instanceof SubmissionValidationError || error?.code === "INVALID_CURSOR") {
     const body = { error: error.message, code: error.code || "INVALID_SUBMISSION" };
     if (error.details?.length) body.details = error.details;
@@ -128,6 +152,8 @@ async function findSubmission(query) {
 function submissionUpdate(payload, duplicate, revision, status) {
   return {
     proposedMetadata: payload.proposedMetadata,
+    artistProposals: payload.artistProposals || [],
+    artistSelections: payload.artistSelections || [],
     genreChanges: payload.genreChanges || null,
     editionProposal: payload.editionProposal || null,
     supportingSources: payload.supportingSources,
@@ -188,22 +214,44 @@ router.post("/editions/preview", auth, submissionsEnabled, editionsEnabled, cont
   catch (error) { return sendRouteError(res, error, "Edition preview failed"); }
 });
 
+// Optional artist links (ARTIST_SUGGESTIONS_ENABLED): artistProposals and
+// artistSelections beside the ordinary body, plus a requestKey that makes an
+// ambiguous retry return the original suggestion instead of a duplicate. A
+// body without artist links keeps the existing contract.
 router.post("/", auth, submissionsEnabled, submissionCreateRateLimit, async (req, res) => {
   try {
-    const payload = await editions.normalize(req.body, req.userId);
+    const { rest, artist, requestKey: rawRequestKey } = splitArtistRequest(req.body);
+    if (artist.present) assertArtistSuggestionsEnabled();
+    const requestKey = normalizeRequestKey(rawRequestKey, { required: artist.present });
+    const payload = await editions.normalize(rest, req.userId);
     await assertCreditIdentities(payload.proposedMetadata.artistCredits);
     payload.genreChanges = await normalizeAlbumGenreProposal(payload.proposedGenres);
-    const duplicate = await findDuplicateSignals(payload);
-    const submittedAt = new Date();
-    const snapshot = snapshotForSubmission(payload, duplicate, submittedAt, 1);
-    const submission = await withNewGenreAllowance(req.userId, payload, (session) => createSubmission({
-      submittedByUserId: req.userId,
-      submissionType: "new_album",
-      ...submissionUpdate(payload, duplicate, 1, "pending"),
-      revisions: [snapshot],
-      moderationHistory: [{ actorUserId: req.userId, action: "submitted", reason: "", createdAt: submittedAt }],
-    }, session));
-    return res.status(201).json(serializeSubmission(submission, { detail: true }));
+    const work = normalizeArtistWork(artist, payload.proposedMetadata.artistCredits);
+    if (work) await assertExistingSelections(work.selections);
+    const digest = requestKey ? creationDigest({ payload, work, editionPreviewId: rest?.editionPreviewId }) : "";
+    const { document: submission, idempotent } = await createWithRequestKey({
+      Model: AlbumSubmission,
+      userId: req.userId,
+      requestKey,
+      digest,
+      create: async () => {
+        // Provider validation runs only for a new request, never for a replay.
+        if (work) Object.assign(payload, artistWorkFields(work, await prepareStoredProposals(work.proposals)));
+        const duplicate = await findDuplicateSignals(payload);
+        const submittedAt = new Date();
+        const snapshot = snapshotForSubmission(payload, duplicate, submittedAt, 1);
+        return withNewGenreAllowance(req.userId, payload, (session) => createSubmission({
+          submittedByUserId: req.userId,
+          submissionType: "new_album",
+          ...submissionUpdate(payload, duplicate, 1, "pending"),
+          ...requestKeyFields(requestKey, digest),
+          revisions: [snapshot],
+          moderationHistory: [{ actorUserId: req.userId, action: "submitted", reason: "", createdAt: submittedAt }],
+        }, session));
+      },
+    });
+    const body = serializeSubmission(submission, { detail: true });
+    return idempotent ? res.status(200).json({ ...body, idempotent: true }) : res.status(201).json(body);
   } catch (error) {
     return sendRouteError(res, error, "Failed to create suggestion");
   }
@@ -421,9 +469,17 @@ router.post("/:submissionId/revise", auth, submissionsEnabled, submissionMutatio
         },
       };
     } else {
-      const payload = await editions.normalize(req.body, req.userId, current);
+      const { rest, artist, requestKey } = splitArtistRequest(req.body);
+      if (requestKey !== undefined) throw new SubmissionValidationError("requestKey is only accepted when creating a suggestion");
+      if (artist.present) assertArtistSuggestionsEnabled();
+      const payload = await editions.normalize(rest, req.userId, current);
       await assertCreditIdentities(payload.proposedMetadata.artistCredits);
       payload.genreChanges = await normalizeAlbumGenreProposal(payload.proposedGenres);
+      const work = normalizeArtistWork(artist, payload.proposedMetadata.artistCredits);
+      if (work) {
+        await assertExistingSelections(work.selections);
+        Object.assign(payload, artistWorkFields(work, await prepareStoredProposals(work.proposals, { previous: current })));
+      }
       genreAllowancePayload = payload;
       const duplicate = await findDuplicateSignals(payload, { excludeSubmissionId: current._id });
       const snapshot = snapshotForSubmission(payload, duplicate, submittedAt, revision);
