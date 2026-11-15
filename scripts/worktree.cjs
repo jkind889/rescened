@@ -132,10 +132,12 @@ function buildEnvironments(profile, state, inherited = process.env, options = {}
     ...(options.artistPages === true ? { ARTIST_PAGES_ENABLED: 'true', RESCENED_PREVIEW_INIT: 'artist-pages', RESCENED_PREVIEW_DATABASE: profile.database } : {}),
     // Read-only MusicBrainz browsing for artist pages; only with --artist-pages.
     ...(options.artistPages === true && options.artistDiscography === true ? { ARTIST_DISCOGRAPHY_ENABLED: 'true' } : {}),
-    // Artist picker and artist suggestion pages; only with --artist-pages, so
-    // automatic collection/index creation stays off. Submissions stay forced
-    // off, so nothing can be suggested or created from this preview.
-    ...(options.artistPages === true && options.artistSuggestions === true ? { ARTIST_SUGGESTIONS_ENABLED: 'true' } : {}) };
+    // Artist picker and artist suggestion pages, read-only; only with
+    // --artist-pages, so automatic collection/index creation stays off.
+    // Submissions stay forced off, and community moderation is forced off too
+    // (whatever the profile allowlists), because moderator approvals with this
+    // flag on can register artists. Moderators can still read the queues.
+    ...(options.artistPages === true && options.artistSuggestions === true ? { ARTIST_SUGGESTIONS_ENABLED: 'true', COMMUNITY_MODERATION_ENABLED: 'false' } : {}) };
   const frontend = { ...base, NODE_ENV: 'development', VITE_API_URL: `http://127.0.0.1:${state.apiPort}`, VITE_CLERK_PUBLISHABLE_KEY: profile.server.CLERK_PUBLISHABLE_KEY };
   return { backend, frontend };
 }
@@ -184,7 +186,7 @@ async function start(ctx, profilePath, { artistPages = false, artistDiscography 
       ? `Artist pages: on. Automatic collection/index creation is off; only ${profile.database}.albumcatalogs artistCredits.artistId_1 is ensured.`
       : 'Artist pages: off.');
     console.log(`Artist MusicBrainz discography: ${artistDiscography ? 'on (live read-only MusicBrainz browsing, shared 1.1 s rate gate)' : 'off'}.`);
-    console.log(`Artist suggestions: ${artistSuggestions ? 'on for reading and the artist picker (live read-only MusicBrainz artist search when someone searches); submissions stay off, so nothing can be suggested or created' : 'off'}.`);
+    console.log(`Artist suggestions: ${artistSuggestions ? 'on for reading and the artist picker (live read-only MusicBrainz artist search when someone searches); submissions and community moderation are off, so nothing can be suggested, approved, or published as an artist' : 'off'}.`);
     console.log('Starting API + Vite only. Ctrl+C stops this pair. Shared development writes persist after worktree removal.');
     const specs = [
       { args: [path.join(__dirname, 'worktree-server.cjs'), path.join(ctx.root, 'server.js')], cwd: ctx.root, env: envs.backend },

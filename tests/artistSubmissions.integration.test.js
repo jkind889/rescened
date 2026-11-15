@@ -368,6 +368,67 @@ integration("flags gate mutations while reads keep working", async () => {
   assert.equal(await Artist.countDocuments({ name: "Flag Band" }), 0);
 });
 
+// The worktree helper's read-only `--artist-pages --artist-suggestions`
+// mode, applied to the real routes with a profile that lists a moderator:
+// existing pending work must stay untouched and no artist may be published.
+integration("the helper's read-only artist suggestions mode publishes nothing, even for a profile moderator", async () => {
+  const wt = require("../scripts/worktree.cjs");
+  const helperModerator = "user_helperModerator";
+  const profile = {
+    environment: "shared-development", database: "rescened_dev", mongoHost: "dev.example.invalid",
+    server: { MONGO_URI: "mongodb+srv://test:fake@dev.example.invalid/rescened_dev", CLERK_SECRET_KEY: "sk_test_fixture", CLERK_PUBLISHABLE_KEY: "pk_test_fixture" },
+    preview: { moderatorUserIds: [helperModerator] },
+  };
+  const { backend } = wt.buildEnvironments(profile, { apiPort: 3101, webPort: 5201 }, {}, { artistPages: true, artistSuggestions: true });
+
+  // Pending work created while the full flags were on.
+  const standalone = await suggest(contributor(), community("Helper Pending Band"));
+  const linkedAlbum = await call("POST", "/suggestions", contributor(), {
+    proposedMetadata: { title: `Helper Album ${crypto.randomUUID()}`, artistCredits: [{ name: "Helper Album Artist", role: "main" }], releaseType: "album", releaseDate: "2026", coverSourceUrl: "https://example.com/cover.jpg" },
+    supportingSources: [{ type: "other", url: "https://example.com/release" }],
+    externalReferences: [],
+    artistProposals: [{ proposalKey: "new-1", kind: "community", canonicalName: "Helper Album Artist", evidence: [{ url: "https://example.com/helper" }] }],
+    artistSelections: [{ position: 0, kind: "proposal", proposalKey: "new-1" }],
+    requestKey: crypto.randomUUID(),
+  });
+  assert.equal(linkedAlbum.status, 201, JSON.stringify(linkedAlbum.body));
+  const artistsBefore = await Artist.countDocuments();
+  const keys = ["COMMUNITY_SUBMISSIONS_ENABLED", "COMMUNITY_MODERATION_ENABLED", "ARTIST_SUGGESTIONS_ENABLED", "MODERATOR_USER_IDS"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) process.env[key] = backend[key];
+  try {
+    assert.deepEqual(keys.map((key) => process.env[key]), ["false", "false", "true", helperModerator]);
+    for (const [path, body] of [
+      ["approve", { expectedRevision: 1 }],
+      ["request-changes", { expectedRevision: 1, reason: "x" }],
+      ["reject", { expectedRevision: 1, reason: "x" }],
+      ["mark-duplicate", { expectedRevision: 1, duplicateOfArtistId: imported.artistId }],
+    ]) {
+      const result = await moderate(standalone.body.submissionId, path, body, helperModerator);
+      assert.equal(result.status, 503, `${path}: ${JSON.stringify(result.body)}`);
+      assert.equal(result.body.code, "MODERATION_DISABLED");
+    }
+    const albumApproval = await call("POST", `/moderation/album-suggestions/${linkedAlbum.body.submissionId}/approve`, helperModerator, { expectedRevision: 1, confirmPossibleDuplicate: true });
+    assert.equal(albumApproval.status, 503, JSON.stringify(albumApproval.body));
+    assert.equal((await suggest(contributor(), community("Helper New Band"))).status, 503, "nothing can be suggested");
+    // Reads still work for the profile moderator.
+    assert.equal((await call("GET", `/moderation/artist-suggestions/${standalone.body.submissionId}`, helperModerator)).status, 200);
+    assert.equal((await call("GET", `/moderation/album-suggestions/${linkedAlbum.body.submissionId}`, helperModerator)).status, 200);
+  } finally {
+    for (const key of keys) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  }
+  assert.equal(await Artist.countDocuments(), artistsBefore, "no artist was published");
+  const storedStandalone = await ArtistSubmission.findOne({ submissionId: standalone.body.submissionId }).lean();
+  assert.equal(storedStandalone.status, "pending");
+  assert.equal(storedStandalone.moderationHistory.length, 1);
+  const storedAlbum = await AlbumSubmission.findOne({ submissionId: linkedAlbum.body.submissionId }).lean();
+  assert.equal(storedAlbum.status, "pending");
+  assert.equal(await AlbumCatalog.countDocuments({ title: storedAlbum.proposedMetadata.title }), 0);
+});
+
 integration("approval rolls back the artist when a later write fails, and concurrent commands publish once", async () => {
   const created = await suggest(contributor(), community("Rollback Band"));
   const { submissionId } = created.body;
