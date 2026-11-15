@@ -19,7 +19,7 @@
     "summary": "The correction form keeps each artist credit whole, including names with commas.",
     "changes": [
       "Each artist credit in a correction now has its own name and role, so a name with a comma, such as Tyler, The Creator, stays one credit instead of splitting into two.",
-      "Albums with many artists keep every credit when you open a correction. A credit leaves the list only when you remove it, and the form tells you when an album has more than the 20 credits one correction can carry."
+      "Albums with many artists keep every credit when you open a correction. Editing the credit list supports up to 20 credits; you can still correct other details or link up to 20 existing credits without removing the rest."
     ]
   },
   {
