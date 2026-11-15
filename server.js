@@ -1,4 +1,8 @@
-require("dotenv").config();
+// Quiet like every other entry point: dotenv 17 otherwise prints a banner to
+// stdout, which also corrupted node:test's serialized child-process output
+// for tests that load this module (tests/sharePreview.test.js flaked with
+// "Unable to deserialize cloned data" under parallel load).
+require("dotenv").config({ quiet: true });
 
 const express = require("express");
 const app = express();
