@@ -8,6 +8,9 @@ const AlbumCatalog = require("../models/AlbumCatalog");
 const AlbumSubmission = require("../models/AlbumSubmission");
 const Artist = require("../models/Artist");
 const Notification = require("../models/Notification");
+const { Genre, GenreEvent } = require("../models/Genre");
+const { validateGenreName } = require("../lib/genres/vocabulary");
+const { genreSuggestionFields, genreSuggestionSnapshot, normalizeGenreSuggestion } = require("../lib/genres/suggestions");
 const { artistMbidOf } = require("../lib/artists/identity");
 const { resolveArtistSelections } = require("../lib/artists/proposals");
 const { approveAlbumSubmission } = require("../routes/utils/approval");
@@ -31,7 +34,7 @@ let replSet;
 async function setup() {
   replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(replSet.getUri(), { dbName: DB_NAME });
-  await Promise.all([AlbumCatalog.syncIndexes(), AlbumSubmission.syncIndexes(), Artist.syncIndexes(), Notification.syncIndexes()]);
+  await Promise.all([AlbumCatalog, AlbumSubmission, Artist, Notification, Genre, GenreEvent].map((model) => model.syncIndexes()));
 }
 
 async function teardown() {
@@ -306,6 +309,117 @@ async function staleModerationCommandTest() {
   assert.equal(stored.moderationHistory.length, 2);
 }
 
+// Holds an approval between its preliminary read and its transaction: every
+// approval path reads the submission first, then calls mongoose.startSession.
+// Returns { entered, release, restore } for a deterministic interleaving.
+function pauseNextSessionStart() {
+  const original = mongoose.startSession;
+  let signalEntered;
+  let release;
+  const entered = new Promise((resolve) => { signalEntered = resolve; });
+  const released = new Promise((resolve) => { release = resolve; });
+  mongoose.startSession = async function pausedStartSession(...args) {
+    mongoose.startSession = original;
+    signalEntered();
+    await released;
+    return original.apply(mongoose, args);
+  };
+  return { entered, release, restore: () => { mongoose.startSession = original; } };
+}
+
+function settle(promise) {
+  return promise.then((result) => ({ result }), (error) => ({ error }));
+}
+
+// Moderator A reviews revision 1 and pauses after the preliminary read.
+// Moderator B requests changes, the contributor revises, and B approves
+// revision 2. A must get APPROVAL_CONFLICT, not idempotent success.
+async function staleGenreApprovalRaceTest() {
+  const jazz = await Genre.create({ genreId: crypto.randomUUID(), ...validateGenreName("Race Jazz"), origin: { source: "seed" } });
+  const soul = await Genre.create({ genreId: crypto.randomUUID(), ...validateGenreName("Race Soul"), origin: { source: "seed" } });
+  const album = await AlbumCatalog.create({ albumId: crypto.randomUUID(), title: "Genre Race Album", artistDisplayName: "Artist" });
+  const firstPayload = await normalizeGenreSuggestion({ albumId: album.albumId, add: [{ genreId: jazz.genreId }] }, album);
+  const createdAt = new Date();
+  const submission = await AlbumSubmission.create({
+    submissionId: crypto.randomUUID(),
+    submittedByUserId: "genre-race-contributor",
+    ...genreSuggestionFields(firstPayload, 1, "pending"),
+    revisions: [genreSuggestionSnapshot(firstPayload, createdAt, 1)],
+    moderationHistory: [{ actorUserId: "genre-race-contributor", action: "submitted", reason: "", createdAt }],
+  });
+  const { submissionId } = submission;
+  const genreDecisions = { add: [{ decision: "apply" }] };
+
+  const pause = pauseNextSessionStart();
+  try {
+    const stale = settle(approveAlbumSubmission({ submissionId, actorUserId: "moderator-a", expectedRevision: 1, genreDecisions }));
+    await pause.entered;
+    await applyModerationCommand({ submissionId, actorUserId: "moderator-b", action: "request_changes", body: { reason: "Wrong genre", expectedRevision: 1 } });
+    const nextPayload = await normalizeGenreSuggestion({ albumId: album.albumId, add: [{ genreId: soul.genreId }] }, album);
+    const revisedAt = new Date();
+    await AlbumSubmission.findOneAndUpdate(
+      { submissionId, status: "needs_changes", currentRevision: 1 },
+      {
+        $set: genreSuggestionFields(nextPayload, 2, "pending"),
+        $push: {
+          revisions: genreSuggestionSnapshot(nextPayload, revisedAt, 2),
+          moderationHistory: { actorUserId: "genre-race-contributor", action: "revised", reason: "", createdAt: revisedAt },
+        },
+      },
+      { runValidators: true },
+    );
+    const winner = await approveAlbumSubmission({ submissionId, actorUserId: "moderator-b", expectedRevision: 2, genreDecisions });
+    assert.equal(winner.idempotent, false);
+    pause.release();
+
+    const outcome = await stale;
+    assert.equal(outcome.result, undefined, `stale approval must not succeed: ${JSON.stringify(outcome.result?.suggestion?.currentRevision)}`);
+    assert.equal(outcome.error.code, "APPROVAL_CONFLICT");
+  } finally {
+    pause.restore();
+  }
+  const stored = await AlbumSubmission.findOne({ submissionId }).lean();
+  assert.equal(stored.currentRevision, 2);
+  assert.equal(stored.moderationHistory.filter((event) => event.action === "approved").length, 1);
+  const finalAlbum = await AlbumCatalog.findById(album._id).populate("genres").lean();
+  assert.deepEqual(finalAlbum.genres.map((genre) => genre.name), ["Race Soul"]);
+}
+
+// The same interleaving for a new-album suggestion.
+async function staleNewAlbumApprovalRaceTest() {
+  const submission = await createSubmission(`Album Race ${crypto.randomUUID()}`);
+  const { submissionId } = submission;
+  const pause = pauseNextSessionStart();
+  try {
+    const stale = settle(approveAlbumSubmission({ submissionId, actorUserId: "moderator-a", expectedRevision: 1, coverResolver: null }));
+    await pause.entered;
+    await applyModerationCommand({ submissionId, actorUserId: "moderator-b", action: "request_changes", body: { reason: "Fix title", expectedRevision: 1 } });
+    const current = await AlbumSubmission.findOne({ submissionId }).lean();
+    const revisedAt = new Date();
+    const revised = { ...current.revisions[0], revision: 2, submittedAt: revisedAt };
+    await AlbumSubmission.findOneAndUpdate(
+      { submissionId, status: "needs_changes", currentRevision: 1 },
+      {
+        $set: { status: "pending", currentRevision: 2 },
+        $push: { revisions: revised, moderationHistory: { actorUserId: "receipt-user", action: "revised", reason: "", createdAt: revisedAt } },
+      },
+      { runValidators: true },
+    );
+    const winner = await approveAlbumSubmission({ submissionId, actorUserId: "moderator-b", expectedRevision: 2, coverResolver: null });
+    assert.equal(winner.idempotent, false);
+    pause.release();
+
+    const outcome = await stale;
+    assert.equal(outcome.result, undefined, "stale approval must not succeed");
+    assert.equal(outcome.error.code, "APPROVAL_CONFLICT");
+  } finally {
+    pause.restore();
+  }
+  const stored = await AlbumSubmission.findOne({ submissionId }).lean();
+  assert.equal(stored.approvalReceipt.revision, 2);
+  assert.equal(stored.moderationHistory.filter((event) => event.action === "approved").length, 1);
+}
+
 function keyedSubmission(userId, requestKey, digest, title) {
   return AlbumSubmission.create({
     submissionId: crypto.randomUUID(),
@@ -367,6 +481,8 @@ if (integrationEnabled) {
   test("approval writes a receipt and enforces the reviewed revision on first approval and retries", approvalReceiptAndRevisionGuardTest);
   test("correction receipts bind the applied fields", correctionReceiptTest);
   test("moderation commands refuse a stale reviewed revision", staleModerationCommandTest);
+  test("a stale genre approval conflicts when another moderator approved a later revision", staleGenreApprovalRaceTest);
+  test("a stale new-album approval conflicts when another moderator approved a later revision", staleNewAlbumApprovalRaceTest);
   test("request keys deduplicate ambiguous create retries per contributor", duplicateRequestKeyTest);
 } else {
   const skip = { skip: "Set RUN_MONGO_INTEGRATION=true in an environment that permits local Mongo processes" };
@@ -377,5 +493,7 @@ if (integrationEnabled) {
   test("approval writes a receipt and enforces the reviewed revision on first approval and retries", skip, () => {});
   test("correction receipts bind the applied fields", skip, () => {});
   test("moderation commands refuse a stale reviewed revision", skip, () => {});
+  test("a stale genre approval conflicts when another moderator approved a later revision", skip, () => {});
+  test("a stale new-album approval conflicts when another moderator approved a later revision", skip, () => {});
   test("request keys deduplicate ambiguous create retries per contributor", skip, () => {});
 }

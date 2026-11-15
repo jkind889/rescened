@@ -287,7 +287,7 @@ Any failure rolls back everything, including genres created earlier in the same 
 
 **Concurrency.** Two approvals on the same album conflict at the database. `withTransaction` retries the loser against the newly committed genres, which the operation lists are designed for, so both land. A writer outside a transaction changing `genresRevision` between the read and the write returns `409 GENRES_CHANGED`.
 
-**Retries.** An approval retried after it succeeded returns the same result with `idempotent: true` and writes nothing.
+**Retries.** An approval retried after it succeeded returns the same result with `idempotent: true` and writes nothing. If another moderator approved a later revision after this command first read the suggestion, or the retry names a different `expectedRevision`, it returns `409 APPROVAL_CONFLICT` instead of success.
 
 The response keeps the approval shape `{ suggestion, album, albumUrl, idempotent }`, and `album` includes its resolved `genres`.
 
