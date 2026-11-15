@@ -14,6 +14,7 @@ import { requestCommunityJson } from "../community/community";
 export const MAX_PICKER_QUERY_LENGTH = 200;
 export const MAX_CANONICAL_NAME_LENGTH = 200;
 export const MAX_EVIDENCE_LINKS = 5;
+export const MAX_EVIDENCE_URL_LENGTH = 2048;
 export const PICKER_LOCAL_LIMIT = 8;
 
 const ARTIST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -75,6 +76,7 @@ export function providerCandidatesFrom(data) {
       type: typeof row.type === "string" ? row.type : "",
       country: typeof row.country === "string" ? row.country : "",
       registeredArtistId: ARTIST_ID.test(String(row.registeredArtistId || "")) ? row.registeredArtistId.toLowerCase() : null,
+      registeredName: typeof row.registeredName === "string" ? row.registeredName.trim() : "",
       sourceUrl: `https://musicbrainz.org/artist/${row.artistMbid.toLowerCase()}`,
     }));
 }
@@ -84,10 +86,11 @@ export function selectionFromLocal(result) {
 }
 
 // A MusicBrainz candidate whose exact MBID is already registered selects
-// that Rescened artist; otherwise it proposes the MusicBrainz artist.
+// that Rescened artist under its registry name (MusicBrainz may word it
+// differently); otherwise it proposes the MusicBrainz artist.
 export function selectionFromCandidate(candidate) {
   if (candidate.registeredArtistId) {
-    return { kind: "existing", artistId: candidate.registeredArtistId, name: candidate.name, artistMbid: candidate.artistMbid };
+    return { kind: "existing", artistId: candidate.registeredArtistId, name: candidate.registeredName || candidate.name, artistMbid: candidate.artistMbid };
   }
   return {
     kind: "musicbrainz",
@@ -100,6 +103,7 @@ export function selectionFromCandidate(candidate) {
 }
 
 function httpsUrlProblem(value) {
+  if (value.length > MAX_EVIDENCE_URL_LENGTH) return `Links can be at most ${MAX_EVIDENCE_URL_LENGTH} characters.`;
   let url;
   try {
     url = new URL(value);
@@ -109,6 +113,29 @@ function httpsUrlProblem(value) {
   if (url.protocol !== "https:" || !url.hostname) return "Links must start with https://.";
   if (url.username || url.password) return "Links cannot contain a username or password.";
   return "";
+}
+
+// Wording for a MusicBrainz row whose MBID is already registered.
+export function registeredNote(candidate) {
+  if (!candidate?.registeredArtistId) return "";
+  const local = candidate.registeredName;
+  return local && local !== candidate.name ? `already on Rescened as ${local}` : "already on Rescened";
+}
+
+// The live status line for a finished or running search. It describes what
+// happened, including failures, so it never invites choosing from results
+// that are not there.
+export function pickerStatusMessage({ searchedQuery, local, provider }) {
+  if (!searchedQuery || (local.status === "idle" && provider.status === "idle")) return "";
+  const quoted = `“${searchedQuery}”`;
+  if (local.status === "loading" || provider.status === "loading") return `Searching for ${quoted}…`;
+  const rows = local.rows.length + provider.rows.length;
+  const localFailed = local.status === "error";
+  const providerFailed = provider.status === "error";
+  if (localFailed && providerFailed) return `Search failed for ${quoted}. Try again, or propose a new artist.`;
+  const failure = localFailed ? " Rescened search failed." : providerFailed ? " MusicBrainz is unavailable." : "";
+  if (!rows) return `No artists found for ${quoted}.${failure} Try another spelling, or propose a new artist.`;
+  return `Results for ${quoted}. Choose one, or propose a new artist.${failure}`;
 }
 
 // Validates a community proposal draft the same way the server will.

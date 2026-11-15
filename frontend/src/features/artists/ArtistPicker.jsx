@@ -12,7 +12,9 @@ import {
   localResultsFrom,
   normalizePickerQuery,
   pickerQueryProblem,
+  pickerStatusMessage,
   providerCandidatesFrom,
+  registeredNote,
   selectionFromCandidate,
   selectionFromLocal,
   selectionName,
@@ -239,7 +241,6 @@ function PickerPanel({ creditName = "", value = null, onChange, disabled = false
     );
   }
 
-  const searching = local.status === "loading" || provider.status === "loading";
   const searched = Boolean(searchedQuery) && (local.status !== "idle" || provider.status !== "idle");
   return (
     <div className="artist-picker" role="group" aria-label={`${label} link`}>
@@ -262,7 +263,7 @@ function PickerPanel({ creditName = "", value = null, onChange, disabled = false
       </form>
       {queryProblem ? <p className="artist-picker-problem" id={`${id}-query-problem`}>{queryProblem}</p> : null}
       <p className="artist-picker-status" role="status" aria-live="polite">
-        {searching ? `Searching for “${searchedQuery}”…` : searched ? `Results for “${searchedQuery}”. Choose one, or propose a new artist.` : ""}
+        {pickerStatusMessage({ searchedQuery, local, provider })}
       </p>
 
       {searched || local.status !== "idle" ? (
@@ -314,7 +315,7 @@ function PickerPanel({ creditName = "", value = null, onChange, disabled = false
                     <span className="artist-picker-result-name">{row.name}</span>
                     <span className="artist-picker-detail" id={`${id}-mb-${row.artistMbid}`}>
                       {candidateDetail(row) || "No description on MusicBrainz"}
-                      {row.registeredArtistId ? " · already on Rescened" : ""}
+                      {row.registeredArtistId ? ` · ${registeredNote(row)}` : ""}
                     </span>
                     <a className="artist-picker-source" href={row.sourceUrl} target="_blank" rel="noopener noreferrer">
                       View {row.name} on MusicBrainz

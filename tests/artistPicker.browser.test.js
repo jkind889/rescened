@@ -24,7 +24,7 @@ const LOCAL_NOVA = { query: 'Nova', results: [
   { artistId: LOCAL_B, name: 'Nova', artistMbid: '', match: { name: 'NOVA', kind: 'credit' }, releaseCount: 0, knownFor: [] },
 ] };
 const PROVIDER_NOVA = { query: 'Nova', provider: 'musicbrainz', candidates: [
-  { kind: 'external', provider: 'musicbrainz', artistMbid: MBID_A, name: 'Nova', disambiguation: 'UK synth-pop band', type: 'Group', country: 'GB', registeredArtistId: REGISTERED },
+  { kind: 'external', provider: 'musicbrainz', artistMbid: MBID_A, name: 'Nova', disambiguation: 'UK synth-pop band', type: 'Group', country: 'GB', registeredArtistId: REGISTERED, registeredName: 'Nova Collective' },
   { kind: 'external', provider: 'musicbrainz', artistMbid: MBID_B, name: 'Nova', disambiguation: 'US rapper', type: 'Person', country: 'US', registeredArtistId: null },
   { kind: 'external', provider: 'musicbrainz', artistMbid: 'not-an-mbid', name: 'Broken row' },
 ] };
@@ -164,7 +164,8 @@ window.__mount = rows => root.render(<Harness initialRows={rows} />);
         await external.waitFor();
         assert.equal(await local.getByRole('listitem').count(), 2, 'same-name Rescened artists stay distinct');
         assert.equal(await external.getByRole('listitem').count(), 2, 'malformed provider rows are dropped');
-        assert.match(await external.getByRole('listitem').first().textContent(), /already on Rescened/);
+        assert.match(await external.getByRole('listitem').first().textContent(), /already on Rescened as Nova Collective/);
+        await page.getByRole('status').filter({ hasText: 'Results for “Nova”. Choose one, or propose a new artist.' }).waitFor();
         assert.equal(await page.getByRole('link', { name: 'View Nova on MusicBrainz' }).first().getAttribute('href'), `https://musicbrainz.org/artist/${MBID_A}`);
         assert.deepEqual(await selections(page), [null], 'results never select anything by themselves');
         const description = await external.getByRole('listitem').nth(1).getByRole('button', { name: 'Choose Nova' })
@@ -183,8 +184,11 @@ window.__mount = rows => root.render(<Harness initialRows={rows} />);
         await external.waitFor();
 
         await external.getByRole('listitem').first().getByRole('button', { name: 'Choose Nova' }).click();
-        assert.deepEqual(await selections(page), [{ kind: 'existing', artistId: REGISTERED, name: 'Nova', artistMbid: MBID_A }], 'an exact registered MBID selects the Rescened artist');
-        await page.getByRole('button', { name: 'Remove link to Nova' }).click();
+        assert.deepEqual(await selections(page), [{ kind: 'existing', artistId: REGISTERED, name: 'Nova Collective', artistMbid: MBID_A }],
+          'an exact registered MBID selects the Rescened artist under its registry name');
+        const summary = page.getByRole('group', { name: 'Credit 1 link' });
+        assert.match(await summary.textContent(), /Nova Collective\s*On Rescened/, 'the summary shows the Rescened name, not the MusicBrainz wording');
+        await page.getByRole('button', { name: 'Remove link to Nova Collective' }).click();
         await local.getByRole('listitem').nth(1).getByRole('button', { name: 'Choose Nova' }).click();
         assert.deepEqual(await selections(page), [{ kind: 'existing', artistId: LOCAL_B, name: 'Nova', artistMbid: '' }]);
       });
@@ -198,6 +202,7 @@ window.__mount = rows => root.render(<Harness initialRows={rows} />);
           { error: 'busy', code: 'ARTIST_DISCOVERY_THROTTLED', retryAfterSeconds: 9 }, { 'retry-after': '9' });
         await answer(page, '/artist-discovery/local', 'Nova', 200, LOCAL_NOVA);
         await page.getByText('MusicBrainz is busy. Try again in 9 seconds.').waitFor();
+        assert.equal(await page.getByRole('status').textContent(), 'Results for “Nova”. Choose one, or propose a new artist. MusicBrainz is unavailable.');
         assert.equal(await page.getByRole('list', { name: 'Rescened artists' }).getByRole('listitem').count(), 2);
         await settleUi(page);
         await page.waitForTimeout(300);
@@ -220,12 +225,15 @@ window.__mount = rows => root.render(<Harness initialRows={rows} />);
         await answer(page, '/artist-discovery/musicbrainz', 'Nobody', 200, 'not json');
         await page.getByText('Failed to search Rescened artists').waitFor();
         await page.getByText('MusicBrainz is unavailable right now. Rescened results still work.').waitFor();
+        assert.equal(await page.getByRole('status').textContent(), 'Search failed for “Nobody”. Try again, or propose a new artist.',
+          'the live status reports the failure instead of inviting a choice');
         await searchFor(page, 1);
         await waitForRequests(page, 4);
         await answer(page, '/artist-discovery/local', 'Nobody', 200, { query: 'Nobody', results: [{ artistId: 'bad', name: 'Bad' }] });
         await answer(page, '/artist-discovery/musicbrainz', 'Nobody', 200, { candidates: [] });
         await page.getByText('No Rescened artists match.').waitFor();
         await page.getByText('No MusicBrainz artists match.').waitFor();
+        assert.equal(await page.getByRole('status').textContent(), 'No artists found for “Nobody”. Try another spelling, or propose a new artist.');
         assert.deepEqual(await selections(page), [null]);
       });
     });
@@ -319,6 +327,17 @@ window.__mount = rows => root.render(<Harness initialRows={rows} />);
         await page.getByRole('button', { name: 'Use this new artist' }).click();
         await page.getByText('Links must start with https://.').waitFor();
         assert.deepEqual(await selections(page), [null]);
+        // Same 2,048-character limit as the server's proposal validator.
+        const longest = `https://example.com/${'a'.repeat(2048 - 20)}`;
+        await page.getByRole('textbox', { name: 'Supporting link 1' }).fill(`${longest}a`);
+        await page.getByRole('button', { name: 'Use this new artist' }).click();
+        await page.getByText('Links can be at most 2048 characters.').waitFor();
+        assert.deepEqual(await selections(page), [null]);
+        await page.getByRole('textbox', { name: 'Supporting link 1' }).fill(longest);
+        await page.getByRole('button', { name: 'Use this new artist' }).click();
+        assert.equal((await selections(page))[0]?.evidence?.[0]?.url?.length, 2048, 'a link at the limit is accepted');
+        await page.getByRole('button', { name: 'Remove link to Unknown Local Band' }).click();
+        await page.getByRole('button', { name: 'Not listed? Propose a new artist' }).click();
         await page.getByRole('textbox', { name: 'Supporting link 1' }).fill('https://example.com/band');
         await page.getByRole('button', { name: 'Add another link' }).click();
         await page.getByRole('textbox', { name: 'Supporting link 2' }).fill('https://example.com/band');

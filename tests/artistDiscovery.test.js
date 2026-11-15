@@ -139,6 +139,32 @@ test("an upstream throttle starts a bounded cooldown that refuses artist request
   await assert.rejects(noHeader.searchArtists("Nova"), (error) => error.retryAfterSeconds === 10);
 });
 
+// Requests already waiting at the shared rate gate when MusicBrainz throttles
+// must be refused at the gate, not sent. Uses the real gate (1.1 s pacing)
+// with a controlled clock: the gate's sleep yields a macrotask, so the first
+// request's 503 is processed before the queued lookup reaches the front.
+test("requests queued behind the rate gate honor a cooldown that started while they waited", async () => {
+  const clock = { now: 0 };
+  const fetches = [];
+  const search = createMusicBrainzSearch({
+    intervalMs: 1_100,
+    nowMs: () => clock.now,
+    sleepFn: async (ms) => { await new Promise((resolve) => setTimeout(resolve, 5)); clock.now += ms; },
+    fetchFn: async (url) => {
+      fetches.push({ url, at: clock.now });
+      return response({}, { status: 503, headers: { "retry-after": "60" } });
+    },
+  });
+  const first = search.searchArtists("Nova");
+  const queuedLookup = search.lookupArtist(MBID_B);
+  const queuedSearch = search.searchArtists("Echo");
+  await assert.rejects(first, (error) => error.code === "MUSICBRAINZ_THROTTLED" && error.retryAfterSeconds === 60);
+  await assert.rejects(queuedLookup, (error) => error.code === "MUSICBRAINZ_THROTTLED" && error.retryAfterSeconds > 0 && error.retryAfterSeconds <= 60);
+  await assert.rejects(queuedSearch, (error) => error.code === "MUSICBRAINZ_THROTTLED");
+  assert.equal(fetches.length, 1, `only the first request reached MusicBrainz: ${JSON.stringify(fetches.map((entry) => entry.at))}`);
+  assert.equal(search.stats.networkRequests, 1);
+});
+
 test("a burst beyond the pending bound is refused instead of queued", async () => {
   const releases = [];
   let calls = 0;
@@ -253,7 +279,7 @@ async function withRouter(options, run) {
   }
 }
 
-const registered = newArtistDocument({ artistId: crypto.randomUUID(), name: "Nova", artistMbid: MBID_A, source: "import" });
+const registered = newArtistDocument({ artistId: crypto.randomUUID(), name: "Local Canonical", artistMbid: MBID_A, source: "import" });
 const communityArtist = { artistId: crypto.randomUUID(), name: "Nova", externalReferences: [], artistSource: "community" };
 
 test("the flag is off by default and independent of artist pages", () => {
@@ -316,6 +342,8 @@ test("MusicBrainz discovery marks exact registered MBIDs and stays external", as
       ["external", MBID_A, registered.artistId],
       ["external", MBID_B, null],
     ], "the same-name community artist is never matched by name");
+    assert.deepEqual(result.body.candidates.map((row) => [row.name, row.registeredName]), [["Nova", "Local Canonical"], ["Nova", null]],
+      "a registered candidate carries the registry name beside the MusicBrainz wording");
     assert.equal(result.body.candidates[0].sourceUrl, `https://musicbrainz.org/artist/${MBID_A}`);
     assert.equal((await get("/musicbrainz")).status, 400);
     assert.equal((await get("/musicbrainz?q=%20")).status, 400);

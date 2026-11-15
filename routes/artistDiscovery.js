@@ -134,18 +134,24 @@ function createArtistDiscoveryRouter({
       return res.json({
         query,
         provider: "musicbrainz",
-        candidates: candidates.map((candidate) => ({
-          kind: "external",
-          provider: "musicbrainz",
-          artistMbid: candidate.artistMbid,
-          name: candidate.name,
-          sortName: candidate.sortName || "",
-          disambiguation: candidate.disambiguation || "",
-          type: candidate.type || "",
-          country: candidate.country || "",
-          registeredArtistId: plain(registered.get(candidate.artistMbid))?.artistId || null,
-          sourceUrl: `https://musicbrainz.org/artist/${candidate.artistMbid}`,
-        })),
+        candidates: candidates.map((candidate) => {
+          const registeredArtist = plain(registered.get(candidate.artistMbid));
+          return {
+            kind: "external",
+            provider: "musicbrainz",
+            artistMbid: candidate.artistMbid,
+            name: candidate.name,
+            sortName: candidate.sortName || "",
+            disambiguation: candidate.disambiguation || "",
+            type: candidate.type || "",
+            country: candidate.country || "",
+            // The Rescened artist this exact MBID already belongs to, with its
+            // registry name, which can differ from the MusicBrainz wording.
+            registeredArtistId: registeredArtist?.artistId || null,
+            registeredName: registeredArtist?.artistId ? registeredArtist.name || "" : null,
+            sourceUrl: `https://musicbrainz.org/artist/${candidate.artistMbid}`,
+          };
+        }),
       });
     } catch (error) {
       log.error("Artist picker registry reconciliation failed", error?.message || error);
