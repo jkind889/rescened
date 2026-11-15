@@ -462,6 +462,56 @@ function approvalResult(result) {
   };
 }
 
+// The revision an approved suggestion was approved at. Approved suggestions
+// cannot be revised, so legacy approvals without a receipt use the current
+// revision.
+function approvedRevision(source) {
+  const revision = Number(source?.approvalReceipt?.revision);
+  return Number.isSafeInteger(revision) && revision > 0 ? revision : source?.currentRevision;
+}
+
+function approvedCorrectionFields(source) {
+  if (Array.isArray(source?.approvalReceipt?.appliedFields)) return source.approvalReceipt.appliedFields;
+  const event = [...(source?.moderationHistory || [])].reverse().find((item) => item?.action === "approved");
+  return Array.isArray(event?.application?.appliedFields) ? event.application.appliedFields : null;
+}
+
+function sameFieldSet(left, right) {
+  const a = [...new Set(left || [])].sort();
+  const b = [...new Set(right || [])].sort();
+  return a.length === b.length && a.every((field, index) => field === b[index]);
+}
+
+// An exact retry of an approval returns the original result. A retry that
+// asserts a different reviewed revision, target album, or correction field
+// selection conflicts: reporting success would claim the moderator approved
+// something they did not. Values the retry omits are not asserted.
+function assertRetryMatchesApproval(source, { expectedRevision, albumId, applyFields, album } = {}) {
+  if (expectedRevision !== undefined && approvedRevision(source) !== expectedRevision) {
+    throw new ModerationConflictError("Suggestion was approved at a different revision", "APPROVAL_CONFLICT");
+  }
+  if (albumId && plain(album)?.albumId !== albumId) {
+    throw new ModerationConflictError("Suggestion was already approved for another album", "APPROVAL_CONFLICT");
+  }
+  if (source?.submissionType === "catalog_correction" && applyFields !== undefined) {
+    const fields = approvedCorrectionFields(source);
+    if (fields && !sameFieldSet(fields, applyFields)) {
+      throw new ModerationConflictError("Correction was already approved with a different field selection", "APPROVAL_CONFLICT");
+    }
+  }
+}
+
+function approvalReceipt({ revision, publicationType, album, appliedFields = [], artistResolutions = [], approvedAt }) {
+  return {
+    revision,
+    publicationType,
+    targetAlbumId: plain(album).albumId,
+    appliedFields: [...appliedFields],
+    artistResolutions: artistResolutions.map((resolution) => ({ ...resolution })),
+    approvedAt,
+  };
+}
+
 async function approveCatalogCorrection({ preliminary, submissionId, actorUserId, applyFields, reason }) {
   const preliminaryRevision = preliminary.currentRevision;
   const selectedFields = correctionApprovalFields(preliminary, applyFields);
@@ -477,6 +527,7 @@ async function approveCatalogCorrection({ preliminary, submissionId, actorUserId
       if (current.status === "approved") {
         const approvedAlbum = await findCatalogByInternalId(current.approvedAlbumCatalogId, session);
         if (!approvedAlbum) throw new ModerationConflictError("Approved suggestion has no usable catalog album", "APPROVAL_INCONSISTENT");
+        assertRetryMatchesApproval(current, { expectedRevision: preliminaryRevision, applyFields, album: approvedAlbum });
         result = { submission: { ...current, approvedAlbumCatalogId: approvedAlbum }, album: approvedAlbum, idempotent: true };
         return;
       }
@@ -548,6 +599,13 @@ async function approveCatalogCorrection({ preliminary, submissionId, actorUserId
             duplicateOfSubmissionId: null,
             approvedAt,
             approvalPublicationType: "catalog_corrected",
+            approvalReceipt: approvalReceipt({
+              revision: preliminaryRevision,
+              publicationType: "catalog_corrected",
+              album: updatedAlbum,
+              appliedFields: applied.appliedFields,
+              approvedAt,
+            }),
           },
           $push: {
             moderationHistory: {
@@ -648,6 +706,10 @@ async function approveAlbumSubmission({
   if (expectedRevision !== undefined && preliminary.status === "pending" && preliminary.currentRevision !== expectedRevision) {
     throw new ModerationConflictError("The suggestion was revised after the queue was loaded", "STATE_CONFLICT");
   }
+  // A retry of an approved suggestion must name the revision that was approved.
+  if (expectedRevision !== undefined && preliminary.status === "approved" && approvedRevision(preliminary) !== expectedRevision) {
+    throw new ModerationConflictError("Suggestion was approved at a different revision", "APPROVAL_CONFLICT");
+  }
   // Genre suggestions have their own approval, including the idempotent
   // retry, so they never reach the album publication logic below.
   if (preliminary.submissionType === "genre_suggestion") {
@@ -662,9 +724,7 @@ async function approveAlbumSubmission({
   if (preliminary.status === "approved") {
     const approvedAlbum = await findCatalogByInternalId(preliminary.approvedAlbumCatalogId);
     if (!approvedAlbum) throw new ModerationConflictError("Approved suggestion has no usable catalog album", "APPROVAL_INCONSISTENT");
-    if (albumId && plain(approvedAlbum).albumId !== albumId) {
-      throw new ModerationConflictError("Suggestion was already approved for another album", "APPROVAL_CONFLICT");
-    }
+    assertRetryMatchesApproval(preliminary, { expectedRevision, albumId, applyFields, album: approvedAlbum });
     return approvalResult({
       submission: { ...preliminary, approvedAlbumCatalogId: approvedAlbum },
       album: approvedAlbum,
@@ -715,9 +775,7 @@ async function approveAlbumSubmission({
       if (current.status === "approved") {
         const approvedAlbum = await findCatalogByInternalId(current.approvedAlbumCatalogId, session);
         if (!approvedAlbum) throw new ModerationConflictError("Approved suggestion has no usable catalog album", "APPROVAL_INCONSISTENT");
-        if (albumId && plain(approvedAlbum).albumId !== albumId) {
-          throw new ModerationConflictError("Suggestion was already approved for another album", "APPROVAL_CONFLICT");
-        }
+        assertRetryMatchesApproval(current, { expectedRevision: preliminaryRevision, albumId, album: approvedAlbum });
         result = {
           submission: { ...current, approvedAlbumCatalogId: approvedAlbum },
           album: approvedAlbum,
@@ -797,6 +855,12 @@ async function approveAlbumSubmission({
             duplicateOfSubmissionId: null,
             approvedAt,
             approvalPublicationType: albumId ? "catalog_linked" : "catalog_created",
+            approvalReceipt: approvalReceipt({
+              revision: current.currentRevision,
+              publicationType: albumId ? "catalog_linked" : "catalog_created",
+              album,
+              approvedAt,
+            }),
             ...(linkedGenreSubmissionId ? { linkedGenreSubmissionId } : {}),
           },
           $push: {
@@ -836,7 +900,9 @@ async function approveAlbumSubmission({
 }
 
 module.exports = {
+  approvalReceipt,
   approveAlbumSubmission,
+  assertRetryMatchesApproval,
   buildCatalogInput,
   resolveSuggestedCover,
 };

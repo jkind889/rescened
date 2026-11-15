@@ -31,8 +31,9 @@ async function applyModerationCommand({ submissionId, actorUserId, action, body 
   let session;
   let updated = null;
   // withTransaction may retry against a newer snapshot. Keep the command tied
-  // to the revision it first observed, like the approval path does.
-  let expectedRevision;
+  // to the revision the moderator reviewed when the request names one, or
+  // else to the revision it first observed, like the approval path does.
+  let expectedRevision = body?.expectedRevision;
   try {
     if (typeof mongoose.startSession !== "function") throw new ModerationUnavailableError();
     session = await mongoose.startSession();

@@ -112,6 +112,8 @@ Private contributor and moderator endpoints require Clerk authentication. `GET /
 | `approvedAlbumCatalogId` | Catalog album created, linked, or corrected by approval; required whenever status is `approved`. |
 | `approvedAt` | Immutable first-approval timestamp shared with the appended approval event. |
 | `approvalPublicationType` | `catalog_created`, `catalog_linked`, or `catalog_corrected`; required for approved records. |
+| `approvalReceipt` | Internal, server-authored record written in the approval transaction for new-album and correction approvals: approved revision, publication type, public target `albumId`, applied correction fields, and resolved artist identities (empty until artist proposals are wired in). Only approved records may carry one, and updates cannot remove it. Not serialized. Genre approvals and approvals made before this field existed have none. |
+| `creationRequestKey`, `creationPayloadDigest` | Optional, immutable pair for ambiguous create retries: a contributor-scoped UUID v4 and the SHA-256 of the normalized client payload, unique per `(submittedByUserId, creationRequestKey)`. No create route sets them yet. |
 | `duplicateOfSubmissionId` | Approved submission selected by a moderator duplicate decision; required whenever status is `duplicate`. |
 | `currentRevision` | Starts at `1` and increments after each accepted revision. |
 | `revisions` | Append-only complete proposal snapshots, including the duplicate state at submission time. |
@@ -412,19 +414,21 @@ Returns full proposal history, evidence, revisions, moderation history, and sani
 
 ### Moderator commands
 
-All command bodies are strict and reject unknown fields, client-supplied reviewer identity, status, audit data, and revision values.
+All command bodies are strict and reject unknown fields, client-supplied reviewer identity, status, and audit data. The only revision value a command accepts is the optional `expectedRevision` guard described below; it is never written.
 
 | Endpoint | Body | Transition |
 | --- | --- | --- |
-| `POST /:submissionId/request-changes` | `{ reason }` | `pending → needs_changes` |
-| `POST /:submissionId/reject` | `{ reason }` | `pending → rejected` |
-| `POST /:submissionId/mark-duplicate` | `{ duplicateOfSubmissionId, reason }` | `pending → duplicate` |
-| `POST /:submissionId/approve` for `new_album` | `{ albumId?, confirmPossibleDuplicate?, reason? }` | `pending → approved`, creating or linking |
-| `POST /:submissionId/approve` for `catalog_correction` | `{ applyFields, reason? }` | `pending → approved`, patching the fixed target |
+| `POST /:submissionId/request-changes` | `{ reason, expectedRevision? }` | `pending → needs_changes` |
+| `POST /:submissionId/reject` | `{ reason, expectedRevision? }` | `pending → rejected` |
+| `POST /:submissionId/mark-duplicate` | `{ duplicateOfSubmissionId, reason, expectedRevision? }` | `pending → duplicate` |
+| `POST /:submissionId/approve` for `new_album` | `{ albumId?, confirmPossibleDuplicate?, reason?, expectedRevision? }` | `pending → approved`, creating or linking |
+| `POST /:submissionId/approve` for `catalog_correction` | `{ applyFields, reason?, expectedRevision? }` | `pending → approved`, patching the fixed target |
+
+`expectedRevision` is the positive-integer revision the moderator reviewed. When it is present, a command against a pending suggestion at any other revision returns `409 STATE_CONFLICT` without writing. Omitting it keeps the earlier behavior, which binds the command to the revision the server first read. Bulk approval already sends it for every item. The artist-proposal approvals planned for later milestones will require it.
 
 Reasons are required, trimmed, and limited to 1,000 characters for change requests and rejections. Approval and duplicate reasons are optional with the same limit; a blank duplicate reason is stored as "Duplicate of an approved suggestion." Duplicate targets must be another approved submission with a usable catalog album. Existing catalog matches are handled by explicit `albumId` selection rather than `mark-duplicate`. Correction approval requires a non-empty subset of proposed field groups and rejects album selection or any supplied duplicate confirmation.
 
-A first successful state-changing command appends one moderation-history event. Request-changes, reject, and mark-duplicate reload moderator detail and return `{ suggestion, duplicateCandidates }`. Approval returns `{ suggestion, album, albumUrl, idempotent }`; an already-approved idempotent retry returns the existing result without appending another event. Concurrent or stale commands return `409 STATE_CONFLICT`.
+A first successful state-changing command appends one moderation-history event. Request-changes, reject, and mark-duplicate reload moderator detail and return `{ suggestion, duplicateCandidates }`. Approval returns `{ suggestion, album, albumUrl, idempotent }`; an already-approved idempotent retry returns the existing result without appending another event. A retry that asserts something different from what was approved returns `409 APPROVAL_CONFLICT` instead: an `expectedRevision` other than the approved revision, an `albumId` other than the approved album, or correction `applyFields` other than the applied set (compared as a set, from the receipt or, for older approvals, the approval event). A retry that omits a value does not assert it. The same check applies when a concurrent approval wins the race inside the transaction, so another moderator's approval of a later revision is reported as a conflict, not as success. Concurrent or stale commands return `409 STATE_CONFLICT`.
 
 ## Approval publication
 

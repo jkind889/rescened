@@ -234,6 +234,34 @@ const correctionApplicationSchema = new mongoose.Schema(
   { _id: false, strict: "throw" },
 );
 
+// Server-authored record of what an approval did, written once in the same
+// transaction as the approval. A retry that asserts a different revision,
+// target, or field selection conflicts instead of reporting success for work
+// the moderator did not review. Internal: not part of serialized responses.
+const artistResolutionSchema = new mongoose.Schema(
+  {
+    position: { type: Number, required: true, min: 0 },
+    kind: { type: String, enum: ["existing", "musicbrainz", "community"], required: true },
+    proposalKey: { type: String, default: "", maxlength: 40 },
+    artistId: { type: String, required: true, lowercase: true, match: ARTIST_ID_PATTERN },
+    artistMbid: { type: String, default: "", lowercase: true, validate: { validator: (value) => !value || MBID_PATTERN.test(value), message: "artistMbid must be an MBID." } },
+    outcome: { type: String, enum: ["linked", "created", "reused"], required: true },
+  },
+  { _id: false, strict: "throw" },
+);
+
+const approvalReceiptSchema = new mongoose.Schema(
+  {
+    revision: { type: Number, required: true, min: 1 },
+    publicationType: { type: String, enum: ["catalog_created", "catalog_linked", "catalog_corrected"], required: true },
+    targetAlbumId: { type: String, required: true, lowercase: true, match: UUID_V4 },
+    appliedFields: { type: [String], default: [] },
+    artistResolutions: { type: [artistResolutionSchema], default: [] },
+    approvedAt: { type: Date, required: true },
+  },
+  { _id: false, strict: "throw" },
+);
+
 // Genre suggestions store public genre snapshots (genreId, slug, name at
 // submission time) so the record reads the same after a later rename.
 const genreRefSchema = new mongoose.Schema(
@@ -457,6 +485,12 @@ const albumSubmissionSchema = new mongoose.Schema(
     },
     approvedAt: { type: Date, default: null },
     approvalPublicationType: { type: String, enum: ["catalog_created", "catalog_linked", "catalog_corrected", "genres_updated"], default: null },
+    approvalReceipt: { type: approvalReceiptSchema, default: undefined },
+    // Optional client-generated key for an ambiguous create retry, scoped to
+    // the contributor. The digest covers the normalized client payload so a
+    // retry with different content conflicts instead of returning this record.
+    creationRequestKey: { type: String, default: undefined, immutable: true, lowercase: true, match: UUID_V4 },
+    creationPayloadDigest: { type: String, default: undefined, immutable: true, match: /^[0-9a-f]{64}$/ },
     currentRevision: { type: Number, required: true, min: 1, default: 1 },
     revisions: { type: [revisionSchema], default: [] },
     moderationHistory: { type: [moderationEventSchema], default: [] },
@@ -492,6 +526,12 @@ albumSubmissionSchema.pre("validate", function validateSubmissionInvariants() {
   }
   if (this.status === "duplicate" && !this.duplicateOfSubmissionId) {
     this.invalidate("duplicateOfSubmissionId", "Duplicate submissions must reference another submission.");
+  }
+  if (this.approvalReceipt && this.status !== "approved") {
+    this.invalidate("approvalReceipt", "Only approved submissions can carry an approval receipt.");
+  }
+  if (Boolean(this.creationRequestKey) !== Boolean(this.creationPayloadDigest)) {
+    this.invalidate("creationRequestKey", "A creation request key and its payload digest are stored together.");
   }
   if (Array.isArray(this.revisions) && this.revisions.length > 0 && this.currentRevision !== this.revisions.length) {
     this.invalidate("currentRevision", "Current revision must match the number of stored revisions.");
@@ -536,6 +576,12 @@ albumSubmissionSchema.pre(["findOneAndUpdate", "updateOne"], function validateSu
   if (status === "approved" && set.duplicateOfSubmissionId && set.duplicateOfSubmissionId !== null) {
     throw invariantValidationError("duplicateOfSubmissionId", "Approved submissions cannot reference a duplicate submission.");
   }
+  if (set.approvalReceipt !== undefined && status !== "approved") {
+    throw invariantValidationError("approvalReceipt", "An approval receipt is written only with the approval itself.");
+  }
+  if (update.$unset?.approvalReceipt !== undefined) {
+    throw invariantValidationError("approvalReceipt", "An approval receipt cannot be removed.");
+  }
   if (status === "duplicate" && set.approvedAlbumCatalogId && set.approvedAlbumCatalogId !== null) {
     throw invariantValidationError("approvedAlbumCatalogId", "Duplicate submissions cannot reference an approved album.");
   }
@@ -544,6 +590,10 @@ albumSubmissionSchema.pre(["findOneAndUpdate", "updateOne"], function validateSu
 albumSubmissionSchema.index({ submittedByUserId: 1, createdAt: -1, _id: -1 });
 albumSubmissionSchema.index({ submittedByUserId: 1, status: 1, approvedAt: -1, submissionId: -1 });
 albumSubmissionSchema.index({ openGenreSuggestionKey: 1 }, { unique: true, sparse: true });
+albumSubmissionSchema.index(
+  { submittedByUserId: 1, creationRequestKey: 1 },
+  { unique: true, partialFilterExpression: { creationRequestKey: { $type: "string" } } },
+);
 albumSubmissionSchema.index({ status: 1, updatedAt: -1, _id: -1 });
 albumSubmissionSchema.index({ status: 1, approvedAt: -1, _id: -1 });
 albumSubmissionSchema.index({ normalizedFingerprint: 1, status: 1 });
