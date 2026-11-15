@@ -22,16 +22,7 @@ function ModerationPanel() {
   const { submissionId } = useParams();
   const [status, setStatus] = useState("pending");
   const [queue, setQueue] = useState({ state: "loading", rows: [], error: null });
-  const [detail, setDetail] = useState({ submissionId: "", data: null, error: null });
-  // Command state belongs to the suggestion it was sent for; a result that
-  // arrives after the moderator opened another suggestion is dropped.
-  const [command, setCommand] = useState({ submissionId: "", pending: false, error: null });
-  const activeSubmission = useRef(submissionId);
-  useEffect(() => {
-    activeSubmission.current = submissionId;
-  }, [submissionId]);
   const [queueRefresh, setQueueRefresh] = useState(0);
-  const [detailRefresh, setDetailRefresh] = useState(0);
 
   const request = useCallback(async (path, options = {}) => {
     const token = await getToken();
@@ -46,52 +37,8 @@ function ModerationPanel() {
     return () => controller.abort();
   }, [request, status, queueRefresh]);
 
-  useEffect(() => {
-    if (!submissionId) return undefined;
-    const controller = new AbortController();
-    request(`/${encodeURIComponent(submissionId)}`, { signal: controller.signal })
-      .then((data) => { if (!controller.signal.aborted) setDetail({ submissionId, data, error: null }); })
-      .catch((error) => { if (!controller.signal.aborted) setDetail({ submissionId, data: null, error: communityErrorFrom(error) }); });
-    return () => controller.abort();
-  }, [request, submissionId, detailRefresh]);
+  const refreshQueue = useCallback(() => setQueueRefresh((value) => value + 1), []);
 
-  // A command finished after the moderator moved on: clear its pending
-  // state (the suggestion reloads when reopened) and show nothing.
-  function settleElsewhere(target) {
-    setCommand((current) => (current.submissionId === target ? { submissionId: target, pending: false, error: null } : current));
-    setQueueRefresh((value) => value + 1);
-  }
-
-  async function decide(action, body) {
-    const target = detail.data?.suggestion?.submissionId;
-    if (!target) return;
-    setCommand({ submissionId: target, pending: true, error: null });
-    try {
-      const data = await request(`/${encodeURIComponent(target)}/${PATHS[action]}`, { method: "POST", body: JSON.stringify(body) });
-      if (activeSubmission.current !== target) {
-        settleElsewhere(target);
-        return;
-      }
-      setDetail((current) => (current.submissionId === target ? { submissionId: target, data, error: null } : current));
-      setCommand({ submissionId: target, pending: false, error: null });
-      // The response is the new detail; only the queue needs reloading.
-      setQueueRefresh((value) => value + 1);
-    } catch (error) {
-      if (activeSubmission.current !== target) {
-        settleElsewhere(target);
-        return;
-      }
-      setCommand({ submissionId: target, pending: false, error: communityErrorFrom(error) });
-      // A conflict means the shown revision is stale: reload both.
-      if (error?.status === 409) {
-        setQueueRefresh((value) => value + 1);
-        setDetailRefresh((value) => value + 1);
-      }
-    }
-  }
-
-  const shown = detail.submissionId === submissionId ? detail.data : null;
-  const shownCommand = command.submissionId === submissionId ? command : { pending: false, error: null };
   return (
     <section className="community-page moderation-artist-suggestions">
       <h1>Artist suggestions</h1>
@@ -113,21 +60,71 @@ function ModerationPanel() {
           </li>
         ))}
       </ul>
-      {submissionId && detail.error && detail.submissionId === submissionId ? <p className="community-message community-message-error" role="alert">{detail.error.message}</p> : null}
-      {shown ? (
-        <>
-          <ArtistSuggestionDetail suggestion={shown.suggestion} showContributor />
-          <ArtistSuggestionDecision
-            key={`${shown.suggestion.submissionId}:${shown.suggestion.currentRevision}:${shown.suggestion.status}`}
-            suggestion={shown.suggestion}
-            context={shown.context}
-            pending={shownCommand.pending}
-            error={shownCommand.error}
-            onCommand={decide}
-          />
-        </>
-      ) : null}
+      {/* Keyed by route: every visit to a suggestion (including returning to
+          one) is a new instance, so a decision sent from an earlier visit can
+          never update, fail into, or leave pending a later one. */}
+      {submissionId ? <SuggestionReview key={submissionId} submissionId={submissionId} request={request} onQueueChanged={refreshQueue} /> : null}
     </section>
+  );
+}
+
+function SuggestionReview({ submissionId, request, onQueueChanged }) {
+  const [detail, setDetail] = useState({ data: null, error: null });
+  const [command, setCommand] = useState({ pending: false, error: null });
+  const [detailRefresh, setDetailRefresh] = useState(0);
+  const alive = useRef(true);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    request(`/${encodeURIComponent(submissionId)}`, { signal: controller.signal })
+      .then((data) => { if (!controller.signal.aborted) setDetail({ data, error: null }); })
+      .catch((error) => { if (!controller.signal.aborted) setDetail({ data: null, error: communityErrorFrom(error) }); });
+    return () => controller.abort();
+  }, [request, submissionId, detailRefresh]);
+
+  async function decide(action, body) {
+    setCommand({ pending: true, error: null });
+    try {
+      const data = await request(`/${encodeURIComponent(submissionId)}/${PATHS[action]}`, { method: "POST", body: JSON.stringify(body) });
+      if (!alive.current) {
+        // This visit is gone; only the shared queue may need reloading.
+        onQueueChanged();
+        return;
+      }
+      // The response is the new detail; only the queue needs reloading.
+      setDetail({ data, error: null });
+      setCommand({ pending: false, error: null });
+      onQueueChanged();
+    } catch (error) {
+      if (!alive.current) return;
+      setCommand({ pending: false, error: communityErrorFrom(error) });
+      // A conflict means the shown revision is stale: reload both.
+      if (error?.status === 409) {
+        setDetailRefresh((value) => value + 1);
+        onQueueChanged();
+      }
+    }
+  }
+
+  if (detail.error) return <p className="community-message community-message-error" role="alert">{detail.error.message}</p>;
+  if (!detail.data) return null;
+  return (
+    <>
+      <ArtistSuggestionDetail suggestion={detail.data.suggestion} showContributor />
+      <ArtistSuggestionDecision
+        key={`${detail.data.suggestion.submissionId}:${detail.data.suggestion.currentRevision}:${detail.data.suggestion.status}`}
+        suggestion={detail.data.suggestion}
+        context={detail.data.context}
+        pending={command.pending}
+        error={command.error}
+        onCommand={decide}
+      />
+    </>
   );
 }
 

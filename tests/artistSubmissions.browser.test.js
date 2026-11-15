@@ -287,6 +287,41 @@ window.__mount = (entry) => root.render(<MemoryRouter initialEntries={[entry]}><
       });
     });
 
+    for (const [label, response] of [
+      ['success', [200, { suggestion: suggestion({ status: 'needs_changes', currentRevision: 1 }), context: { registeredArtist: null, sameNameArtists: [] } }]],
+      ['error', [409, { error: 'Stale request-changes from the first visit', code: 'STATE_CONFLICT' }]],
+    ]) {
+      await t.test(`returning to a suggestion ignores a delayed ${label} sent from the earlier visit`, async () => {
+        const firstVisit = suggestion({ currentRevision: 1 });
+        const returnVisit = suggestion({ currentRevision: 2 });
+        const empty = { registeredArtist: null, sameNameArtists: [] };
+        await fixture({ entry: `/moderation/artist-suggestions/${SUBMISSION}`, routes: {
+          'GET /moderation/artist-suggestions': [200, { suggestions: [firstVisit, other] }],
+          [`GET /moderation/artist-suggestions/${SUBMISSION}`]: [[200, { suggestion: firstVisit, context: empty }], [200, { suggestion: returnVisit, context: empty }]],
+          [`GET /moderation/artist-suggestions/${OTHER}`]: [200, { suggestion: other, context: empty }],
+          [`POST /moderation/artist-suggestions/${SUBMISSION}/request-changes`]: [{ hold: 'changes', response }],
+        } }, async page => {
+          const revision = page.locator('.suggestion-detail-revision');
+          const status = page.locator('.suggestion-detail .suggestion-status');
+          await revision.filter({ hasText: 'Revision 1' }).waitFor();
+          await page.getByRole('radio', { name: /Request changes/ }).check();
+          await page.getByLabel(/^Reason/).fill('Add a label page');
+          await page.getByRole('button', { name: 'Apply decision' }).click();
+          await page.waitForFunction(() => Boolean(window.__holds?.changes));
+          await page.getByRole('link', { name: 'Other Band' }).click();
+          await page.getByRole('heading', { name: 'Other Band' }).waitFor();
+          await page.getByRole('link', { name: 'Brand New Band' }).click();
+          await revision.filter({ hasText: 'Revision 2' }).waitFor();
+          await page.evaluate(() => window.__release('changes'));
+          await page.evaluate(() => new Promise(done => setTimeout(done, 150)));
+          assert.deepEqual(await revision.allTextContents(), ['Revision 2'], 'the freshly loaded revision stays on screen');
+          assert.deepEqual(await status.allTextContents(), ['Waiting for review'], 'the earlier visit\'s result is not applied');
+          assert.equal(await page.getByText('Stale request-changes from the first visit').count(), 0, 'nor its error');
+          assert.equal(await page.getByRole('button', { name: 'Apply decision' }).isDisabled(), false, 'nor its pending state');
+        });
+      });
+    }
+
     await t.test('pages fit a phone width', async () => {
       await fixture({ entry: `/moderation/artist-suggestions/${SUBMISSION}`, routes: {
         'GET /moderation/artist-suggestions': [200, { suggestions: [suggestion()] }],
