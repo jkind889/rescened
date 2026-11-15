@@ -12,6 +12,7 @@ import {
   WITHDRAWABLE_SUGGESTION_STATUSES,
 } from "../features/community/community";
 import useMediaQuery from "../features/community/useMediaQuery";
+import { useArtistLinkingState } from "../features/artists/useArtistLinking";
 
 const PAGE_LIMIT = 20;
 
@@ -156,6 +157,7 @@ export function Suggestions() {
   const { submissionId } = useParams();
   const location = useLocation();
   const { getToken } = useAuth();
+  const artistSuggestionsOn = useArtistLinkingState(getToken) === "enabled";
   const [suggestions, setSuggestions] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
   const [listStatus, setListStatus] = useState("idle");
@@ -501,6 +503,7 @@ export function Suggestions() {
             </p>
           </div>
           <Link className="community-primary-link" to="/suggestions/new">+ Suggest an album</Link>
+          {artistSuggestionsOn ? <Link className="community-primary-link" to="/artist-suggestions">+ Suggest an artist</Link> : null}
         </header>
 
         {listStatus === "ready" && suggestions.length === 0 ? (

@@ -262,5 +262,6 @@ module.exports = {
   normalizeRequestKey,
   prepareStoredProposals,
   proposalRegistryContext,
+  publicProposal,
   splitArtistRequest,
 };

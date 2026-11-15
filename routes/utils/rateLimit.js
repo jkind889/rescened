@@ -43,6 +43,12 @@ const RATE_LIMITS = {
     duration: 60,
     message: "Too many artist searches. Please try again soon.",
   },
+  artistSuggestionCreate: {
+    keyPrefix: "rescened:artist-suggestion-create",
+    points: 10,
+    duration: 10 * 60,
+    message: "Too many artist suggestions. Please try again soon.",
+  },
   artistDiscoveryProvider: {
     keyPrefix: "rescened:artist-discovery-provider",
     points: 15,
@@ -311,6 +317,7 @@ const artistLinksLimiter = createRateLimiter(RATE_LIMITS.artistLinks);
 const externalSearchLimiter = createRateLimiter(RATE_LIMITS.externalSearch);
 const artistDiscoveryLocalLimiter = createRateLimiter(RATE_LIMITS.artistDiscoveryLocal);
 const artistDiscoveryProviderLimiter = createRateLimiter(RATE_LIMITS.artistDiscoveryProvider);
+const artistSuggestionCreateLimiter = createRateLimiter(RATE_LIMITS.artistSuggestionCreate);
 const albumSaveLimiter = createRateLimiter(RATE_LIMITS.albumSave);
 const reviewCreateLimiter = createRateLimiter(RATE_LIMITS.reviewCreate);
 const diaryMutationLimiter = createRateLimiter(RATE_LIMITS.diaryMutation);
@@ -454,6 +461,10 @@ module.exports = {
   artistDiscoveryProviderRateLimit: createRateLimitMiddleware(artistDiscoveryProviderLimiter, {
     keyGenerator: getAuthenticatedUserRateLimitKey,
     message: RATE_LIMITS.artistDiscoveryProvider.message,
+  }),
+  artistSuggestionCreateRateLimit: createRateLimitMiddleware(artistSuggestionCreateLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.artistSuggestionCreate.message,
   }),
   artistLinksRateLimit: createRateLimitMiddleware(artistLinksLimiter, {
     keyGenerator: getIpRateLimitKey,

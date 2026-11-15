@@ -216,6 +216,26 @@ See [artist identity](ARTIST_IDENTITY.md#artist-links-on-album-suggestions).
 | `ARTIST_LINKS_REQUIRE_NEW_ALBUM` | `400` | An artist-linked suggestion was approved with `albumId`. |
 | `ARTIST_IDENTITY_CONFLICT` | `409` | At approval, a linked artist is missing or a registration raced; nothing was published. |
 
+### Standalone artist suggestions
+
+`/artist-suggestions` and `/moderation/artist-suggestions`. See [artist identity](ARTIST_IDENTITY.md#standalone-artist-suggestions).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `UNAUTHORIZED` / `MODERATOR_REQUIRED` | `401` / `403` | Not signed in, or not an allowlisted moderator on a moderator route. |
+| `ARTIST_SUGGESTION_NOT_FOUND` | `404` | No such suggestion, or another contributor's suggestion. |
+| `SUBMISSIONS_DISABLED`, `MODERATION_DISABLED`, `ARTIST_SUGGESTIONS_DISABLED` | `503` | A mutation while the matching flag is off. Reads still work. |
+| `INVALID_ARTIST_SUGGESTION`, `INVALID_ARTIST_PROPOSAL`, `INVALID_REQUEST_KEY` | `400` | The body breaks the strict contract, or a create has no `requestKey`. |
+| `EXPECTED_REVISION_REQUIRED` | `400` | A revision, withdrawal, or moderator command did not name the reviewed revision. |
+| `REVISION_CONFLICT`, `STATE_CONFLICT` | `409` | The suggestion changed since it was loaded. |
+| `INVALID_SUBMISSION_STATE` | `409` | The command is not allowed in the current state. |
+| `ARTIST_ALREADY_EXISTS` | `409` | The MusicBrainz MBID is already a Rescened artist; `existingArtist` names it. |
+| `INVALID_DUPLICATE_TARGET` | `409` | `duplicateOfArtistId` is not an artist on Rescened. |
+| `APPROVAL_CONFLICT` | `409` | A retry names a revision other than the approved one. |
+| `ARTIST_IDENTITY_CONFLICT` | `409` | Another approval registered the same MBID at the same moment; retrying reuses it. |
+| `ARTIST_LOOKUP_UNAVAILABLE` | `503` | MusicBrainz could not confirm the MBID; nothing was saved. |
+| `ARTIST_SUGGESTION_UNAVAILABLE` | `503` | MongoDB transactions are unavailable. |
+
 ### Artist biographies
 
 See [artist biographies](ARTIST_BIOGRAPHIES.md).
