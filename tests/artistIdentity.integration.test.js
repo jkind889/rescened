@@ -666,6 +666,70 @@ async function artistLinksVersusBackfillTest() {
   }
 }
 
+// A moderator-approved identity must stay protected after a fresh, additive
+// backfill links other credits, so a later re-import cannot replace it.
+async function correctionThenFreshBackfillThenReimportTest() {
+  await Promise.all([AlbumCatalog.deleteMany({}), Artist.deleteMany({}), AlbumSubmission.deleteMany({})]);
+  const previousFlag = process.env.ARTIST_SUGGESTIONS_ENABLED;
+  process.env.ARTIST_SUGGESTIONS_ENABLED = "true";
+  try {
+    const group = crypto.randomUUID();
+    const rows = [datasetRow(group, "Lifecycle", [{ artistMbid: MBID_A, name: "Alpha", joinPhrase: " & " }, { artistMbid: MBID_B, name: "Beta", joinPhrase: "" }])];
+    const source = validation(rows, "lifecycle-dataset");
+    const album = await AlbumCatalog.create(buildCatalogInput(rows[0], source.dataset));
+    const reviewed = await Artist.create(newArtistDocument({ name: "Alpha (reviewed)", artistMbid: MBID_A, source: "manual" }));
+
+    // 1. A moderator links Alpha by an identity-only correction.
+    const correction = await createCorrection(await AlbumCatalog.findById(album._id).lean(), { artistLinks: {
+      artistSelections: [{ position: 0, kind: "existing", artistId: reviewed.artistId }],
+    } });
+    await approveAlbumSubmission({ submissionId: correction.submissionId, actorUserId: "moderator", expectedRevision: 1, applyFields: ["artistLinks"] });
+    const corrected = await AlbumCatalog.collection.findOne({ _id: album._id });
+    assert.equal(corrected.fieldProvenance.artistIdentity.source, "community");
+
+    // 2. A fresh backfill plan agrees with Alpha and adds Beta.
+    const plan = await createPlan({ validations: [source], AlbumCatalog, Artist, databaseName: DB_NAME });
+    assert.equal(plan.counts.link, 1);
+    const report = await applyPlan({ plan, expectedSha256: plan.planSha256, confirmTarget: DB_NAME, databaseName: DB_NAME, AlbumCatalog, Artist, mongoose });
+    assert.equal(report.counts.applied, 1);
+    const backfilled = await AlbumCatalog.collection.findOne({ _id: album._id });
+    assert.equal(backfilled.artistCredits[0].artistId, reviewed.artistId);
+    assert.equal(backfilled.artistCredits[1].artistMbid, MBID_B);
+    assert.equal(backfilled.fieldProvenance.artistIdentity.source, "community", "the backfill keeps the moderator's ownership");
+    assert.equal(backfilled.fieldProvenance.artistIdentity.method, "artist-link-correction");
+    assert.equal(backfilled.fieldProvenance.artistIdentity.backfill.method, "artist-identity-backfill", "the backfill's own record is kept beside it");
+
+    // 3. A later dataset renames the album and credits Alpha to another MBID.
+    const updatedRows = [datasetRow(group, "Lifecycle (Remastered)", [{ artistMbid: MBID_C, name: "Alpha", joinPhrase: " & " }, { artistMbid: MBID_B, name: "Beta", joinPhrase: "" }])];
+    const reimport = await preflightImport({ validation: validation(updatedRows, "lifecycle-dataset-2"), AlbumCatalog, Artist });
+    await applyImport({ plan: reimport, AlbumCatalog, Artist, mongoose });
+    const after = await AlbumCatalog.collection.findOne({ _id: album._id });
+    assert.equal(after.title, "Lifecycle (Remastered)", "unowned fields still refresh");
+    assert.equal(after.artistCredits[0].artistId, reviewed.artistId, "the moderator-approved identity survives the re-import");
+    assert.deepEqual(after.artistCredits, backfilled.artistCredits);
+    assert.equal(await Artist.countDocuments({ "externalReferences.externalId": MBID_C }), 0, "no artist is registered for the discarded dataset identity");
+
+    // Manual ownership is kept the same way.
+    const manualGroup = crypto.randomUUID();
+    const manualRows = [datasetRow(manualGroup, "Manual Lifecycle", [{ artistMbid: MBID_A, name: "Alpha", joinPhrase: " & " }, { artistMbid: MBID_D, name: "Delta", joinPhrase: "" }])];
+    const manualSource = validation(manualRows, "manual-lifecycle");
+    const manualInput = buildCatalogInput(manualRows[0], manualSource.dataset);
+    manualInput.artistCredits[0] = { ...manualInput.artistCredits[0], artistId: reviewed.artistId, artistMbid: MBID_A };
+    manualInput.fieldProvenance = { ...manualInput.fieldProvenance, artistIdentity: "manual" };
+    const manual = await AlbumCatalog.create(manualInput);
+    const manualPlan = await createPlan({ validations: [manualSource], AlbumCatalog, Artist, databaseName: DB_NAME });
+    assert.equal(manualPlan.counts.link, 1);
+    await applyPlan({ plan: manualPlan, expectedSha256: manualPlan.planSha256, confirmTarget: DB_NAME, databaseName: DB_NAME, AlbumCatalog, Artist, mongoose });
+    const manualAfter = await AlbumCatalog.collection.findOne({ _id: manual._id });
+    assert.equal(manualAfter.fieldProvenance.artistIdentity.source, "manual");
+    assert.equal(manualAfter.fieldProvenance.artistIdentity.backfill.method, "artist-identity-backfill");
+    assert.equal(manualAfter.artistCredits[1].artistMbid, MBID_D);
+  } finally {
+    if (previousFlag === undefined) delete process.env.ARTIST_SUGGESTIONS_ENABLED;
+    else process.env.ARTIST_SUGGESTIONS_ENABLED = previousFlag;
+  }
+}
+
 const TESTS = [
   ["imported canonical names stay separate from album credited display", canonicalImportNameTest],
   ["artist backfill CLI dry-run and refused apply never initialize database collections", cliReadOnlyGuardsTest],
@@ -677,6 +741,7 @@ const TESTS = [
   ["a catalog correction approved between enrichment planning and apply is a conflict", correctionBetweenPlanAndApplyTest],
   ["opted-in plans link user-owned credits additively and keep their provenance", userOwnedEnrichmentTest],
   ["artist-link corrections and the identity backfill conflict in either order", artistLinksVersusBackfillTest],
+  ["a moderator-approved identity stays protected through a fresh backfill and a re-import", correctionThenFreshBackfillThenReimportTest],
 ];
 
 if (integrationEnabled) {
