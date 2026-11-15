@@ -1,0 +1,226 @@
+/* Shared artist picker. Rescened results and MusicBrainz candidates are kept
+   in visibly separate sections; external rows carry a dashed edge so they are
+   not distinguished by color alone. */
+.artist-picker {
+  display: grid;
+  gap: .6rem;
+  min-width: 0;
+  padding: .75rem;
+  border: 1px solid var(--app-line, #d8d8d8);
+  border-radius: 8px;
+  background: var(--app-surface, #fff);
+  color: var(--app-text, inherit);
+}
+
+.artist-picker-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: .5rem;
+}
+
+.artist-picker-field {
+  display: grid;
+  flex: 1 1 14rem;
+  gap: .25rem;
+  min-width: 0;
+  font-size: .85rem;
+  color: var(--app-muted, #555);
+}
+
+.artist-picker-field input {
+  width: 100%;
+  min-width: 0;
+  padding: .45rem .6rem;
+  border: 1px solid var(--app-line-strong, #999);
+  border-radius: 6px;
+  background: var(--app-bg, #fff);
+  color: var(--app-text, inherit);
+  font: inherit;
+  font-size: .95rem;
+}
+
+.artist-picker-field input[aria-invalid="true"] {
+  border-color: var(--app-danger, #b00020);
+}
+
+.artist-picker-button,
+.artist-picker-link-button {
+  min-height: 2.25rem;
+  padding: .4rem .75rem;
+  border-radius: 6px;
+  font: inherit;
+  font-size: .9rem;
+  cursor: pointer;
+}
+
+.artist-picker-button {
+  border: 1px solid var(--app-line-strong, #999);
+  background: var(--app-surface-strong, #f3f3f3);
+  color: var(--app-text, inherit);
+  overflow-wrap: anywhere;
+}
+
+.artist-picker-button-primary {
+  border-color: var(--app-accent, #333);
+  background: var(--app-accent, #333);
+  color: var(--app-bg, #fff);
+}
+
+.artist-picker-link-button {
+  justify-self: start;
+  border: 0;
+  background: none;
+  padding-left: 0;
+  color: var(--app-accent, inherit);
+  text-decoration: underline;
+  text-underline-offset: .2em;
+}
+
+.artist-picker-button:focus-visible,
+.artist-picker-link-button:focus-visible,
+.artist-picker-field input:focus-visible,
+.artist-picker-source:focus-visible {
+  outline: 2px solid var(--app-accent, currentColor);
+  outline-offset: 2px;
+}
+
+.artist-picker-button:disabled,
+.artist-picker-link-button:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+.artist-picker-status:empty {
+  display: none;
+}
+
+.artist-picker-status,
+.artist-picker-note,
+.artist-picker-detail {
+  margin: 0;
+  font-size: .85rem;
+  color: var(--app-muted, #555);
+  overflow-wrap: anywhere;
+}
+
+.artist-picker-problem {
+  margin: 0;
+  font-size: .85rem;
+  color: var(--app-danger, #b00020);
+}
+
+.artist-picker-section {
+  display: grid;
+  gap: .4rem;
+  min-width: 0;
+}
+
+.artist-picker-heading {
+  margin: 0;
+  font-size: .8rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--app-muted, #555);
+}
+
+.artist-picker-results {
+  display: grid;
+  gap: .4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.artist-picker-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  padding: .5rem .6rem;
+  border: 1px solid var(--app-line, #d8d8d8);
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.artist-picker-result-external {
+  border-style: dashed;
+}
+
+.artist-picker-result-copy {
+  display: grid;
+  gap: .15rem;
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.artist-picker-result-name,
+.artist-picker-selection-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.artist-picker-source {
+  font-size: .8rem;
+  color: var(--app-muted, #555);
+  text-decoration: underline;
+  text-underline-offset: .2em;
+}
+
+.artist-picker-error-row {
+  display: grid;
+  gap: .25rem;
+}
+
+.artist-picker-selection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .5rem;
+  margin: 0;
+}
+
+.artist-picker-badge {
+  padding: .1rem .45rem;
+  border: 1px solid var(--app-line-strong, #999);
+  border-radius: 999px;
+  font-size: .75rem;
+  color: var(--app-muted, #555);
+}
+
+.artist-picker-badge-musicbrainz,
+.artist-picker-badge-community {
+  border-style: dashed;
+}
+
+.artist-picker-selected .artist-picker-button {
+  justify-self: start;
+}
+
+.artist-picker-evidence {
+  display: grid;
+  gap: .4rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.artist-picker-evidence legend {
+  margin-bottom: .25rem;
+  font-size: .85rem;
+  color: var(--app-muted, #555);
+}
+
+.artist-picker-evidence-row {
+  display: grid;
+  gap: .2rem;
+}
+
+.artist-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}

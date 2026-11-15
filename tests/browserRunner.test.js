@@ -20,7 +20,7 @@ test('browser prerequisites refuse dotenv, missing installs and missing browser 
   }
   fs.writeFileSync(path.join(directory, '.env.example'), '');
   assert.doesNotThrow(() => prerequisites(directory, executable));
-  assert.equal(files.length, 6);
+  assert.equal(files.length, 7);
   for (const name of files) assert.ok(fs.existsSync(path.join(__dirname, '..', name)));
 });
 

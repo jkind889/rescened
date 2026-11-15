@@ -66,6 +66,7 @@ app.use("/likes", likeRoutes)
 app.use("/track-rankings", require("./routes/trackRankings"));
 app.use("/genres", require("./routes/genres"));
 app.use("/artists", require("./routes/artists"));
+app.use("/artist-discovery", require("./routes/artistDiscovery"));
 app.use("/notifications", notificationRoutes)
 app.use("/suggestions", suggestionRoutes)
 app.use("/moderation/album-suggestions", moderationRoutes)

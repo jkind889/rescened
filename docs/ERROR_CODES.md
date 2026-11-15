@@ -185,6 +185,19 @@ The `/artists` routes are public reads. See [artist identity](ARTIST_IDENTITY.md
 | `ARTIST_DISCOGRAPHY_NOT_AVAILABLE` | `404` | The registry artist has no MusicBrainz artist identity to browse. |
 | `EXTERNAL_DISCOGRAPHY_UNAVAILABLE` | `502` | MusicBrainz failed, was busy, timed out, or returned data that could not be normalized or exceeded the response-size limit. Adds `category`, `upstreamStatus`, and `requestId` as for external search. Local artist content is unaffected. |
 
+### Artist picker discovery
+
+`GET /artist-discovery/local` and `GET /artist-discovery/musicbrainz` require Clerk sign-in and `ARTIST_SUGGESTIONS_ENABLED`; they do not depend on `ARTIST_PAGES_ENABLED`. See [artist identity](ARTIST_IDENTITY.md#artist-picker-discovery).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `UNAUTHORIZED` | `401` | No signed-in user. |
+| `ARTIST_SUGGESTIONS_DISABLED` | `503` | `ARTIST_SUGGESTIONS_ENABLED` is off. |
+| `INVALID_ARTIST_DISCOVERY` | `400` | An unsupported query field, a missing or blank `q` for MusicBrainz, a `q` longer than 200 characters, or a local `limit` outside 1–12. |
+| `ARTIST_DISCOVERY_THROTTLED` | `503` | MusicBrainz asked Rescened to slow down (an upstream 429 or 503 starts a cooldown of its `Retry-After`, 10 seconds by default, at most 120), or too many artist lookups are already waiting. Sends `Retry-After`, `retryAfterSeconds`, and `requestId`. Local discovery is unaffected. |
+| `ARTIST_DISCOVERY_UNAVAILABLE` | `502` | MusicBrainz failed, timed out, or returned data that could not be normalized or exceeded the size limit. Adds `category`, `upstreamStatus`, and `requestId` as for external search. |
+| `RATE_LIMITED` | `429` | The per-user picker budget (60 local or 15 MusicBrainz searches a minute) is spent. |
+
 ### Artist biographies
 
 See [artist biographies](ARTIST_BIOGRAPHIES.md).
