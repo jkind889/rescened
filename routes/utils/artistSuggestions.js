@@ -51,9 +51,9 @@ function splitArtistRequest(body) {
   };
 }
 
-function assertArtistSuggestionsEnabled() {
+function assertArtistSuggestionsEnabled(message = "Artist linking is currently disabled") {
   if (!isArtistSuggestionsEnabled()) {
-    throw new ArtistSuggestionError("Artist linking is currently disabled", 503, "ARTIST_SUGGESTIONS_DISABLED");
+    throw new ArtistSuggestionError(message, 503, "ARTIST_SUGGESTIONS_DISABLED");
   }
 }
 

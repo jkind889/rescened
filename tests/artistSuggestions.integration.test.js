@@ -379,6 +379,50 @@ integration("with artist suggestions off, links are refused while legacy flows a
   }
 });
 
+integration("while artist linking is off, a suggestion with stored links cannot be revised and keeps them", async () => {
+  const user = contributor();
+  const linked = await call("POST", "/suggestions", user, { ...mixedBody(`Off revise ${crypto.randomUUID()}`), requestKey: crypto.randomUUID() });
+  assert.equal(linked.status, 201);
+  const plain = await call("POST", "/suggestions", user, suggestionBody(`Off plain ${crypto.randomUUID()}`, [{ name: "Plain" }]));
+  for (const { submissionId } of [linked.body, plain.body]) {
+    await applyModerationCommand({ submissionId, actorUserId: MODERATOR, action: "request_changes", body: { reason: "Fix the title", expectedRevision: 1 } });
+  }
+  const detail = (await call("GET", `/suggestions/${linked.body.submissionId}`, user)).body;
+  // Exactly what the form would send with links omitted.
+  const withoutLinks = { proposedMetadata: { ...detail.proposedMetadata, title: `${detail.proposedMetadata.title} (fixed)` }, supportingSources: detail.supportingSources, externalReferences: detail.externalReferences };
+  process.env.ARTIST_SUGGESTIONS_ENABLED = "false";
+  try {
+    const refused = await call("POST", `/suggestions/${linked.body.submissionId}/revise`, user, withoutLinks);
+    assert.equal(refused.status, 503);
+    assert.equal(refused.body.code, "ARTIST_SUGGESTIONS_DISABLED");
+    const stored = await AlbumSubmission.findOne({ submissionId: linked.body.submissionId }).lean();
+    assert.equal(stored.status, "needs_changes");
+    assert.equal(stored.currentRevision, 1);
+    assert.equal(stored.artistSelections.length, 6, "the stored links are untouched");
+    assert.equal(stored.artistProposals.length, 4);
+    const withLinks = await call("POST", `/suggestions/${linked.body.submissionId}/revise`, user, { ...withoutLinks, artistProposals: detail.artistProposals.map(({ observation, ...proposal }) => proposal), artistSelections: detail.artistSelections });
+    assert.equal(withLinks.status, 503, "resending the links is refused while off as well");
+
+    const plainDetail = (await call("GET", `/suggestions/${plain.body.submissionId}`, user)).body;
+    const plainRevision = await call("POST", `/suggestions/${plain.body.submissionId}/revise`, user, {
+      proposedMetadata: { ...plainDetail.proposedMetadata, title: `${plainDetail.proposedMetadata.title} (fixed)` },
+      supportingSources: plainDetail.supportingSources,
+      externalReferences: plainDetail.externalReferences,
+    });
+    assert.equal(plainRevision.status, 200, "a suggestion without links revises normally while off");
+  } finally {
+    process.env.ARTIST_SUGGESTIONS_ENABLED = "true";
+  }
+  // With linking on, a revision is a complete snapshot: omitting the links is
+  // the contributor removing them (the form only does so after explicit
+  // Remove link actions).
+  const removed = await call("POST", `/suggestions/${linked.body.submissionId}/revise`, user, withoutLinks);
+  assert.equal(removed.status, 200, JSON.stringify(removed.body));
+  const after = await AlbumSubmission.findOne({ submissionId: linked.body.submissionId }).lean();
+  assert.deepEqual(after.artistSelections, []);
+  assert.equal(after.revisions[0].artistSelections.length, 6, "revision history keeps the earlier links");
+});
+
 integration("a revision keeps observations for unchanged MBIDs and appends a new snapshot", async () => {
   const user = contributor();
   const created = await call("POST", "/suggestions", user, { ...mixedBody(`Revise ${crypto.randomUUID()}`), requestKey: crypto.randomUUID() });

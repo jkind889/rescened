@@ -51,6 +51,7 @@ const {
   assertArtistSuggestionsEnabled,
   assertExistingSelections,
   creationDigest,
+  isArtistBearing,
   normalizeArtistWork,
   normalizeRequestKey,
   prepareStoredProposals,
@@ -479,7 +480,14 @@ router.post("/:submissionId/revise", auth, submissionsEnabled, submissionMutatio
     } else {
       const { rest, artist, requestKey } = splitArtistRequest(req.body);
       if (requestKey !== undefined) throw new SubmissionValidationError("requestKey is only accepted when creating a suggestion");
-      if (artist.present) assertArtistSuggestionsEnabled();
+      // Fail closed: while artist linking is off, a suggestion that already
+      // has artist links cannot be revised at all, so a revision can never
+      // drop its stored links just because the feature is off.
+      if (artist.present || isArtistBearing(current)) {
+        assertArtistSuggestionsEnabled(isArtistBearing(current) && !artist.present
+          ? "This suggestion has artist links, and artist linking is turned off right now. Revise it when linking is back on, or withdraw it."
+          : undefined);
+      }
       const payload = await editions.normalize(rest, req.userId, current);
       await assertCreditIdentities(payload.proposedMetadata.artistCredits);
       payload.genreChanges = await normalizeAlbumGenreProposal(payload.proposedGenres);

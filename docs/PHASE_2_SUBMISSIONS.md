@@ -382,7 +382,7 @@ Appends a full revision and resubmits the proposal.
 - Selects the request contract from stored `submissionType`. A new album revalidates the complete proposal and recalculates duplicates; a correction re-reads its fixed target and captures a fresh baseline for the complete proposed patch.
 - Increments `currentRevision`, appends a `revised` event, and returns status to `pending`.
 - Uses the previously read revision number in the update filter to prevent concurrent overwrites.
-- A new-album revision may carry artist links, as on create, but no `requestKey`. Each revision snapshot stores its own links, and a revision without links clears them.
+- A new-album revision may carry artist links, as on create, but no `requestKey`. Each revision snapshot stores its own links, and a revision without links clears them. While `ARTIST_SUGGESTIONS_ENABLED` is off, a suggestion that has stored links cannot be revised at all (`503 ARTIST_SUGGESTIONS_DISABLED`), so its links are never dropped implicitly; it can still be withdrawn.
 
 ### `POST /suggestions/:submissionId/withdraw`
 

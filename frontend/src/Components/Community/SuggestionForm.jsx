@@ -369,6 +369,13 @@ export function SuggestionForm({
   const [editionBusy, setEditionBusy] = useState(false);
   const linkingState = useArtistLinkingState(getToken);
   const artistLinking = linkingState === "enabled";
+  // Links stored on the suggestion being revised (not just a local draft).
+  // While linking is off the server refuses to revise such a suggestion, so
+  // the form never offers to drop them.
+  const [hasStoredLinks] = useState(() => {
+    const stored = (initialValue?.suggestion || initialValue)?.artistSelections;
+    return Array.isArray(stored) && stored.length > 0;
+  });
   const validationSummaryRef = useRef(null);
   const serverErrorRef = useRef(null);
   const controlsDisabled = disabled || isSubmitting || editionBusy;
@@ -482,14 +489,19 @@ export function SuggestionForm({
     if (draft.proposedGenres?.note?.trim() && !draft.proposedGenres?.add?.length) {
       errors.push("Choose a genre for your moderator note, or clear the note to submit without genres.");
     }
-    // Links are sent only after the server confirms linking is on. While that
-    // is unknown, submitting would silently drop them (a revision without
-    // links clears its stored links), so the form waits instead.
+    // Links are sent only after the server confirms linking is on. Otherwise
+    // submitting would drop them (a revision without links clears its stored
+    // links), so the form refuses instead. Removing a link is always an
+    // explicit action on the credit.
     const hasLinks = draft.proposedMetadata.artistCredits.some((artist) => artist.link && !hasActiveIdentity(artist));
-    if (hasLinks && linkingState === "loading") {
+    if (hasStoredLinks && linkingState === "disabled") {
+      errors.push("This suggestion has artist links, and artist linking is turned off right now. Revise it when linking is back on, or withdraw it.");
+    } else if (hasLinks && linkingState === "loading") {
       errors.push("Still checking whether artist linking is available. Try again in a moment so your artist links are kept.");
     } else if (hasLinks && linkingState === "unavailable") {
       errors.push("Could not check whether artist linking is available, so your artist links cannot be sent. Reload the page to try again, or remove the links.");
+    } else if (hasLinks && linkingState === "disabled") {
+      errors.push("Artist linking is turned off right now. Remove the artist links you added (Remove artist link on each credit) to send this suggestion without them.");
     }
     setValidationErrors(errors);
 
@@ -729,7 +741,22 @@ export function SuggestionForm({
                       ? "Checking whether artist linking is available. This credit’s artist link is kept."
                       : linkingState === "unavailable"
                         ? "Artist linking could not be checked, so this credit’s artist link cannot be sent until you reload."
-                        : "Artist linking is turned off, so this credit’s artist link will not be sent."}
+                        : hasStoredLinks
+                          ? "Artist linking is turned off right now. This credit’s artist link is kept, and the suggestion can be revised when linking is back on."
+                          : "Artist linking is turned off right now, so this credit’s artist link cannot be sent."}
+                    {linkingState === "disabled" && !hasStoredLinks ? (
+                      <>
+                        {" "}
+                        <button
+                          type="button"
+                          className="suggestion-form-remove"
+                          onClick={() => updateArtist(artist.key, "link", null)}
+                          disabled={controlsDisabled}
+                        >
+                          Remove artist link
+                        </button>
+                      </>
+                    ) : null}
                   </span>
                 ) : null}
                 <button

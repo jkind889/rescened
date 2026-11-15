@@ -204,7 +204,7 @@ See [artist identity](ARTIST_IDENTITY.md#artist-links-on-album-suggestions).
 
 | Code | Status | Meaning |
 | --- | --- | --- |
-| `ARTIST_SUGGESTIONS_DISABLED` | `503` | A suggestion create or revision carries artist links, or an artist-linked suggestion is approved, while `ARTIST_SUGGESTIONS_ENABLED` is off. |
+| `ARTIST_SUGGESTIONS_DISABLED` | `503` | While `ARTIST_SUGGESTIONS_ENABLED` is off: a create or revision carries artist links, a suggestion that already has artist links is revised (with or without links), or an artist-linked suggestion is approved. |
 | `INVALID_REQUEST_KEY` | `400` | A create with artist links has no `requestKey`, or the key is not a UUID v4. |
 | `REQUEST_KEY_CONFLICT` | `409` | The contributor already used this `requestKey` for a different suggestion body. |
 | `INVALID_ARTIST_PROPOSAL`, `DUPLICATE_ARTIST_PROPOSAL`, `UNKNOWN_ARTIST_PROPOSAL`, `UNATTACHED_ARTIST_PROPOSAL`, `DUPLICATE_ARTIST_SELECTION`, `ARTIST_SELECTION_OUT_OF_RANGE` | `400` | The proposals or selections break the strict contract; `details` names the field. |

@@ -261,14 +261,35 @@ window.__mountReview = (submission, props = {}) => root.render(<MemoryRouter>
       });
     });
 
-    await t.test('a confirmed "off" says the links will not be sent before omitting them', async () => {
+    await t.test('a confirmed "off" blocks a revision with stored links instead of dropping them', async () => {
       await fixture(async page => {
         await page.evaluate(() => { window.__linking = false; });
         await page.evaluate(value => window.__mountForm(value), linkedSubmission());
-        await page.getByText('Artist linking is turned off, so this credit’s artist link will not be sent.').first().waitFor();
+        await page.getByText('Artist linking is turned off right now. This credit’s artist link is kept, and the suggestion can be revised when linking is back on.').first().waitFor();
+        assert.equal(await page.getByRole('button', { name: 'Remove artist link' }).count(), 0, 'stored links offer no removal while linking is off');
+        await page.getByRole('button', { name: 'Send for review' }).click();
+        await page.getByText('This suggestion has artist links, and artist linking is turned off right now. Revise it when linking is back on, or withdraw it.').waitFor();
+        assert.deepEqual(await page.evaluate(() => window.__payloads), [], 'nothing is submitted, so nothing is cleared');
+      });
+    });
+
+    await t.test('links only in a local draft need an explicit removal while linking is off', async () => {
+      await fixture(async page => {
+        const draftWithLinks = { ...initial, proposedMetadata: { ...initial.proposedMetadata, artistCredits: [
+          { name: 'Tyler, the Creator', role: 'main', link: { kind: 'existing', artistId: LOCAL, name: 'Tyler Canonical', artistMbid: '' } },
+          { name: 'Guest', role: 'featured' },
+        ] } };
+        await page.evaluate(() => { window.__linking = false; });
+        await page.evaluate(value => window.__mountForm(value), draftWithLinks);
+        await page.getByText('Artist linking is turned off right now, so this credit’s artist link cannot be sent.').waitFor();
+        await page.getByRole('button', { name: 'Send for review' }).click();
+        await page.getByText(/Remove the artist links you added/).waitFor();
+        assert.deepEqual(await page.evaluate(() => window.__payloads), [], 'the link is not silently dropped');
+        await page.getByRole('button', { name: 'Remove artist link' }).click();
         await page.getByRole('button', { name: 'Send for review' }).click();
         const [payload] = await page.evaluate(() => window.__payloads);
-        assert.equal('artistSelections' in payload, false);
+        assert.equal('artistSelections' in payload, false, 'sent without links only after the explicit removal');
+        assert.deepEqual(payload.proposedMetadata.artistCredits[0], { name: 'Tyler, the Creator', role: 'main' });
       });
     });
 
