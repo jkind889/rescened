@@ -35,6 +35,7 @@ const EMPTY_REASONS = {
 const CORRECTION_FIELD_ORDER = [
   "title",
   "artists",
+  "artistLinks",
   "releaseType",
   "releaseDate",
   "label",
@@ -46,6 +47,7 @@ const CORRECTION_FIELD_ORDER = [
 const CORRECTION_FIELD_LABELS = {
   title: "Title",
   artists: "Artists and credits",
+  artistLinks: "Artist links (identity only)",
   releaseType: "Release type",
   releaseDate: "Release date",
   label: "Label",
@@ -203,8 +205,13 @@ export function ModeratorDecision({
           setClientError("Select at least one proposed field before approving the correction.");
           return;
         }
+        if (!reviewedRevision) {
+          setClientError("Reload this correction before approving it.");
+          return;
+        }
         onCommand("approve", {
           applyFields,
+          expectedRevision: reviewedRevision,
           ...(trimmedReason ? { reason: trimmedReason } : {}),
         });
         return;

@@ -71,6 +71,7 @@ import ${JSON.stringify(path.join(frontend, 'src/reset.css'))}; import ${JSON.st
 import SuggestionForm from ${JSON.stringify(path.join(frontend, 'src/Components/Community/SuggestionForm.jsx'))};
 import ModeratorDecision from ${JSON.stringify(path.join(frontend, 'src/Components/Community/ModeratorDecision.jsx'))};
 import SubmissionDetails from ${JSON.stringify(path.join(frontend, 'src/Components/Community/SubmissionDetails.jsx'))};
+import CorrectionForm from ${JSON.stringify(path.join(frontend, 'src/Components/Community/CorrectionForm.jsx'))};
 
 // Fetch stub: capability answers come from window.__linking; discovery
 // answers are canned; everything else reports a disabled feature.
@@ -95,6 +96,7 @@ const root = createRoot(document.getElementById('root'));
 window.__payloads = [];
 window.__commands = [];
 window.__mountForm = initialValue => root.render(<MemoryRouter><SuggestionForm initialValue={initialValue} getToken={getToken} onSubmit={payload => { window.__payloads.push(JSON.parse(JSON.stringify(payload))); }} /></MemoryRouter>);
+window.__mountCorrection = initialValue => root.render(<MemoryRouter><CorrectionForm initialValue={initialValue} getToken={getToken} draftKey="" onSubmit={payload => { window.__payloads.push(JSON.parse(JSON.stringify(payload))); }} /></MemoryRouter>);
 window.__mountReview = (submission, props = {}) => root.render(<MemoryRouter>
   <SubmissionDetails submission={submission} showContributor artistRegistry={{ ${JSON.stringify(LOCAL)}: { artistId: ${JSON.stringify(LOCAL)}, name: 'Tyler Canonical', artistMbid: '' } }} artistProposalRegistry={props.proposalRegistry || null} />
   <ModeratorDecision submission={submission} duplicateCandidates={props.duplicateCandidates || {}} onCommand={(action, body) => window.__commands.push({ action, body })} />
@@ -290,6 +292,98 @@ window.__mountReview = (submission, props = {}) => root.render(<MemoryRouter>
         const [payload] = await page.evaluate(() => window.__payloads);
         assert.equal('artistSelections' in payload, false, 'sent without links only after the explicit removal');
         assert.deepEqual(payload.proposedMetadata.artistCredits[0], { name: 'Tyler, the Creator', role: 'main' });
+      });
+    });
+
+    const correctionAlbum = {
+      albumId: '66666666-6666-4666-8666-666666666666', title: 'Many Credits', artistDisplayName: 'Tyler, the Creator & Many', releaseType: 'album', releaseYear: 2020, releaseDate: '2020', tracks: [],
+      artistCredits: [
+        { name: 'Tyler, the Creator', role: 'main' },
+        { name: 'Already Linked', role: 'main', artistId: LOCAL },
+        ...Array.from({ length: 20 }, (_, index) => ({ name: index === 19 ? 'Last, Credit!' : `Player ${index + 1}`, role: 'performer' })),
+      ],
+    };
+    const correctionInitial = { targetAlbumId: correctionAlbum.albumId, targetAlbum: correctionAlbum };
+    const linkRow = (page, n) => page.locator('.correction-artist-link-row').filter({ has: page.getByText(`Artist ${String(n).padStart(2, '0')}`, { exact: true }) });
+
+    await t.test('a correction links credits by identity only, past the 20-credit edit limit', async () => {
+      await fixture(async page => {
+        await page.evaluate(value => window.__mountCorrection(value), correctionInitial);
+        await page.getByRole('checkbox', { name: 'Artist links' }).check();
+        assert.equal(await page.getByRole('checkbox', { name: /^Artists/ }).isDisabled(), true, 'replacing credits cannot be combined with links');
+        assert.equal(await page.locator('.correction-artist-link-row').count(), 22, 'every stored credit is listed');
+        assert.equal(await linkRow(page, 2).getByRole('searchbox').count(), 0, 'an already-linked credit gets no picker');
+        await linkRow(page, 1).getByRole('button', { name: 'Search artists' }).click();
+        await linkRow(page, 1).getByRole('button', { name: 'Choose Tyler Canonical' }).click();
+        await linkRow(page, 22).getByRole('button', { name: 'Search artists' }).click();
+        await linkRow(page, 22).getByRole('button', { name: 'Choose Guest Canonical' }).click();
+        await page.getByRole('checkbox', { name: 'Title', exact: true }).check();
+        await page.getByLabel('Corrected title').fill('Many Credits (Deluxe)');
+        await page.getByRole('textbox', { name: 'HTTPS source URL' }).fill('https://example.com/credits');
+        await page.getByRole('button', { name: 'Send correction for review' }).click();
+        const [payload] = await page.evaluate(() => window.__payloads);
+        assert.deepEqual(payload.proposedChanges.artistLinks, {
+          artistProposals: [{ proposalKey: 'mb-1', kind: 'musicbrainz', artistMbid: MBID }],
+          artistSelections: [{ position: 0, kind: 'existing', artistId: LOCAL }, { position: 21, kind: 'proposal', proposalKey: 'mb-1' }],
+        });
+        assert.equal('artists' in payload.proposedChanges, false, 'no credit wording is sent');
+        assert.equal(payload.proposedChanges.title, 'Many Credits (Deluxe)');
+      });
+    });
+
+    await t.test('correction links follow the capability rules and keep shared proposals', async () => {
+      await fixture(async page => {
+        await page.evaluate(() => { window.__linking = false; });
+        await page.evaluate(value => window.__mountCorrection(value), correctionInitial);
+        await page.getByRole('checkbox', { name: 'Title', exact: true }).waitFor();
+        await page.waitForFunction(() => window.__requests.includes('/artist-discovery/capabilities'));
+        assert.equal(await page.getByRole('checkbox', { name: 'Artist links' }).count(), 0, 'no Artist links group while linking is off');
+      });
+      const storedRevision = {
+        ...correctionInitial,
+        submissionId: '77777777-7777-4777-8777-777777777777',
+        currentRevision: 2,
+        supportingSources: [{ type: 'other', url: 'https://example.com/c', description: '' }],
+        proposedChanges: { artistLinks: {
+          artistProposals: [{ proposalKey: 'shared', kind: 'community', canonicalName: 'Players', evidence: [{ url: 'https://example.com/players', description: '' }] }],
+          artistSelections: [{ position: 2, kind: 'proposal', proposalKey: 'shared' }, { position: 3, kind: 'proposal', proposalKey: 'shared' }],
+        } },
+      };
+      await fixture(async page => {
+        await page.evaluate(() => { window.__linking = false; });
+        await page.evaluate(value => window.__mountCorrection(value), storedRevision);
+        await page.getByText('Artist linking is turned off right now. These links are kept, and the correction can be revised when linking is back on.').waitFor();
+        await page.getByRole('button', { name: /Submit|Send correction/ }).click();
+        await page.getByText('This correction has artist links, and artist linking is turned off right now. Revise it when linking is back on, or withdraw it.').waitFor();
+        assert.deepEqual(await page.evaluate(() => window.__payloads), [], 'stored correction links are never dropped while off');
+      });
+      await fixture(async page => {
+        await page.evaluate(value => window.__mountCorrection(value), storedRevision);
+        await linkRow(page, 3).getByRole('button', { name: 'Remove link to Players' }).waitFor();
+        await page.getByRole('button', { name: /Submit|Send correction/ }).click();
+        const [payload] = await page.evaluate(() => window.__payloads);
+        assert.deepEqual(payload.proposedChanges.artistLinks.artistProposals.map(proposal => proposal.proposalKey), ['shared']);
+        assert.deepEqual(payload.proposedChanges.artistLinks.artistSelections, [{ position: 2, kind: 'proposal', proposalKey: 'shared' }, { position: 3, kind: 'proposal', proposalKey: 'shared' }]);
+      });
+    });
+
+    await t.test('moderators approve corrections only at the displayed revision and see links on the stored credits', async () => {
+      await fixture(async page => {
+        const correction = {
+          submissionId: '88888888-8888-4888-8888-888888888888', submissionType: 'catalog_correction', status: 'pending', currentRevision: 4,
+          createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:00.000Z', targetAlbum: correctionAlbum, targetAlbumId: correctionAlbum.albumId,
+          proposedChanges: { title: 'X', artistLinks: { artistProposals: [], artistSelections: [{ position: 0, kind: 'existing', artistId: LOCAL }] } },
+          correctionDiff: [
+            { field: 'title', baseline: 'Many Credits', current: 'Many Credits', proposed: 'X', stale: false },
+            { field: 'artistLinks', baseline: { artistCredits: correctionAlbum.artistCredits }, current: { artistCredits: correctionAlbum.artistCredits }, proposed: { artistProposals: [], artistSelections: [{ position: 0, kind: 'existing', artistId: LOCAL }] }, stale: false },
+          ],
+          supportingSources: [], externalReferences: [], revisions: [], moderationHistory: [],
+        };
+        await page.evaluate(value => window.__mountReview(value), correction);
+        await page.getByText('Identity only: each credit keeps its wording, role, and position.').waitFor();
+        assert.match(await page.locator('.suggestion-correction-diff-item').nth(1).locator('.suggestion-credit-item').first().textContent(), /Tyler, the Creator.*Linked to Rescened artist Tyler Canonical/);
+        await page.getByRole('button', { name: 'Approve & publish' }).click();
+        assert.deepEqual(await page.evaluate(() => window.__commands), [{ action: 'approve', body: { applyFields: ['title', 'artistLinks'], expectedRevision: 4 } }]);
       });
     });
 

@@ -10,7 +10,7 @@ const SUBMISSION_STATUSES = new Set([
   "withdrawn",
 ]);
 const SUBMISSION_TYPES = new Set(["new_album", "catalog_correction", "genre_suggestion"]);
-const CORRECTION_FIELDS = new Set(["title", "artists", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"]);
+const CORRECTION_FIELDS = new Set(["title", "artists", "artistLinks", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"]);
 const MODERATOR_DEFAULT_PAGE_LIMIT = 20;
 const MODERATOR_MAX_PAGE_LIMIT = 50;
 const PUBLIC_UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

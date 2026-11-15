@@ -10,7 +10,7 @@ const { Genre } = require("../../models/Genre");
 const BaselineModels = require("../../models/AlbumBaseline");
 const { approveAlbumSubmission } = require("./approval");
 const { CORRECTION_FIELD_GROUPS } = require("./submissions");
-const { isArtistBearing } = require("./artistSuggestions");
+const { hasArtistLinks, isArtistBearing } = require("./artistSuggestions");
 const {
   ApprovalUnavailableError,
   ModerationValidationError,
@@ -162,7 +162,9 @@ async function bulkApprovalPlans(values) {
         : { eligible: false, reason: REVIEW_REASONS.unmatchedGenreName };
     } else if (type === "catalog_correction") {
       const applyFields = correctionFieldsAsProposed(source);
-      plan = applyFields.length
+      plan = hasArtistLinks(source)
+        ? { eligible: false, reason: REVIEW_REASONS.artistLinks }
+        : applyFields.length
         ? { eligible: true, body: { applyFields } }
         : { eligible: false, reason: REVIEW_REASONS.noProposedFields };
     } else if (isArtistBearing(source)) {

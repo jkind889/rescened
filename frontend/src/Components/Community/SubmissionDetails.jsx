@@ -340,7 +340,7 @@ function diffValue(value) {
   return JSON.stringify(value, null, 2);
 }
 
-function CorrectionDiffBlock({ submission, headingLevel = 3, registry = null }) {
+function CorrectionDiffBlock({ submission, headingLevel = 3, registry = null, proposalRegistry = null }) {
   const changes = values(submission.correctionDiff);
   if (submission.submissionType !== "catalog_correction" || !changes.length) {
     return null;
@@ -367,6 +367,20 @@ function CorrectionDiffBlock({ submission, headingLevel = 3, registry = null }) 
                 {change.stale ? "Changed since submission" : "Baseline matches"}
               </span>
             </div>
+            {change.field === "artistLinks" ? (
+              <div className="suggestion-detail-subsection">
+                <p className="suggestion-detail-note">
+                  Identity only: each credit keeps its wording, role, and position. Links are added to the credits as they
+                  were when the correction was submitted.
+                </p>
+                <CreditList
+                  credits={values(change.baseline?.artistCredits)}
+                  registry={registry}
+                  links={artistLinksByPosition(change.proposed, submission.artistResolutions)}
+                  proposalRegistry={proposalRegistry}
+                />
+              </div>
+            ) : (
             <dl className="suggestion-correction-diff-values">
               <div>
                 <dt>Baseline</dt>
@@ -381,6 +395,7 @@ function CorrectionDiffBlock({ submission, headingLevel = 3, registry = null }) 
                 <dd><pre>{diffValue(change.proposed)}</pre></dd>
               </div>
             </dl>
+            )}
             {registry && change.field === "artists" && values(change.proposed?.artistCredits).length ? (
               <div className="suggestion-detail-subsection">
                 <p className="suggestion-detail-note">Proposed credits and the registry artists they link to</p>
@@ -631,7 +646,7 @@ export function SubmissionDetails({
         </section>
       ) : null}
 
-      <CorrectionDiffBlock registry={registry} submission={submission} headingLevel={sectionHeadingLevel} />
+      <CorrectionDiffBlock registry={registry} proposalRegistry={artistProposalRegistry} submission={submission} headingLevel={sectionHeadingLevel} />
 
       {isGenreSuggestion ? (
         <section className="suggestion-detail-section">

@@ -97,6 +97,7 @@ export function formatCommunityAction(action) {
 export function formatCommunityValue(value) {
   const labels = {
     ep: "EP",
+    artistLinks: "Artist links",
     musicbrainz: "MusicBrainz",
     spotify: "Spotify",
   };

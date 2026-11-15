@@ -186,10 +186,16 @@ function submissionCreditLists(suggestion) {
   return [
     suggestion?.proposedMetadata?.artistCredits,
     linkedArtists(suggestion?.artistSelections),
+    linkedArtists(suggestion?.proposedChanges?.artistLinks?.artistSelections),
     suggestion?.proposedChanges?.artists?.artistCredits,
     suggestion?.targetAlbum?.artistCredits,
     suggestion?.baseValues?.artists?.artistCredits,
-    ...revisions.flatMap((revision) => [revision?.proposedMetadata?.artistCredits, linkedArtists(revision?.artistSelections), revision?.proposedChanges?.artists?.artistCredits]),
+    ...revisions.flatMap((revision) => [
+      revision?.proposedMetadata?.artistCredits,
+      linkedArtists(revision?.artistSelections),
+      revision?.proposedChanges?.artists?.artistCredits,
+      linkedArtists(revision?.proposedChanges?.artistLinks?.artistSelections),
+    ]),
   ];
 }
 
@@ -220,7 +226,9 @@ async function moderatorDetail(submission) {
   const [candidates, registry, proposalRegistry] = await Promise.all([
     duplicateCandidates(submission),
     registryContextFor(suggestion),
-    suggestion.artistProposals?.length ? proposalRegistryFor(suggestion) : Promise.resolve(undefined),
+    suggestion.artistProposals?.length || suggestion.proposedChanges?.artistLinks?.artistProposals?.length
+      ? proposalRegistryFor(suggestion)
+      : Promise.resolve(undefined),
   ]);
   const detail = { suggestion, duplicateCandidates: candidates, artistRegistry: registry.artists };
   if (proposalRegistry !== undefined) detail.artistProposalRegistry = proposalRegistry;

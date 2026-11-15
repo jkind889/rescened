@@ -556,6 +556,188 @@ integration("a request-key replay ignores later genre renames and expired editio
   assert.equal(await AlbumSubmission.countDocuments({ submittedByUserId: editionUser }), 1);
 });
 
+// A legacy album written raw, so its credits keep wording a schema write
+// would change: a missing role, trailing join text, repeated names, and
+// punctuation. 25 credits, past the 20-credit edit limit.
+async function rawLegacyAlbum() {
+  const credits = Array.from({ length: 25 }, (_, index) => ({ name: `Session Player ${index + 1}`, role: "performer" }));
+  credits[0] = { name: "Tyler, the Creator", role: "main" };
+  credits[1] = { name: "Alpha & " };
+  credits[2] = { name: "Repeat", role: "main" };
+  credits[3] = { role: "producer", name: "Repeat" };
+  credits[4] = { name: "Already Linked", role: "main", artistId: localArtist.artistId };
+  credits[24] = { name: "Last, Credit!", role: "remixer" };
+  const albumId = crypto.randomUUID();
+  const { insertedId } = await AlbumCatalog.collection.insertOne({
+    albumId, title: "Legacy Credits", artistDisplayName: "Tyler, the Creator & Many", artistCredits: credits, releaseType: "album",
+    releaseDate: "2020", releaseDatePrecision: "year", releaseYear: 2020, tracks: [], externalReferences: [], catalogSource: "import",
+    fieldProvenance: { artistCredits: { source: "import" }, artistDisplayName: { source: "import" } }, catalogRevision: 3,
+    createdAt: new Date(), updatedAt: new Date(),
+  });
+  return { _id: insertedId, albumId, credits };
+}
+
+function linksBody(albumId, artistLinks, extra = {}) {
+  return { albumId, proposedChanges: { artistLinks, ...extra }, supportingSources: [{ type: "other", url: "https://example.com/credits" }] };
+}
+
+const LEGACY_LINKS = {
+  artistProposals: [
+    { proposalKey: "repeat", kind: "community", canonicalName: "Repeat", evidence: [{ url: EVIDENCE }] },
+    { proposalKey: "mb-1", kind: "musicbrainz", artistMbid: MBID_NEW },
+  ],
+  artistSelections: [
+    { position: 0, kind: "existing", artistId: localArtist?.artistId },
+    { position: 2, kind: "proposal", proposalKey: "repeat" },
+    { position: 3, kind: "proposal", proposalKey: "repeat" },
+    { position: 24, kind: "proposal", proposalKey: "mb-1" },
+  ],
+};
+
+integration("identity-only correction links add artists without touching credit wording, roles, order, or display name", async () => {
+  LEGACY_LINKS.artistSelections[0].artistId = localArtist.artistId;
+  const album = await rawLegacyAlbum();
+  const user = contributor();
+  // Fresh contributors for refused attempts keep the per-user creation limit free.
+  const correct = (body, asUser = contributor()) => call("POST", "/suggestions/corrections", asUser, body);
+
+  // Strict contract.
+  const invalid = [
+    [{ artistSelections: [{ position: 25, kind: "existing", artistId: localArtist.artistId }] }, "ARTIST_SELECTION_OUT_OF_RANGE"],
+    [{ artistSelections: [{ position: 0, kind: "existing", artistId: localArtist.artistId }, { position: 0, kind: "existing", artistId: localArtist.artistId }] }, "DUPLICATE_ARTIST_SELECTION"],
+    [{ artistSelections: [{ position: 4, kind: "existing", artistId: localArtist.artistId }] }, "CREDIT_ALREADY_LINKED"],
+    [{ artistSelections: Array.from({ length: 21 }, (_, position) => ({ position: position < 4 ? position : position + 1, kind: "existing", artistId: localArtist.artistId })) }, "INVALID_ARTIST_PROPOSAL"],
+    [{ artistSelections: [{ position: 0, kind: "existing", artistId: localArtist.artistId, name: "Rewritten" }] }, "INVALID_ARTIST_PROPOSAL"],
+  ];
+  for (const [links, code] of invalid) {
+    const result = await correct(linksBody(album.albumId, links));
+    assert.equal(result.status, 400, JSON.stringify(result.body));
+    assert.equal(result.body.code, code, JSON.stringify(result.body));
+  }
+  const both = await correct(linksBody(album.albumId, LEGACY_LINKS, { artists: { artistDisplayName: "X", artistCredits: [{ name: "X" }] } }));
+  assert.equal(both.status, 400);
+  assert.match(both.body.error, /cannot replace artists and add artistLinks/);
+
+  // Two corrections: one with links and a title, one title-only partial approval.
+  const created = await correct(linksBody(album.albumId, LEGACY_LINKS, { title: "Legacy Credits (Deluxe)" }), user);
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const { submissionId } = created.body;
+  const stored = await AlbumSubmission.findOne({ submissionId }).lean();
+  assert.deepEqual(stored.baseValues.artistLinks.artistCredits, album.credits, "the baseline is the raw stored credits, all 25");
+  assert.equal(stored.proposedChanges.artistLinks.artistProposals.find((proposal) => proposal.kind === "musicbrainz").observation.name, "Observed New Artist");
+  const mine = await call("GET", "/suggestions/mine", user);
+  assert.equal(JSON.stringify(mine.body).includes(EVIDENCE), false, "summaries carry no evidence");
+  assert.ok(JSON.stringify((await call("GET", `/suggestions/${submissionId}`, user)).body).includes(EVIDENCE));
+  assert.equal((await call("GET", `/suggestions/${submissionId}`, "outsider")).status, 404);
+  const detail = await call("GET", `/moderation/album-suggestions/${submissionId}`, MODERATOR);
+  assert.equal(detail.body.artistRegistry[localArtist.artistId].name, "Local Artist");
+  const queue = await call("GET", "/moderation/album-suggestions?submissionType=catalog_correction", MODERATOR);
+  assert.deepEqual(queue.body.suggestions.find((item) => item.submissionId === submissionId).bulkApproval, { eligible: false, reason: "artist_links" });
+
+  const missing = await approveRoute(submissionId, { applyFields: ["artistLinks", "title"] });
+  assert.equal(missing.status, 400);
+  assert.equal(missing.body.code, "EXPECTED_REVISION_REQUIRED");
+  const stale = await approveRoute(submissionId, { applyFields: ["artistLinks", "title"], expectedRevision: 2 });
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.code, "STATE_CONFLICT");
+
+  const before = await artistCount();
+  const approved = await approveRoute(submissionId, { applyFields: ["artistLinks", "title"], expectedRevision: 1 });
+  assert.equal(approved.status, 200, JSON.stringify(approved.body));
+  const raw = await AlbumCatalog.collection.findOne({ _id: album._id });
+  assert.equal(raw.title, "Legacy Credits (Deluxe)");
+  assert.equal(raw.catalogRevision, 4);
+  assert.equal(raw.artistDisplayName, "Tyler, the Creator & Many", "the display name is not touched");
+  assert.equal(raw.artistCredits.length, 25);
+  const selected = new Set([0, 2, 3, 24]);
+  raw.artistCredits.forEach((credit, index) => {
+    const { artistId, artistMbid, ...wording } = credit;
+    if (!selected.has(index)) {
+      assert.deepEqual(credit, album.credits[index], `credit ${index} is byte-for-byte unchanged`);
+      return;
+    }
+    assert.deepEqual(wording, album.credits[index], `credit ${index} keeps its wording, role and key order`);
+    assert.deepEqual(Object.keys(credit).slice(0, Object.keys(album.credits[index]).length), Object.keys(album.credits[index]));
+    assert.ok(artistId);
+  });
+  assert.equal(raw.artistCredits[0].artistId, localArtist.artistId);
+  assert.equal(raw.artistCredits[2].artistId, raw.artistCredits[3].artistId, "an explicitly shared proposal is one artist at both positions");
+  assert.equal(raw.artistCredits[24].artistMbid, MBID_NEW);
+  assert.equal(await artistCount(), before + await createdArtistCount(submissionId), "only the receipt's created artists were added");
+  assert.ok(await createdArtistCount(submissionId) >= 1, "the shared community proposal registered one artist");
+  assert.deepEqual(raw.fieldProvenance.artistCredits, { source: "import" }, "credit wording ownership is unchanged");
+  assert.deepEqual(raw.fieldProvenance.artistDisplayName, { source: "import" });
+  assert.equal(raw.fieldProvenance.artistIdentity.source, "community");
+  assert.equal(raw.fieldProvenance.artistIdentity.method, "artist-link-correction");
+  assert.deepEqual(raw.fieldProvenance.artistIdentity.positions, [0, 2, 3, 24]);
+  assert.equal(raw.fieldProvenance.title.source, "community");
+  const receipt = (await AlbumSubmission.findOne({ submissionId }).lean()).approvalReceipt;
+  assert.deepEqual(receipt.appliedFields, ["title", "artistLinks"]);
+  assert.deepEqual(receipt.artistResolutions.map(({ position }) => position), [0, 2, 3, 24]);
+  assert.deepEqual(receipt.artistResolutions.map(({ kind }) => kind), ["existing", "community", "community", "musicbrainz"]);
+  assert.equal(JSON.stringify(await Artist.find({}).lean()).includes(EVIDENCE), false, "evidence never reaches the registry");
+
+  const retry = await approveRoute(submissionId, { applyFields: ["title", "artistLinks"], expectedRevision: 1 });
+  assert.equal(retry.status, 200);
+  assert.equal(retry.body.idempotent, true);
+  assert.equal((await AlbumCatalog.collection.findOne({ _id: album._id })).catalogRevision, 4);
+});
+
+integration("a partial correction approval applies only the selected groups and registers no artists", async () => {
+  const album = await rawLegacyAlbum();
+  const user = contributor();
+  const created = await call("POST", "/suggestions/corrections", user, linksBody(album.albumId, {
+    artistProposals: [{ proposalKey: "new-1", kind: "community", canonicalName: "Only If Applied", evidence: [{ url: "https://example.com/only" }] }],
+    artistSelections: [{ position: 1, kind: "proposal", proposalKey: "new-1" }],
+  }, { title: "Partial Title" }));
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const before = await artistCount();
+  const approved = await approveRoute(created.body.submissionId, { applyFields: ["title"], expectedRevision: 1 });
+  assert.equal(approved.status, 200, JSON.stringify(approved.body));
+  assert.equal(await artistCount(), before, "unapplied links publish no artist");
+  const raw = await AlbumCatalog.collection.findOne({ _id: album._id });
+  assert.deepEqual(raw.artistCredits, album.credits);
+  assert.equal(raw.fieldProvenance.artistIdentity, undefined);
+  const receipt = (await AlbumSubmission.findOne({ submissionId: created.body.submissionId }).lean()).approvalReceipt;
+  assert.deepEqual(receipt.appliedFields, ["title"]);
+  assert.deepEqual(receipt.artistResolutions, []);
+});
+
+integration("correction links are gated, fail closed while off, and roll back with a stale baseline", async () => {
+  const album = await rawLegacyAlbum();
+  const user = contributor();
+  const links = { artistSelections: [{ position: 1, kind: "existing", artistId: localArtist.artistId }] };
+  const created = await call("POST", "/suggestions/corrections", user, linksBody(album.albumId, links));
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const { submissionId } = created.body;
+  process.env.ARTIST_SUGGESTIONS_ENABLED = "false";
+  try {
+    const refused = await call("POST", "/suggestions/corrections", user, linksBody(album.albumId, links));
+    assert.equal(refused.status, 503);
+    assert.equal(refused.body.code, "ARTIST_SUGGESTIONS_DISABLED");
+    const approval = await approveRoute(submissionId, { applyFields: ["artistLinks"], expectedRevision: 1 });
+    assert.equal(approval.status, 503);
+    await applyModerationCommand({ submissionId, actorUserId: MODERATOR, action: "request_changes", body: { reason: "Add a source", expectedRevision: 1 } });
+    const revise = await call("POST", `/suggestions/${submissionId}/revise`, user, { proposedChanges: { title: "Only a title now" }, supportingSources: [{ type: "other", url: "https://example.com/c" }] });
+    assert.equal(revise.status, 503, "a correction with links cannot be revised while linking is off");
+    assert.equal((await AlbumSubmission.findOne({ submissionId }).lean()).proposedChanges.artistLinks.artistSelections.length, 1);
+  } finally {
+    process.env.ARTIST_SUGGESTIONS_ENABLED = "true";
+  }
+  const revised = await call("POST", `/suggestions/${submissionId}/revise`, user, { proposedChanges: { artistLinks: links }, supportingSources: [{ type: "other", url: "https://example.com/c" }] });
+  assert.equal(revised.status, 200, JSON.stringify(revised.body));
+
+  // Someone else writes the credits without changing the revision; the raw
+  // baseline still catches it.
+  await AlbumCatalog.collection.updateOne({ _id: album._id }, { $set: { "artistCredits.1.name": "Alpha &" } });
+  const before = await artistCount();
+  const conflict = await approveRoute(submissionId, { applyFields: ["artistLinks"], expectedRevision: 2 });
+  assert.equal(conflict.status, 409);
+  assert.equal(conflict.body.code, "CATALOG_CHANGED");
+  assert.equal(await artistCount(), before);
+  assert.equal((await AlbumSubmission.findOne({ submissionId }).lean()).status, "pending");
+});
+
 async function pendingLinked(title) {
   const created = await call("POST", "/suggestions", contributor(), { ...mixedBody(title), requestKey: crypto.randomUUID() });
   assert.equal(created.status, 201);

@@ -285,7 +285,7 @@ async function correctionReceiptTest() {
   const retry = await approveAlbumSubmission({ submissionId, actorUserId: "moderator", applyFields: ["title"], expectedRevision: 1 });
   assert.equal(retry.idempotent, true);
   await assert.rejects(
-    approveAlbumSubmission({ submissionId, actorUserId: "moderator", applyFields: ["title", "label"] }),
+    approveAlbumSubmission({ submissionId, actorUserId: "moderator", expectedRevision: 1, applyFields: ["title", "label"] }),
     (error) => error.code === "APPROVAL_CONFLICT",
   );
   const album = await AlbumCatalog.findById(target._id).lean();

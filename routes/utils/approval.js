@@ -517,6 +517,8 @@ function approvalReceipt({ revision, publicationType, album, appliedFields = [],
 async function approveCatalogCorrection({ preliminary, submissionId, actorUserId, applyFields, reason }) {
   const preliminaryRevision = preliminary.currentRevision;
   const selectedFields = correctionApprovalFields(preliminary, applyFields);
+  // Artists are registered only when the links are actually applied.
+  if (selectedFields.appliedFields.includes("artistLinks")) assertArtistSuggestionsEnabled();
   let session;
   let result = null;
   try {
@@ -566,17 +568,42 @@ async function approveCatalogCorrection({ preliminary, submissionId, actorUserId
       const resolvedArtistCredits = applied.appliedFields.includes("artists")
         ? await resolveApprovalCredits(changes.artists?.artistCredits, current, actorUserId, approvedAt, session)
         : null;
+      // Identity-only links: the stored credits must still be byte-for-byte
+      // the reviewed baseline (a backfill or another write changes them or
+      // the revision), and only identities are added.
+      let linked = null;
+      if (applied.appliedFields.includes("artistLinks")) {
+        const raw = await AlbumCatalog.collection.findOne({ _id: plain(target)._id }, { session });
+        if (!raw || JSON.stringify(raw.artistCredits || []) !== JSON.stringify(current.baseValues?.artistLinks?.artistCredits || [])) {
+          throw new ModerationConflictError("The album's credits changed after this correction was submitted", "CATALOG_CHANGED");
+        }
+        linked = await resolveCorrectionLinks(current, raw.artistCredits || [], actorUserId, approvedAt, session);
+      }
       const patch = correctionPatch(current, target, applied.appliedFields, actorUserId, approvedAt, resolvedArtistCredits);
+      if (linked) {
+        // Identity provenance only: whoever owns the credit wording still
+        // owns it, so fieldProvenance.artistCredits is left unchanged.
+        patch.fieldProvenance.artistIdentity = {
+          ...correctionProvenance(current, actorUserId, approvedAt),
+          method: "artist-link-correction",
+          positions: linked.resolutions.map((resolution) => resolution.position),
+        };
+      }
       const candidate = {
         ...plain(target),
         ...patch,
+        ...(linked ? { artistCredits: linked.credits } : {}),
         catalogRevision: baselineRevision + 1,
       };
       validateCatalogDocument(candidate, { existingId: plain(target)._id });
+      if (linked) {
+        const invalid = new AlbumCatalog({ artistCredits: linked.credits }).validateSync(["artistCredits"]);
+        if (invalid) throw new ModerationConflictError(`Linked credits fail catalog validation: ${invalid.message}`, "CATALOG_CHANGED");
+      }
       // Albums written before revisions were tracked have no stored field and
       // count as revision 1, so match that shape and set the next revision
       // explicitly; $inc on a missing field would leave it at 1.
-      const updatedAlbum = await AlbumCatalog.findOneAndUpdate(
+      let updatedAlbum = await AlbumCatalog.findOneAndUpdate(
         {
           _id: plain(target)._id,
           albumId: plain(target).albumId,
@@ -586,6 +613,17 @@ async function approveCatalogCorrection({ preliminary, submissionId, actorUserId
         { returnDocument: "after", runValidators: true, session },
       );
       if (!updatedAlbum) throw new ModerationConflictError("Catalog album changed while the correction was being applied", "CATALOG_CHANGED");
+      if (linked) {
+        // Written through the raw collection, like the identity backfill, so
+        // schema casting cannot trim or re-key the stored credit wording.
+        const written = await AlbumCatalog.collection.updateOne(
+          { _id: plain(target)._id, catalogRevision: baselineRevision + 1 },
+          { $set: { artistCredits: linked.credits } },
+          { session },
+        );
+        if (Number(written?.matchedCount) !== 1) throw new ModerationConflictError("Catalog album changed while the correction was being applied", "CATALOG_CHANGED");
+        updatedAlbum = await readQuery(AlbumCatalog.findOne({ _id: plain(target)._id }), session);
+      }
       await baselineService().invalidateAlbumBaseline(updatedAlbum, {
         session,
         actorUserId,
@@ -606,6 +644,7 @@ async function approveCatalogCorrection({ preliminary, submissionId, actorUserId
               publicationType: "catalog_corrected",
               album: updatedAlbum,
               appliedFields: applied.appliedFields,
+              artistResolutions: linked?.resolutions || [],
               approvedAt,
             }),
           },
@@ -707,6 +746,18 @@ async function resolveArtistLinks(submission, actorUserId, approvedAt, session) 
   }
 }
 
+// A correction's identity-only links, resolved against the album's stored
+// credits inside the approval transaction.
+async function resolveCorrectionLinks(submission, storedCredits, actorUserId, approvedAt, session) {
+  const links = submission.proposedChanges?.artistLinks || {};
+  return resolveArtistLinks({
+    ...submission,
+    proposedMetadata: { artistCredits: storedCredits },
+    artistProposals: links.artistProposals || [],
+    artistSelections: links.artistSelections || [],
+  }, actorUserId, approvedAt, session);
+}
+
 function appliedFieldsChanged(left, right) {
   return JSON.stringify(left?.appliedFields || []) !== JSON.stringify(right?.appliedFields || []);
 }
@@ -732,12 +783,13 @@ async function approveAlbumSubmission({
     throw new ModerationConflictError("Suggestion not found", "SUGGESTION_NOT_FOUND");
   }
   const preliminary = plain(preliminarySubmission);
-  // An album suggestion is approved only as the revision the moderator
-  // reviewed: the detail page and bulk approval both send it, and a missing
-  // value is refused rather than defaulting to whatever is current.
-  if ((preliminary.submissionType || "new_album") === "new_album" && expectedRevision === undefined) {
+  // An album suggestion or catalog correction is approved only as the
+  // revision the moderator reviewed: the detail page and bulk approval both
+  // send it, and a missing value is refused rather than defaulting to
+  // whatever is current. Genre approvals keep the optional guard.
+  if (["new_album", "catalog_correction"].includes(preliminary.submissionType || "new_album") && expectedRevision === undefined) {
     throw new ModerationValidationError(
-      "expectedRevision is required to approve an album suggestion; approve the revision you reviewed",
+      "expectedRevision is required to approve an album suggestion or catalog correction; approve the revision you reviewed",
       "EXPECTED_REVISION_REQUIRED",
     );
   }

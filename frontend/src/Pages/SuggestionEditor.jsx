@@ -327,6 +327,7 @@ export function SuggestionEditor({ mode = "create" }) {
 
         {loadStatus === "ready" && !revisionBlocked && !genreFlow ? (correctionFlow ? (
           <CorrectionForm
+            getToken={getToken}
             key={`${submission?.submissionId || albumId || "correction"}-${submission?.currentRevision || 1}-${draftKey}`}
             initialValue={submission}
             draftKey={draftKey}

@@ -5,12 +5,14 @@ const AlbumCatalog = require("../../models/AlbumCatalog");
 const { normalizeCatalogAlbum } = require("./albumCatalog");
 const AlbumSubmission = require("../../models/AlbumSubmission");
 const {
+  creditIdentity,
   creditWithIdentity,
   creditsHaveIdentity,
   findCreditIdentityProblems,
   normalizeArtistId,
   normalizeArtistMbid,
 } = require("../../lib/artists/identity");
+const { ArtistProposalValidationError, normalizeArtistProposals, normalizeArtistSelections } = require("../../lib/artists/proposals");
 
 const RELEASE_TYPES = new Set([
   "album",
@@ -34,7 +36,7 @@ const SOURCE_TYPES = new Set([
 ]);
 const ACTIVE_STATUSES = ["pending", "needs_changes"];
 const SUBMISSION_TYPES = ["new_album", "catalog_correction", "genre_suggestion"];
-const CORRECTION_FIELD_GROUPS = ["title", "artists", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"];
+const CORRECTION_FIELD_GROUPS = ["title", "artists", "artistLinks", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"];
 const APPROVAL_PUBLICATION_TYPES = ["catalog_created", "catalog_linked", "catalog_corrected", "genres_updated"];
 const PUBLIC_UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_PAGE_LIMIT = 20;
@@ -283,8 +285,11 @@ function correctionAlbumRevision(album) {
   return Number.isSafeInteger(value) && value > 0 ? value : 1;
 }
 
-function correctionAlbumValue(album, field) {
+function correctionAlbumValue(album, field, { rawArtistCredits } = {}) {
   const source = plain(album) || {};
+  // Identity links compare against the credits exactly as stored (read raw,
+  // so no schema default or trim changes them).
+  if (field === "artistLinks") return { artistCredits: clone(rawArtistCredits || source.artistCredits || []) };
   if (field === "artists") {
     return {
       artistDisplayName: source.artistDisplayName || "",
@@ -305,6 +310,9 @@ function correctionAlbumValue(album, field) {
 function correctionProvenanceValue(album, field) {
   const source = plain(album) || {};
   const provenance = source.fieldProvenance || {};
+  if (field === "artistLinks") {
+    return { artistCredits: clone(provenance.artistCredits), artistIdentity: clone(provenance.artistIdentity) };
+  }
   if (field === "artists") {
     return {
       artistDisplayName: clone(provenance.artistDisplayName),
@@ -340,17 +348,29 @@ function correctionCurrentValue(album, field) {
   return correctionAlbumValue(album, field);
 }
 
+// Names and identities by position: what an identity-only link depends on.
+function creditLinkState(value) {
+  return (value?.artistCredits || []).map((credit) => [credit?.name ?? "", credit?.artistId || "", credit?.artistMbid || ""]);
+}
+
 function correctionDiff(source) {
   const proposed = source.proposedChanges || {};
   const baseline = source.baseValues || {};
   const target = source.targetAlbumCatalogId;
-  return correctionFieldOrder(Object.keys(proposed)).map((field) => ({
-    field,
-    baseline: clone(baseline[field]),
-    current: clone(correctionCurrentValue(target, field)),
-    proposed: clone(proposed[field]),
-    stale: !sameValue(correctionCurrentValue(target, field), baseline[field]),
-  }));
+  return correctionFieldOrder(Object.keys(proposed)).map((field) => {
+    const current = correctionCurrentValue(target, field);
+    return {
+      field,
+      baseline: clone(baseline[field]),
+      current: clone(current),
+      proposed: clone(proposed[field]),
+      // Approval rechecks the raw stored credits; this advisory flag ignores
+      // schema defaults on the hydrated album.
+      stale: field === "artistLinks"
+        ? !sameValue(creditLinkState(current), creditLinkState(baseline[field]))
+        : !sameValue(current, baseline[field]),
+    };
+  });
 }
 
 function normalizeCorrectionTracks(value, targetAlbum) {
@@ -389,9 +409,39 @@ function normalizeCorrectionTracks(value, targetAlbum) {
   });
 }
 
-function normalizeCorrectionChanges(value, targetAlbum) {
+// Identity-only links for existing credits. Positions refer to the target's
+// stored credits (all of them, even past the twenty-credit edit limit); each
+// selected credit must have no identity yet. Wording is never part of this.
+function normalizeCorrectionArtistLinks(value, rawArtistCredits) {
+  assertRecord(value, "proposedChanges.artistLinks");
+  assertKeys(value, new Set(["artistProposals", "artistSelections"]), "proposedChanges.artistLinks");
+  const credits = Array.isArray(rawArtistCredits) ? rawArtistCredits : [];
+  const artistProposals = normalizeArtistProposals(value.artistProposals ?? [], "proposedChanges.artistLinks.artistProposals");
+  const artistSelections = normalizeArtistSelections(value.artistSelections ?? [], artistProposals, {
+    creditCount: credits.length,
+    path: "proposedChanges.artistLinks.artistSelections",
+  });
+  if (!artistSelections.length) fail("proposedChanges.artistLinks.artistSelections must link at least one credit");
+  const linked = artistSelections.filter((selection) => {
+    const identity = creditIdentity(credits[selection.position]);
+    return Boolean(identity.artistId || identity.artistMbid);
+  });
+  if (linked.length) {
+    throw new ArtistProposalValidationError(
+      "A selected credit already links to an artist",
+      "CREDIT_ALREADY_LINKED",
+      linked.map((selection) => `proposedChanges.artistLinks.artistSelections position ${selection.position} already has an artist identity`),
+    );
+  }
+  return { artistProposals, artistSelections };
+}
+
+function normalizeCorrectionChanges(value, targetAlbum, { rawArtistCredits } = {}) {
   assertRecord(value, "proposedChanges");
   assertKeys(value, new Set(CORRECTION_FIELD_GROUPS), "proposedChanges");
+  if (value.artists !== undefined && value.artistLinks !== undefined) {
+    fail("proposedChanges cannot replace artists and add artistLinks in the same correction");
+  }
   const changes = {};
   if (value.title !== undefined) changes.title = requiredString(value.title, "proposedChanges.title", 200);
   if (value.artists !== undefined) {
@@ -401,6 +451,9 @@ function normalizeCorrectionChanges(value, targetAlbum) {
       artistDisplayName: requiredString(value.artists.artistDisplayName, "proposedChanges.artists.artistDisplayName", 300),
       artistCredits: normalizeArtistCredits(value.artists.artistCredits, "proposedChanges.artists.artistCredits"),
     };
+  }
+  if (value.artistLinks !== undefined) {
+    changes.artistLinks = normalizeCorrectionArtistLinks(value.artistLinks, rawArtistCredits || plain(targetAlbum)?.artistCredits);
   }
   if (value.releaseType !== undefined) {
     const releaseType = requiredString(value.releaseType, "proposedChanges.releaseType", 30).toLowerCase();
@@ -425,6 +478,8 @@ function normalizeCorrectionChanges(value, targetAlbum) {
   if (!Object.keys(changes).length) fail("proposedChanges must contain at least one field group");
 
   const effective = Object.keys(changes).filter((field) => {
+    // Links only ever target unlinked credits, so they always change something.
+    if (field === "artistLinks") return true;
     if (field === "externalReferences") {
       const existing = new Set((plain(targetAlbum)?.externalReferences || []).map(correctionReferenceKey));
       return changes.externalReferences.add.some((reference) => !existing.has(correctionReferenceKey(reference)));
@@ -463,19 +518,22 @@ function correctionFingerprint(targetAlbum, changes) {
   })).digest("hex");
 }
 
-function normalizeCorrectionPayload(body, targetAlbum) {
+// `rawArtistCredits` are the target's credits read from the raw collection;
+// the corrections route passes them so an artistLinks baseline matches the
+// stored bytes. Without them the hydrated credits are used.
+function normalizeCorrectionPayload(body, targetAlbum, { rawArtistCredits } = {}) {
   assertRecord(body, "request body");
   assertKeys(body, new Set(["albumId", "proposedChanges", "supportingSources"]), "request body");
   if (!targetAlbum) fail("Target catalog album is required");
   const albumId = requiredString(body.albumId, "albumId", 100).toLowerCase();
   if (!PUBLIC_UUID_V4.test(albumId)) fail("albumId must be a UUID v4");
   if (plain(targetAlbum).albumId !== albumId) fail("albumId does not match the target catalog album");
-  const proposedChanges = normalizeCorrectionChanges(body.proposedChanges, targetAlbum);
+  const proposedChanges = normalizeCorrectionChanges(body.proposedChanges, targetAlbum, { rawArtistCredits });
   return {
     albumId,
     targetAlbumCatalogId: plain(targetAlbum)._id,
     baseCatalogRevision: correctionAlbumRevision(targetAlbum),
-    baseValues: Object.fromEntries(Object.keys(proposedChanges).map((field) => [field, correctionAlbumValue(targetAlbum, field)])),
+    baseValues: Object.fromEntries(Object.keys(proposedChanges).map((field) => [field, correctionAlbumValue(targetAlbum, field, { rawArtistCredits })])),
     baseProvenance: Object.fromEntries(Object.keys(proposedChanges).map((field) => [field, correctionProvenanceValue(targetAlbum, field)])),
     proposedChanges,
     supportingSources: normalizeSources(body.supportingSources),
@@ -684,6 +742,14 @@ function plain(value) {
   return typeof value?.toObject === "function" ? value.toObject() : value;
 }
 
+function withoutLinkEvidence(changes) {
+  const value = clone(plain(changes) || {});
+  if (value.artistLinks?.artistProposals) {
+    value.artistLinks.artistProposals = value.artistLinks.artistProposals.map(({ evidence, ...proposal }) => proposal);
+  }
+  return value;
+}
+
 function artistDetailFields(source) {
   // eslint-disable-next-line global-require
   return require("./artistSuggestions").artistDetailFields(source);
@@ -787,7 +853,9 @@ function serializeSubmission(value, { detail = false, moderator = false } = {}) 
   if (submissionType === "catalog_correction") {
     result.baseCatalogRevision = source.baseCatalogRevision;
     result.baseValues = source.baseValues || {};
-    result.proposedChanges = source.proposedChanges || {};
+    // Summaries keep the link structure but not the private evidence, which
+    // only detail (owner and moderators) carries.
+    result.proposedChanges = detail ? source.proposedChanges || {} : withoutLinkEvidence(source.proposedChanges);
     if (detail) result.correctionDiff = correctionDiff(source);
     if (source.targetAlbumCatalogId?.albumId) result.targetAlbum = normalizeCatalogAlbum(source.targetAlbumCatalogId);
     if (moderator && source.baseProvenance) result.baseProvenance = clone(source.baseProvenance);
@@ -801,6 +869,7 @@ function serializeSubmission(value, { detail = false, moderator = false } = {}) 
     // Private: detail responses reach only the owner and moderators.
     Object.assign(result, artistDetailFields(source), artistResolutionFields(source));
   }
+  if (detail && submissionType === "catalog_correction") Object.assign(result, artistResolutionFields(source));
   if (detail) {
     result.revisions = (source.revisions || []).map(publicSnapshot);
     result.moderationHistory = (source.moderationHistory || []).map((event) => {

@@ -50,6 +50,7 @@ const {
   artistWorkFields,
   assertArtistSuggestionsEnabled,
   assertExistingSelections,
+  correctionArtistLinks,
   creationDigest,
   isArtistBearing,
   normalizeArtistWork,
@@ -192,6 +193,25 @@ async function queryResult(query) {
   return query && typeof query.exec === "function" ? query.exec() : query;
 }
 
+// The target's credits exactly as stored, for an identity-only link baseline.
+async function rawArtistCredits(album) {
+  const id = plain(album)?._id;
+  if (!id || typeof AlbumCatalog.collection?.findOne !== "function") return plain(album)?.artistCredits || [];
+  const raw = await AlbumCatalog.collection.findOne({ _id: id }, { projection: { artistCredits: 1 } });
+  return raw?.artistCredits || [];
+}
+
+// Identity-only correction links: gated, existing artists checked, and
+// MusicBrainz proposals prepared (an MBID already observed on `previous`
+// keeps that observation). Mutates payload.proposedChanges.artistLinks.
+async function prepareCorrectionLinks(payload, previous = null) {
+  const links = payload.proposedChanges.artistLinks;
+  if (!links) return;
+  await assertExistingSelections(links.artistSelections);
+  const prior = plain(plain(previous)?.proposedChanges)?.artistLinks;
+  links.artistProposals = await prepareStoredProposals(links.artistProposals, { previous: prior ? { artistProposals: prior.artistProposals } : null });
+}
+
 async function createSubmission(data, session) {
   if (!session) return AlbumSubmission.create(data);
   const [submission] = await AlbumSubmission.create([data], { session });
@@ -271,10 +291,13 @@ router.post("/corrections", auth, submissionsEnabled, correctionCreateRateLimit,
     const requestedAlbumId = typeof req.body?.albumId === "string" ? req.body.albumId.trim().toLowerCase() : "";
     const album = requestedAlbumId ? await queryResult(AlbumCatalog.findOne({ albumId: requestedAlbumId })) : null;
     if (!album) return res.status(404).json({ error: "Target catalog album not found", code: "CATALOG_TARGET_NOT_FOUND" });
-    const payload = normalizeCorrectionPayload(req.body, album);
+    const wantsLinks = req.body?.proposedChanges?.artistLinks !== undefined;
+    if (wantsLinks) assertArtistSuggestionsEnabled();
+    const payload = normalizeCorrectionPayload(req.body, album, wantsLinks ? { rawArtistCredits: await rawArtistCredits(album) } : {});
     if (payload.proposedChanges.artists) {
       await assertCreditIdentities(payload.proposedChanges.artists.artistCredits, "proposedChanges.artists.artistCredits");
     }
+    await prepareCorrectionLinks(payload);
     const submittedAt = new Date();
     const snapshot = correctionSnapshot(payload, submittedAt, 1);
     const submission = await AlbumSubmission.create({
@@ -466,10 +489,20 @@ router.post("/:submissionId/revise", auth, submissionsEnabled, submissionMutatio
       const target = await queryResult(AlbumCatalog.findOne({ _id: targetId }));
       if (!target) return res.status(409).json({ error: "The correction target album is no longer available", code: "CATALOG_TARGET_MISSING" });
       const body = { ...(req.body || {}), albumId: req.body?.albumId || plain(target).albumId };
-      const payload = normalizeCorrectionPayload(body, target);
+      const wantsLinks = body.proposedChanges?.artistLinks !== undefined;
+      // Fail closed like album suggestions: with linking off, a correction
+      // that has artist links cannot be revised, so its links are never
+      // dropped implicitly.
+      if (wantsLinks || correctionArtistLinks(current)) {
+        assertArtistSuggestionsEnabled(correctionArtistLinks(current) && !wantsLinks
+          ? "This correction has artist links, and artist linking is turned off right now. Revise it when linking is back on, or withdraw it."
+          : undefined);
+      }
+      const payload = normalizeCorrectionPayload(body, target, wantsLinks ? { rawArtistCredits: await rawArtistCredits(target) } : {});
       if (payload.proposedChanges.artists) {
         await assertCreditIdentities(payload.proposedChanges.artists.artistCredits, "proposedChanges.artists.artistCredits");
       }
+      await prepareCorrectionLinks(payload, current);
       update = {
         $set: correctionUpdate(payload, revision, "pending"),
         $push: {

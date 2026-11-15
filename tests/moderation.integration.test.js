@@ -356,6 +356,7 @@ async function correctionApprovalTest() {
   const result = await approveAlbumSubmission({
     submissionId: submission.submissionId,
     actorUserId: "integration-moderator",
+    expectedRevision: 1,
     applyFields: ["title"],
     reason: "Verified the title against the cited source",
   });
@@ -380,7 +381,7 @@ async function ambiguousCorrectionRetryTest() {
     artistDisplayName: "Retry Artist", catalogSource: "manual", catalogRevision: 1,
   });
   const submission = await createCorrection(target, { title: "Reviewed correction" });
-  const command = { submissionId: submission.submissionId, actorUserId: "first-moderator", applyFields: ["title"], reason: "Reviewed" };
+  const command = { submissionId: submission.submissionId, actorUserId: "first-moderator", expectedRevision: 1, applyFields: ["title"], reason: "Reviewed" };
   await approveAlbumSubmission(command); // Commit succeeded; deliberately discard its response.
   const snapshot = async () => ({
     album: await AlbumCatalog.findById(target._id).lean(),
@@ -404,7 +405,7 @@ async function ambiguousCorrectionRetryTest() {
   }
   // An old retry must not overwrite a later, separately approved correction.
   const next = await createCorrection(await AlbumCatalog.findById(target._id), { title: "Later correction" });
-  await approveAlbumSubmission({ submissionId: next.submissionId, actorUserId: "later-moderator", applyFields: ["title"] });
+  await approveAlbumSubmission({ submissionId: next.submissionId, actorUserId: "later-moderator", expectedRevision: 1, applyFields: ["title"] });
   const later = await snapshot();
   assert.equal(later.album.catalogRevision, 3);
   assert.equal(later.album.title, "Later correction");
@@ -433,7 +434,7 @@ async function staleCorrectionTest() {
   const submission = await createCorrection(target, { title: "Stale proposal" });
   await AlbumCatalog.updateOne({ _id: target._id }, { $set: { label: "Intervening edit" }, $inc: { catalogRevision: 1 } });
   await assert.rejects(
-    approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "integration-moderator", applyFields: ["title"] }),
+    approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "integration-moderator", expectedRevision: 1, applyFields: ["title"] }),
     (error) => error.code === "CATALOG_CHANGED",
   );
   const persisted = await AlbumSubmission.findOne({ submissionId: submission.submissionId }).lean();
@@ -465,6 +466,7 @@ async function legacyRevisionCorrectionTest() {
   await approveAlbumSubmission({
     submissionId: submission.submissionId,
     actorUserId: "integration-moderator",
+    expectedRevision: 1,
     applyFields: ["releaseType"],
     reason: "Verified the release type",
   });

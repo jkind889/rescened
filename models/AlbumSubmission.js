@@ -39,7 +39,7 @@ const MODERATION_ACTIONS = [
 ];
 const SUBMISSION_TYPES = ["new_album", "catalog_correction", "genre_suggestion"];
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const CORRECTION_FIELDS = ["title", "artists", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"];
+const CORRECTION_FIELDS = ["title", "artists", "artistLinks", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"];
 
 function isHttpsUrl(value) {
   if (!value) return true;
@@ -198,6 +198,18 @@ const correctionChangesSchema = new mongoose.Schema(
           type: [correctionArtistSchema],
           required: true,
           validate: { validator: (value) => value.length >= 1 && value.length <= 20, message: "One to twenty artist credits are required." },
+        },
+      }, { _id: false, strict: "throw" }),
+    },
+    // Identity-only links for the target album's existing credits, by
+    // position. Never carries credit wording; see lib/artists/proposals.js.
+    artistLinks: {
+      type: new mongoose.Schema({
+        artistProposals: artistProposalsField,
+        artistSelections: {
+          ...artistSelectionsField,
+          required: true,
+          validate: { validator: (value) => Array.isArray(value) && value.length >= 1 && value.length <= 20, message: "One to twenty artist links are required." },
         },
       }, { _id: false, strict: "throw" }),
     },

@@ -351,7 +351,7 @@ integration("a catalog correction keeps the album's genre provenance", async () 
     revisions: [correctionSnapshot(payload, submittedAt, 1)],
     moderationHistory: [{ actorUserId: "corrector", action: "submitted", createdAt: submittedAt }],
   });
-  const corrected = await call("POST", `/moderation/album-suggestions/${correction.submissionId}/approve`, MODERATOR, { applyFields: ["title"] });
+  const corrected = await call("POST", `/moderation/album-suggestions/${correction.submissionId}/approve`, MODERATOR, { applyFields: ["title"], expectedRevision: 1 });
   assert.equal(corrected.status, 200, JSON.stringify(corrected.body));
 
   const after = await AlbumCatalog.findById(album._id).lean();

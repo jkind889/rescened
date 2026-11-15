@@ -165,6 +165,20 @@ function isArtistBearing(source) {
   return (item.submissionType || "new_album") === "new_album" && Array.isArray(item.artistSelections) && item.artistSelections.length > 0;
 }
 
+// A catalog correction's identity-only links ({ artistProposals,
+// artistSelections }), or null.
+function correctionArtistLinks(source) {
+  const item = plain(source) || {};
+  if (item.submissionType !== "catalog_correction") return null;
+  const links = plain(plain(item.proposedChanges)?.artistLinks);
+  return Array.isArray(links?.artistSelections) && links.artistSelections.length ? links : null;
+}
+
+// Whether a suggestion of either kind carries artist links.
+function hasArtistLinks(source) {
+  return isArtistBearing(source) || Boolean(correctionArtistLinks(source));
+}
+
 function publicProposal(proposal) {
   const item = plain(proposal) || {};
   if (item.kind === "musicbrainz") {
@@ -223,7 +237,8 @@ function artistResolutionFields(source) {
 // Moderator context: which proposed MusicBrainz MBIDs are already registered,
 // so the reviewer can see approval will reuse that artist. Exact MBIDs only.
 async function proposalRegistryContext(suggestion, { ArtistModel = Artist } = {}) {
-  const mbids = (suggestion?.artistProposals || []).filter((proposal) => proposal.kind === "musicbrainz").map((proposal) => proposal.artistMbid);
+  const proposals = [...(suggestion?.artistProposals || []), ...(suggestion?.proposedChanges?.artistLinks?.artistProposals || [])];
+  const mbids = proposals.filter((proposal) => proposal.kind === "musicbrainz").map((proposal) => proposal.artistMbid);
   if (!mbids.length) return {};
   const found = await loadArtistsByMbid(ArtistModel, mbids);
   const result = {};
@@ -239,7 +254,9 @@ module.exports = {
   artistWorkFields,
   assertArtistSuggestionsEnabled,
   assertExistingSelections,
+  correctionArtistLinks,
   creationDigest,
+  hasArtistLinks,
   isArtistBearing,
   normalizeArtistWork,
   normalizeRequestKey,

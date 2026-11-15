@@ -14,13 +14,18 @@ import {
   creditRowsFromDraft,
   creditRowsSnapshot,
   creditsFromRows,
+  creditIdentity,
   musicBrainzArtistUrl,
 } from "../../features/community/artistCredits.js";
+import { ArtistPicker } from "../../features/artists/ArtistPicker.jsx";
+import { artistRequestFields, linksFromSubmission } from "../../features/artists/artistLinkPayload.js";
+import { useArtistLinkingState } from "../../features/artists/useArtistLinking";
 
-const FIELD_ORDER = ["title", "artists", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"];
+const FIELD_ORDER = ["title", "artists", "artistLinks", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"];
 const FIELD_VALUE_KEYS = {
   title: ["title"],
   artists: ["artistDisplayName", "artistCredits"],
+  artistLinks: ["artistLinks"],
   releaseType: ["releaseType"],
   releaseDate: ["releaseDate", "releaseYear"],
   label: ["label"],
@@ -32,6 +37,18 @@ const DEFAULT_SOURCE = { type: "musicbrainz", url: "", description: "" };
 
 function targetAlbumFrom(initialValue) {
   return initialValue?.targetAlbum || {};
+}
+
+const MAX_ARTIST_LINKS = 20;
+
+// Identity-only links for the album's stored credits, one entry per credit
+// position (null when unlinked). A revision restores its stored links,
+// keeping explicit shared proposal keys.
+function initialArtistLinks(initialValue) {
+  const credits = targetAlbumFrom(initialValue).artistCredits || [];
+  const stored = initialValue?.proposedChanges?.artistLinks;
+  if (!stored) return credits.map(() => null);
+  return linksFromSubmission({ proposedMetadata: { artistCredits: credits }, artistProposals: stored.artistProposals, artistSelections: stored.artistSelections });
 }
 
 function currentValues(initialValue) {
@@ -56,6 +73,7 @@ function currentValues(initialValue) {
     referenceEntityType: existingChanges.externalReferences?.add?.[0]?.entityType ?? "release-group",
     referenceExternalId: existingChanges.externalReferences?.add?.[0]?.externalId ?? "",
     referenceUrl: existingChanges.externalReferences?.add?.[0]?.url ?? "",
+    artistLinks: initialArtistLinks(initialValue),
   };
 }
 
@@ -84,7 +102,13 @@ function restoredState(initialValue, stored) {
   const fields = (Array.isArray(stored.enabledFields) ? stored.enabledFields : []).filter((field) => FIELD_ORDER.includes(field));
   for (const field of fields) {
     for (const key of FIELD_VALUE_KEYS[field]) {
-      if (key === "artistCredits") {
+      if (key === "artistLinks") {
+        // Positions only make sense for the same credit list.
+        const storedLinks = stored.values?.artistLinks;
+        if (Array.isArray(storedLinks) && storedLinks.length === values.artistLinks.length) {
+          values.artistLinks = storedLinks.map((link) => (link && typeof link === "object" ? link : null));
+        }
+      } else if (key === "artistCredits") {
         const storedCredits = stored.values?.artistCredits;
         const restoredCredits = creditRowsFromDraft(storedCredits);
         if (restoredCredits) {
@@ -137,6 +161,7 @@ export function CorrectionForm({
   error = null,
   formId = "community-correction-form",
   draftKey = "",
+  getToken,
 }) {
   const [storedDraft] = useState(() => readDraft(draftKey));
   const [initialState] = useState(() => restoredState(initialValue, storedDraft?.value));
@@ -155,6 +180,11 @@ export function CorrectionForm({
   const fieldPrefix = useId();
   const album = targetAlbumFrom(initialValue);
   const isRevision = Boolean(initialValue?.submissionId);
+  const linkingState = useArtistLinkingState(getToken);
+  // Links stored on the correction being revised. Like album suggestions,
+  // they are never dropped implicitly while linking is unknown or off.
+  const hasStoredLinks = Boolean(initialValue?.proposedChanges?.artistLinks?.artistSelections?.length);
+  const albumCredits = Array.isArray(album.artistCredits) ? album.artistCredits : [];
 
   function updateValue(key, value) {
     setValues((current) => ({ ...current, [key]: value }));
@@ -193,6 +223,14 @@ export function CorrectionForm({
     setClientError("");
   }
 
+  function updateArtistLink(position, link) {
+    setValues((current) => ({
+      ...current,
+      artistLinks: current.artistLinks.map((entry, index) => (index === position ? link : entry)),
+    }));
+    setClientError("");
+  }
+
   function discardDraft() {
     const start = restoredState(initialValue, null);
     clearDraft(draftKey);
@@ -222,6 +260,32 @@ export function CorrectionForm({
         // role and artist identity while its name is unchanged.
         artistCredits: creditsFromRows(values.artistCredits),
       };
+    }
+    if (enabledFields.has("artistLinks") || hasStoredLinks) {
+      // Links go only after the server confirms linking is on; otherwise
+      // the form refuses rather than dropping them.
+      if (linkingState !== "enabled") {
+        setClientError(hasStoredLinks && linkingState === "disabled"
+          ? "This correction has artist links, and artist linking is turned off right now. Revise it when linking is back on, or withdraw it."
+          : linkingState === "loading"
+            ? "Still checking whether artist linking is available. Try again in a moment so your artist links are kept."
+            : linkingState === "unavailable"
+              ? "Could not check whether artist linking is available, so your artist links cannot be sent. Reload the page to try again."
+              : "Artist linking is turned off right now. Deselect Artist links to send the other corrections without them.");
+        return;
+      }
+    }
+    if (enabledFields.has("artistLinks")) {
+      const fields = artistRequestFields(values.artistLinks);
+      if (!fields.artistSelections?.length) {
+        setClientError("Choose an artist for at least one credit, or deselect Artist links.");
+        return;
+      }
+      if (fields.artistSelections.length > MAX_ARTIST_LINKS) {
+        setClientError(`A correction can link at most ${MAX_ARTIST_LINKS} credits. Send the rest in another correction.`);
+        return;
+      }
+      proposedChanges.artistLinks = fields;
     }
     if (enabledFields.has("releaseType")) proposedChanges.releaseType = values.releaseType;
     if (enabledFields.has("releaseDate")) {
@@ -279,12 +343,16 @@ export function CorrectionForm({
       <fieldset className="correction-fieldset">
         <legend>Choose the catalog fields to correct</legend>
         <p className="correction-help">Each selected group is reviewed independently. Unselected fields remain exactly as they are.</p>
-        {FIELD_ORDER.map((field) => (
-          <label className="correction-field-toggle" key={field}>
-            <input checked={enabledFields.has(field)} onChange={() => toggleField(field)} type="checkbox" />
-            <span>{formatCommunityValue(field)}</span>
-          </label>
-        ))}
+        {FIELD_ORDER.filter((field) => field !== "artistLinks" || linkingState === "enabled" || enabledFields.has("artistLinks")).map((field) => {
+          // Replacing the credits and adding links to them cannot be combined.
+          const blocked = (field === "artists" && enabledFields.has("artistLinks")) || (field === "artistLinks" && enabledFields.has("artists"));
+          return (
+            <label className="correction-field-toggle" key={field}>
+              <input checked={enabledFields.has(field)} disabled={blocked && !enabledFields.has(field)} onChange={() => toggleField(field)} type="checkbox" />
+              <span>{formatCommunityValue(field)}{blocked && !enabledFields.has(field) ? " (not with the other artist group)" : ""}</span>
+            </label>
+          );
+        })}
       </fieldset>
 
       {enabledFields.has("title") ? (
@@ -360,6 +428,56 @@ export function CorrectionForm({
           >
             + Add artist credit
           </button>
+        </fieldset>
+      ) : null}
+      {enabledFields.has("artistLinks") ? (
+        <fieldset className="correction-fieldset correction-artist-links">
+          <legend>Artist links</legend>
+          <p className="correction-help">
+            Link credits to the artists they name. Credit wording, roles, and order stay exactly as they are; only the link is added.
+            Up to {MAX_ARTIST_LINKS} links per correction.
+          </p>
+          {linkingState !== "enabled" ? (
+            <p className="community-message community-message-error" role="status">
+              {linkingState === "loading"
+                ? "Checking whether artist linking is available. Your links are kept."
+                : linkingState === "unavailable"
+                  ? "Artist linking could not be checked, so these links cannot be sent until you reload."
+                  : hasStoredLinks
+                    ? "Artist linking is turned off right now. These links are kept, and the correction can be revised when linking is back on."
+                    : "Artist linking is turned off right now. Deselect Artist links to send the other corrections."}
+            </p>
+          ) : null}
+          <div className="suggestion-form-repeater">
+            {albumCredits.map((credit, index) => {
+              const identity = creditIdentity(credit);
+              return (
+                <div className="suggestion-form-repeater-row correction-artist-link-row" key={`link-${index}`}>
+                  <p className="suggestion-form-row-number">Artist {String(index + 1).padStart(2, "0")}</p>
+                  <p className="correction-artist-link-credit">
+                    <strong>{credit.name}</strong>
+                    {credit.role ? <span> · {credit.role}</span> : null}
+                  </p>
+                  {identity ? (
+                    <small className="suggestion-form-artist-link">Already linked to an artist.</small>
+                  ) : linkingState === "enabled" ? (
+                    <div className="suggestion-form-artist-link">
+                      <ArtistPicker
+                        key={`picker-${index}`}
+                        label={`Artist ${String(index + 1).padStart(2, "0")}`}
+                        creditName={credit.name}
+                        value={values.artistLinks[index] || null}
+                        onChange={(link) => updateArtistLink(index, link)}
+                        disabled={isSubmitting}
+                      />
+                    </div>
+                  ) : values.artistLinks[index] ? (
+                    <small className="suggestion-form-artist-link">Link kept: {values.artistLinks[index].name || values.artistLinks[index].canonicalName}</small>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
         </fieldset>
       ) : null}
       {enabledFields.has("releaseType") ? (

@@ -181,7 +181,7 @@ async function approvalResolvesIdentityTest() {
   const kept = await createCorrection(firstAlbum, {
     artists: { artistDisplayName: "Gamma feat. Unlinked Guest", artistCredits: firstAlbum.artistCredits },
   });
-  await approveAlbumSubmission({ submissionId: kept.submissionId, actorUserId: "moderator", applyFields: ["artists"], reason: "Display name" });
+  await approveAlbumSubmission({ submissionId: kept.submissionId, actorUserId: "moderator", expectedRevision: 1, applyFields: ["artists"], reason: "Display name" });
   const corrected = await AlbumCatalog.findById(firstAlbum._id).lean();
   assert.equal(corrected.artistDisplayName, "Gamma feat. Unlinked Guest");
   assert.deepEqual(corrected.artistCredits, firstAlbum.artistCredits);
@@ -190,7 +190,7 @@ async function approvalResolvesIdentityTest() {
     artists: { artistDisplayName: "Ghost", artistCredits: [{ name: "Ghost", artistId: crypto.randomUUID() }] },
   });
   await assert.rejects(
-    approveAlbumSubmission({ submissionId: ghost.submissionId, actorUserId: "moderator", applyFields: ["artists"], reason: "Ghost" }),
+    approveAlbumSubmission({ submissionId: ghost.submissionId, actorUserId: "moderator", expectedRevision: 1, applyFields: ["artists"], reason: "Ghost" }),
     (error) => error.status === 409 && error.code === "ARTIST_IDENTITY_CONFLICT" && error.details[0].code === "ARTIST_NOT_FOUND",
   );
   assert.equal((await AlbumSubmission.findOne({ submissionId: ghost.submissionId }).lean()).status, "pending");
@@ -518,7 +518,7 @@ async function correctionBetweenPlanAndApplyTest() {
   // A moderator approves a display-name correction after the plan was reviewed.
   const current = await AlbumCatalog.findById(album._id).lean();
   const correction = await createCorrection(current, { artists: { artistDisplayName: "Alpha (corrected)", artistCredits: current.artistCredits } });
-  await approveAlbumSubmission({ submissionId: correction.submissionId, actorUserId: "moderator", applyFields: ["artists"], reason: "Display name" });
+  await approveAlbumSubmission({ submissionId: correction.submissionId, actorUserId: "moderator", expectedRevision: 1, applyFields: ["artists"], reason: "Display name" });
   const corrected = await AlbumCatalog.findById(album._id).lean();
   assert.equal(corrected.catalogRevision, 2);
 
@@ -576,7 +576,7 @@ async function userOwnedEnrichmentTest() {
   // A moderator approves a correction for one album after planning.
   const current = await AlbumCatalog.findById(corrected._id).lean();
   const correction = await createCorrection(current, { artists: { artistDisplayName: "Beta (corrected)", artistCredits: current.artistCredits } });
-  await approveAlbumSubmission({ submissionId: correction.submissionId, actorUserId: "moderator", applyFields: ["artists"], reason: "Display name" });
+  await approveAlbumSubmission({ submissionId: correction.submissionId, actorUserId: "moderator", expectedRevision: 1, applyFields: ["artists"], reason: "Display name" });
 
   const report = await applyPlan({ plan, expectedSha256: plan.planSha256, confirmTarget: DB_NAME, databaseName: DB_NAME, AlbumCatalog, Artist, mongoose });
   assert.deepEqual([report.counts.applied, report.counts.conflict], [2, 1]);
@@ -607,6 +607,65 @@ async function userOwnedEnrichmentTest() {
   assert.deepEqual([rerun.counts.applied, rerun.counts.alreadyApplied, rerun.counts.conflict], [0, 2, 1]);
 }
 
+// Identity-only artist-link corrections and the identity backfill both add
+// identities to stored credits; whichever commits second must conflict.
+async function artistLinksVersusBackfillTest() {
+  await Promise.all([AlbumCatalog.deleteMany({}), Artist.deleteMany({}), AlbumSubmission.deleteMany({})]);
+  const previousFlag = process.env.ARTIST_SUGGESTIONS_ENABLED;
+  process.env.ARTIST_SUGGESTIONS_ENABLED = "true";
+  try {
+    const linkBeta = { artistLinks: {
+      artistProposals: [{ proposalKey: "beta", kind: "community", canonicalName: "Beta", evidence: [{ url: "https://example.com/beta" }] }],
+      artistSelections: [{ position: 1, kind: "proposal", proposalKey: "beta" }],
+    } };
+    const albumFor = (title, group) => AlbumCatalog.create({
+      albumId: crypto.randomUUID(), title, artistDisplayName: "Alpha & Beta",
+      artistCredits: [{ name: "Alpha", role: "main" }, { name: "Beta", role: "featured" }], externalReferences: [rgRef(group)],
+      fieldProvenance: { artistCredits: { source: "musicbrainz" } }, catalogSource: "import", catalogRevision: 1,
+    });
+    const evidence = (groups) => enrichmentSource(groups.map((group) => evidenceRow(group, [
+      { name: "Alpha", joinPhrase: " & ", artistMbid: MBID_A, artistName: "Alpha" },
+      { name: "Beta", joinPhrase: "", artistMbid: MBID_B, artistName: "Beta" },
+    ])));
+
+    // Correction first: the backfill planned before it must not overwrite it.
+    const firstGroup = crypto.randomUUID();
+    const first = await albumFor("Correction First", firstGroup);
+    const firstSource = evidence([firstGroup]);
+    const plan = await createPlan({ validations: [firstSource.validation], unresolved: firstSource.unresolved, AlbumCatalog, Artist, databaseName: DB_NAME });
+    assert.equal(plan.counts.link, 1, "one album to link");
+    const correction = await createCorrection(await AlbumCatalog.findById(first._id).lean(), linkBeta);
+    await approveAlbumSubmission({ submissionId: correction.submissionId, actorUserId: "moderator", expectedRevision: 1, applyFields: ["artistLinks"] });
+    const linked = await AlbumCatalog.collection.findOne({ _id: first._id });
+    assert.equal(linked.catalogRevision, 2);
+    assert.ok(linked.artistCredits[1].artistId, "the correction linked Beta");
+    const report = await applyPlan({ plan, expectedSha256: plan.planSha256, confirmTarget: DB_NAME, databaseName: DB_NAME, AlbumCatalog, Artist, mongoose });
+    assert.equal(report.counts.conflict, 1);
+    assert.deepEqual((await AlbumCatalog.collection.findOne({ _id: first._id })).artistCredits, linked.artistCredits, "the backfill does not overwrite the correction");
+
+    // Backfill first: the pending correction's baseline is stale.
+    const secondGroup = crypto.randomUUID();
+    const second = await albumFor("Backfill First", secondGroup);
+    const pending = await createCorrection(await AlbumCatalog.findById(second._id).lean(), linkBeta);
+    const secondSource = evidence([secondGroup]);
+    const secondPlan = await createPlan({ validations: [secondSource.validation], unresolved: secondSource.unresolved, AlbumCatalog, Artist, databaseName: DB_NAME });
+    const applied = await applyPlan({ plan: secondPlan, expectedSha256: secondPlan.planSha256, confirmTarget: DB_NAME, databaseName: DB_NAME, AlbumCatalog, Artist, mongoose });
+    assert.equal(applied.counts.applied, 1);
+    const artistsBefore = await Artist.countDocuments();
+    await assert.rejects(
+      approveAlbumSubmission({ submissionId: pending.submissionId, actorUserId: "moderator", expectedRevision: 1, applyFields: ["artistLinks"] }),
+      (error) => error.code === "CATALOG_CHANGED",
+    );
+    assert.equal(await Artist.countDocuments(), artistsBefore, "a refused link registers no artist");
+    assert.equal((await AlbumSubmission.findOne({ submissionId: pending.submissionId }).lean()).status, "pending");
+    const backfilled = await AlbumCatalog.collection.findOne({ _id: second._id });
+    assert.equal(backfilled.artistCredits[1].artistMbid, MBID_B, "the backfill's link stands; the stale correction added nothing");
+  } finally {
+    if (previousFlag === undefined) delete process.env.ARTIST_SUGGESTIONS_ENABLED;
+    else process.env.ARTIST_SUGGESTIONS_ENABLED = previousFlag;
+  }
+}
+
 const TESTS = [
   ["imported canonical names stay separate from album credited display", canonicalImportNameTest],
   ["artist backfill CLI dry-run and refused apply never initialize database collections", cliReadOnlyGuardsTest],
@@ -617,6 +676,7 @@ const TESTS = [
   ["enrichment evidence plans and applies guarded links with verified names and protected credits", enrichmentPlanApplyTest],
   ["a catalog correction approved between enrichment planning and apply is a conflict", correctionBetweenPlanAndApplyTest],
   ["opted-in plans link user-owned credits additively and keep their provenance", userOwnedEnrichmentTest],
+  ["artist-link corrections and the identity backfill conflict in either order", artistLinksVersusBackfillTest],
 ];
 
 if (integrationEnabled) {
