@@ -6,7 +6,16 @@ import {
 } from "../../features/community/community.js";
 import { clearDraft, readDraft, useDraftAutosave } from "../../features/community/drafts.js";
 import DraftNotice from "./DraftNotice";
-import { creditsFromNames } from "../../features/community/artistCredits.js";
+import {
+  MAX_CREDIT_ROWS,
+  creditRow,
+  creditRowProblems,
+  creditRowsFromCredits,
+  creditRowsFromDraft,
+  creditRowsSnapshot,
+  creditsFromRows,
+  musicBrainzArtistUrl,
+} from "../../features/community/artistCredits.js";
 
 const FIELD_ORDER = ["title", "artists", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"];
 const FIELD_VALUE_KEYS = {
@@ -28,12 +37,15 @@ function targetAlbumFrom(initialValue) {
 function currentValues(initialValue) {
   const album = targetAlbumFrom(initialValue);
   const existingChanges = initialValue?.proposedChanges || {};
-  const artistCredits = album.artistCredits?.length ? album.artistCredits : [{ name: album.artistDisplayName || "", role: "main" }];
+  const proposedCredits = existingChanges.artists?.artistCredits;
+  const startingCredits = Array.isArray(proposedCredits) && proposedCredits.length
+    ? proposedCredits
+    : album.artistCredits?.length ? album.artistCredits : [{ name: album.artistDisplayName || "", role: "main" }];
   return {
     title: existingChanges.title ?? album.title ?? "",
     artistDisplayName: existingChanges.artists?.artistDisplayName ?? album.artistDisplayName ?? "",
-    artistCredits: existingChanges.artists?.artistCredits?.map((credit) => credit.name).join(", ")
-      ?? artistCredits.map((credit) => credit.name).join(", "),
+    // One structured row per credit; names are never joined into text.
+    artistCredits: creditRowsFromCredits(startingCredits),
     releaseType: existingChanges.releaseType ?? album.releaseType ?? "album",
     releaseDate: existingChanges.releaseDate?.releaseDate ?? album.releaseDate ?? "",
     releaseYear: existingChanges.releaseDate?.releaseYear ?? album.releaseYear ?? "",
@@ -66,7 +78,11 @@ function restoredState(initialValue, stored) {
   const fields = (Array.isArray(stored.enabledFields) ? stored.enabledFields : []).filter((field) => FIELD_ORDER.includes(field));
   for (const field of fields) {
     for (const key of FIELD_VALUE_KEYS[field]) {
-      if (typeof stored.values?.[key] === "string") values[key] = stored.values[key];
+      if (key === "artistCredits") {
+        values.artistCredits = creditRowsFromDraft(stored.values?.artistCredits) || values.artistCredits;
+      } else if (typeof stored.values?.[key] === "string") {
+        values[key] = stored.values[key];
+      }
     }
   }
   const source = stored.source && typeof stored.source === "object" ? stored.source : {};
@@ -83,7 +99,11 @@ function restoredState(initialValue, stored) {
 
 function draftSnapshot(enabledFields, values, source) {
   const fields = FIELD_ORDER.filter((field) => enabledFields.has(field));
-  const selectedValues = Object.fromEntries(fields.flatMap((field) => FIELD_VALUE_KEYS[field].map((key) => [key, values[key]])));
+  // Credit rows are stored without their per-load keys, so keys never count as edits.
+  const selectedValues = Object.fromEntries(fields.flatMap((field) => FIELD_VALUE_KEYS[field].map((key) => [
+    key,
+    key === "artistCredits" ? creditRowsSnapshot(values[key]) : values[key],
+  ])));
   return { enabledFields: fields, values: selectedValues, source };
 }
 
@@ -125,6 +145,28 @@ export function CorrectionForm({
     setClientError("");
   }
 
+  function updateCredit(key, field, value) {
+    setValues((current) => ({
+      ...current,
+      artistCredits: current.artistCredits.map((credit) => (credit.key === key ? { ...credit, [field]: value } : credit)),
+    }));
+    setClientError("");
+  }
+
+  function addCredit() {
+    setValues((current) => (current.artistCredits.length >= MAX_CREDIT_ROWS
+      ? current
+      : { ...current, artistCredits: [...current.artistCredits, creditRow()] }));
+    setClientError("");
+  }
+
+  function removeCredit(key) {
+    setValues((current) => (current.artistCredits.length <= 1
+      ? current
+      : { ...current, artistCredits: current.artistCredits.filter((credit) => credit.key !== key) }));
+    setClientError("");
+  }
+
   function toggleField(field) {
     setEnabledFields((current) => {
       const next = new Set(current);
@@ -152,13 +194,16 @@ export function CorrectionForm({
 
     if (enabledFields.has("title")) proposedChanges.title = values.title;
     if (enabledFields.has("artists")) {
+      const problems = creditRowProblems(values.artistCredits);
+      if (problems.length) {
+        setClientError(problems.join(" "));
+        return;
+      }
       proposedChanges.artists = {
         artistDisplayName: values.artistDisplayName,
-        // Unchanged names keep their role and artist identity.
-        artistCredits: creditsFromNames(values.artistCredits, [
-          ...(initialValue?.proposedChanges?.artists?.artistCredits || []),
-          ...(targetAlbumFrom(initialValue).artistCredits || []),
-        ]),
+        // Each row is submitted as its own credit, in order. A row keeps its
+        // role and artist identity while its name is unchanged.
+        artistCredits: creditsFromRows(values.artistCredits),
       };
     }
     if (enabledFields.has("releaseType")) proposedChanges.releaseType = values.releaseType;
@@ -227,17 +272,68 @@ export function CorrectionForm({
         </div>
       ) : null}
       {enabledFields.has("artists") ? (
-        <div className="correction-grid">
+        <fieldset className="correction-fieldset correction-credits">
+          <legend>Artist credits</legend>
           <div className="community-field">
             <label htmlFor={`${fieldPrefix}-artist`}>Artist display name</label>
             <input id={`${fieldPrefix}-artist`} onChange={(event) => updateValue("artistDisplayName", event.target.value)} value={values.artistDisplayName} />
           </div>
-          <div className="community-field">
-            <label htmlFor={`${fieldPrefix}-credits`}>Artist credits</label>
-            <input id={`${fieldPrefix}-credits`} onChange={(event) => updateValue("artistCredits", event.target.value)} value={values.artistCredits} />
-            <small>Separate multiple credits with commas.</small>
+          <p className="correction-help">One row per credited artist, so a name with a comma stays a single credit. Changing a name removes its link to an artist.</p>
+          <div className="suggestion-form-repeater">
+            {values.artistCredits.map((credit, index) => {
+              const linked = credit.identity && credit.identity.name === credit.name.trim() ? credit.identity : null;
+              return (
+                <div className="suggestion-form-repeater-row" key={credit.key}>
+                  <p className="suggestion-form-row-number">Artist {String(index + 1).padStart(2, "0")}</p>
+                  <div className="community-field">
+                    <label htmlFor={`${fieldPrefix}-${credit.key}-name`}>Name</label>
+                    <input
+                      aria-label={`Artist ${index + 1} name`}
+                      id={`${fieldPrefix}-${credit.key}-name`}
+                      maxLength={200}
+                      onChange={(event) => updateCredit(credit.key, "name", event.target.value)}
+                      value={credit.name}
+                    />
+                    {linked ? (
+                      <small>
+                        {musicBrainzArtistUrl(linked)
+                          ? <>Linked to a <a href={musicBrainzArtistUrl(linked)} target="_blank" rel="noreferrer">MusicBrainz artist</a>.</>
+                          : "Linked to a Rescened artist."}
+                      </small>
+                    ) : null}
+                  </div>
+                  <div className="community-field">
+                    <label htmlFor={`${fieldPrefix}-${credit.key}-role`}>Role</label>
+                    <input
+                      aria-label={`Artist ${index + 1} role`}
+                      id={`${fieldPrefix}-${credit.key}-role`}
+                      maxLength={80}
+                      onChange={(event) => updateCredit(credit.key, "role", event.target.value)}
+                      value={credit.role}
+                    />
+                  </div>
+                  <button
+                    aria-label={`Remove artist ${index + 1}`}
+                    className="suggestion-form-remove"
+                    disabled={values.artistCredits.length === 1}
+                    onClick={() => removeCredit(credit.key)}
+                    type="button"
+                  >
+                    Remove
+                  </button>
+                </div>
+              );
+            })}
           </div>
-        </div>
+          <button
+            className="suggestion-form-add"
+            disabled={values.artistCredits.length >= MAX_CREDIT_ROWS}
+            onClick={addCredit}
+            type="button"
+          >
+            + Add artist credit
+          </button>
+        </fieldset>
       ) : null}
       {enabledFields.has("releaseType") ? (
         <div className="community-field">

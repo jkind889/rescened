@@ -47,7 +47,7 @@ New-album suggestions, revisions, and artist corrections accept optional `artist
 
 The MusicBrainz suggestion prefill (`GET /search/musicbrainz/release-group/:mbid`) now includes each credit's `artistMbid`. External search candidates carry it too; they remain discovery candidates, not catalog albums.
 
-The frontend keeps a credit's identity only while its name is unchanged. If a contributor renames a credit, it is submitted as a plain credit. The correction form's comma-separated name field reuses the role and identity of a current credit with exactly the same name. Moderators see a MusicBrainz artist link beside identified credits in submission details.
+The frontend keeps a credit's identity only while its name is unchanged. If a contributor renames a credit, it is submitted as a plain credit. The correction form shows one editable row per credit (name and role) with add and remove controls, so a name containing a comma, such as "Tyler, The Creator", stays one credit. Each row keeps its role, position, and identity while its name is unchanged, and the form submits the rows as a structured credit list. A stored correction draft keeps its rows the same way; a draft saved by the earlier comma-separated field is ignored for credits (the other fields restore) because that text cannot be split reliably. Moderators see a MusicBrainz artist link beside identified credits in submission details.
 
 ### Approval
 
@@ -318,7 +318,6 @@ MusicBrainz core data is CC0. The section credits MusicBrainz and links to the a
 - Older datasets and community-only registrations may still have provisional credit-derived names. Provenance distinguishes those from verified MusicBrainz artist names. Existing registry names are not renamed automatically.
 - Surfaces that render an album from a response without `artistCredits` (an older API) show plain text. Link checks run in the browser after a page renders, so a credit becomes a link a moment after its text. A credit already checked on the page costs no further request.
 - Credits without an MBID stay unlinked. There is no name matching, and the suggestion and correction forms have no artist search or picker. Contributors can propose identity only through a MusicBrainz prefill or by keeping an existing credit's name.
-- The correction form's comma-separated credit field still splits names that contain commas, such as "Tyler, The Creator". This is a pre-existing problem. Those pieces no longer match the current credit, so the correction submits them without identity.
 - Moderator details show a credit's `artistId` and MusicBrainz link. They do not show the registry artist's own name.
 - User-owned credits are linked only when a plan is made with `--link-user-owned`. Otherwise, link them through reviewed corrections.
 - Legacy migration and the importer's provider adapters still drop join phrases from credits.
