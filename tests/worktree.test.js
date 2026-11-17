@@ -307,6 +307,33 @@ test('launcher passes the artist opt-in and guarded connect to the API only', as
   assert.equal(code, 0, output); assert.equal(output.includes('sk_test_fixture'), false); assert.equal(output.includes('fake@'), false);
 });
 
+test('artist suggestions are a separate read-only opt-in that requires artist pages', async () => {
+  const inherited = wt.buildEnvironments(profile(), { apiPort: 3101, webPort: 5201 }, { ARTIST_SUGGESTIONS_ENABLED: 'true', COMMUNITY_SUBMISSIONS_ENABLED: 'true' }, { artistPages: true });
+  assert.equal(inherited.backend.ARTIST_SUGGESTIONS_ENABLED, 'false', 'the inherited environment cannot enable it');
+  const alone = wt.buildEnvironments(profile(), { apiPort: 3101, webPort: 5201 }, {}, { artistSuggestions: true });
+  assert.equal(alone.backend.ARTIST_SUGGESTIONS_ENABLED, 'false');
+  const on = wt.buildEnvironments(profile(), { apiPort: 3101, webPort: 5201 }, {}, { artistPages: true, artistSuggestions: true });
+  assert.equal(on.backend.ARTIST_SUGGESTIONS_ENABLED, 'true');
+  assert.equal(on.backend.RESCENED_PREVIEW_INIT, 'artist-pages', 'automatic collection and index creation stay off');
+  assert.equal(on.backend.COMMUNITY_SUBMISSIONS_ENABLED, 'false', 'nothing can be suggested from the preview');
+  const moderated = profile();
+  moderated.preview = { moderatorUserIds: ['user_moderator'] };
+  const withModerators = wt.buildEnvironments(moderated, { apiPort: 3101, webPort: 5201 }, {}, { artistPages: true, artistSuggestions: true });
+  assert.equal(withModerators.backend.COMMUNITY_MODERATION_ENABLED, 'false', 'moderators cannot approve, so no artist can be published');
+  assert.equal(withModerators.backend.MODERATOR_USER_IDS, 'user_moderator', 'moderators can still read the queues');
+  assert.equal(withModerators.backend.ALBUM_MAPPING_MODERATION_ENABLED, 'true', 'unrelated moderation keeps its existing semantics');
+  const withoutSwitch = wt.buildEnvironments(moderated, { apiPort: 3101, webPort: 5201 }, {}, { artistPages: true });
+  assert.equal(withoutSwitch.backend.COMMUNITY_MODERATION_ENABLED, 'true', 'without the switch the existing preview behavior is unchanged');
+  assert.equal(on.backend.ARTIST_DISCOGRAPHY_ENABLED, 'false', 'discography stays a separate switch');
+  assert.equal(on.backend.EXTERNAL_ALBUM_SEARCH_ENABLED, 'false');
+  assert.deepEqual(Object.keys(on.frontend).sort(), ['NODE_ENV', 'VITE_API_URL', 'VITE_CLERK_PUBLISHABLE_KEY']);
+  assert.ok(wt.DISABLED.includes('ARTIST_SUGGESTIONS_ENABLED'));
+  assert.deepEqual(wt.parseArgs(['start', '--profile', '/p.json', '--artist-pages', '--artist-suggestions']).options, { profile: '/p.json', artistPages: true, artistSuggestions: true });
+  assert.throws(() => wt.parseArgs(['start', '--artist-suggestions', '--artist-suggestions']), /Duplicate/);
+  await assert.rejects(wt.main(['setup', '--artist-suggestions']), /not supported/);
+  await assert.rejects(wt.main(['start', '--profile', '/nonexistent/profile.json', '--artist-suggestions']), /requires --artist-pages/);
+});
+
 test('artist discography is a separate opt-in that requires artist pages', async () => {
   const off = wt.buildEnvironments(profile(), { apiPort: 3101, webPort: 5201 }, { ARTIST_DISCOGRAPHY_ENABLED: 'true' }, { artistPages: true });
   assert.equal(off.backend.ARTIST_DISCOGRAPHY_ENABLED, 'false');

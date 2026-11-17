@@ -1,5 +1,28 @@
 [
   {
+    "id": "artist-suggestions",
+    "date": "2026-11-15",
+    "title": "Suggest artists",
+    "summary": "Help tie albums to the right artists by linking credits when you suggest an album or a correction, or by suggesting a missing artist on its own. These options appear on the Suggestions page once artist suggestions are turned on.",
+    "changes": [
+      "When you suggest a new album, you can link each artist credit to an artist already on Rescened, an artist found on MusicBrainz, or a new artist you propose with links that show the artist exists.",
+      "On an album that is already on Rescened, choose Artist links in a correction to connect credits that are not tied to an artist yet. The credited name on the album stays the same.",
+      "Use Suggest an artist on the Suggestions page to propose a missing artist without an album, then follow it under Your artist suggestions. You can withdraw a suggestion while it is waiting for review, and revise it if a moderator asks for changes.",
+      "Notes and supporting links you add to an artist suggestion are visible only to you and moderators.",
+      "Moderators review every artist suggestion and link. A new artist appears on Rescened only after it is approved."
+    ]
+  },
+  {
+    "id": "correction-artist-credits",
+    "date": "2026-11-15",
+    "title": "Artist credits stay intact in corrections",
+    "summary": "The correction form keeps each artist credit whole, including names with commas.",
+    "changes": [
+      "Each artist credit in a correction now has its own name and role, so a name with a comma, such as Tyler, The Creator, stays one credit instead of splitting into two.",
+      "Albums with many artists keep every credit when you open a correction. Editing the credit list supports up to 20 credits; you can still correct other details or link up to 20 existing credits without removing the rest."
+    ]
+  },
+  {
     "id": "artist-pages",
     "date": "2026-11-12",
     "title": "Artist pages",

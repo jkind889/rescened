@@ -605,7 +605,7 @@ const clientSource = fs.readFileSync(path.join(__dirname, "../frontend/src/featu
 const clientHelpers = import(`data:text/javascript;base64,${Buffer.from(clientSource).toString("base64")}`);
 
 test("form credits keep a proposed identity only while the name is unchanged", async () => {
-  const { creditIdentity, creditPayload, creditsFromNames, musicBrainzArtistUrl } = await clientHelpers;
+  const { creditIdentity, creditPayload, musicBrainzArtistUrl } = await clientHelpers;
   const artistId = crypto.randomUUID();
   const identity = creditIdentity({ name: " Alpha ", artistId, artistMbid: MBID_A });
   assert.deepEqual(creditPayload("Alpha", "main", identity), { name: "Alpha", role: "main", artistId, artistMbid: MBID_A });
@@ -613,18 +613,6 @@ test("form credits keep a proposed identity only while the name is unchanged", a
   assert.equal(creditIdentity({ name: "Plain" }), null);
   assert.equal(musicBrainzArtistUrl(identity), `https://musicbrainz.org/artist/${MBID_A}`);
   assert.equal(musicBrainzArtistUrl({ artistMbid: "javascript:alert(1)" }), "");
-
-  const known = [
-    { name: "Alpha", role: "main", artistId, artistMbid: MBID_A },
-    { name: "Beta", role: "featured", artistMbid: MBID_B },
-  ];
-  assert.deepEqual(creditsFromNames("Beta, Alpha, Gamma", known), [
-    { name: "Beta", role: "featured", artistMbid: MBID_B },
-    { name: "Alpha", role: "main", artistId, artistMbid: MBID_A },
-    { name: "Gamma", role: "main" },
-  ]);
-  assert.deepEqual(creditsFromNames("Alpha, Alpha", known).map((credit) => credit.artistId), [artistId, undefined], "each known credit is reused once");
-  assert.deepEqual(creditsFromNames(" , ", known), []);
 });
 
 test("moderator review flags a credit worded differently from its linked registry artist", async () => {

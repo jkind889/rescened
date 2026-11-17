@@ -10,7 +10,7 @@ const SUBMISSION_STATUSES = new Set([
   "withdrawn",
 ]);
 const SUBMISSION_TYPES = new Set(["new_album", "catalog_correction", "genre_suggestion"]);
-const CORRECTION_FIELDS = new Set(["title", "artists", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"]);
+const CORRECTION_FIELDS = new Set(["title", "artists", "artistLinks", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"]);
 const MODERATOR_DEFAULT_PAGE_LIMIT = 20;
 const MODERATOR_MAX_PAGE_LIMIT = 50;
 const PUBLIC_UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -83,21 +83,33 @@ function publicUuid(value, path) {
   return value.trim().toLowerCase();
 }
 
+// The revision the moderator reviewed. Optional for existing clients; when
+// present, a command against any other revision returns STATE_CONFLICT (or
+// APPROVAL_CONFLICT for a retry of an approval made at another revision).
+function optionalExpectedRevision(body) {
+  if (body.expectedRevision === undefined) return {};
+  if (!Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 1) {
+    fail("expectedRevision must be a positive integer");
+  }
+  return { expectedRevision: body.expectedRevision };
+}
+
 function normalizeCommandBody(body, action) {
   assertRecord(body || {});
   if (action === "request_changes" || action === "reject") {
-    assertKeys(body, new Set(["reason"]));
-    return { reason: requiredReason(body.reason) };
+    assertKeys(body, new Set(["reason", "expectedRevision"]));
+    return { reason: requiredReason(body.reason), ...optionalExpectedRevision(body) };
   }
   if (action === "mark_duplicate") {
-    assertKeys(body, new Set(["duplicateOfSubmissionId", "reason"]));
+    assertKeys(body, new Set(["duplicateOfSubmissionId", "reason", "expectedRevision"]));
     return {
       duplicateOfSubmissionId: publicUuid(body.duplicateOfSubmissionId, "duplicateOfSubmissionId"),
       reason: optionalReason(body.reason) || DEFAULT_DUPLICATE_REASON,
+      ...optionalExpectedRevision(body),
     };
   }
   if (action === "approve") {
-    assertKeys(body, new Set(["albumId", "confirmPossibleDuplicate", "reason", "applyFields", "genreDecisions"]));
+    assertKeys(body, new Set(["albumId", "confirmPossibleDuplicate", "reason", "applyFields", "genreDecisions", "expectedRevision"]));
     if (body.albumId !== undefined && body.albumId !== null && body.albumId !== "") {
       body.albumId = publicUuid(body.albumId, "albumId");
     }
@@ -120,6 +132,7 @@ function normalizeCommandBody(body, action) {
       // Checked against the stored suggestion by the genre approval itself.
       genreDecisions: body.genreDecisions,
       reason: optionalReason(body.reason),
+      ...optionalExpectedRevision(body),
     };
   }
   fail("moderation action is invalid");

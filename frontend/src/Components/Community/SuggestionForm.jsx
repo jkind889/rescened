@@ -9,6 +9,9 @@ import { albumGenreChanges, buildAlbumGenreProposal, initialGenreForm } from "..
 import DraftNotice from "./DraftNotice";
 import { creditIdentity, creditPayload, musicBrainzArtistUrl } from "../../features/community/artistCredits.js";
 import ContributorEditionPicker from "./ContributorEditionPicker";
+import { ArtistPicker } from "../../features/artists/ArtistPicker.jsx";
+import { artistRequestFields, linksFromSubmission } from "../../features/artists/artistLinkPayload.js";
+import { useArtistLinkingState } from "../../features/artists/useArtistLinking";
 
 const MAX_ARTISTS = 20;
 const MAX_SOURCES = 10;
@@ -41,7 +44,16 @@ function artistRow(value = {}) {
     // local draft (which stores the row's `identity`). It is sent only while
     // the name is unchanged.
     identity: value.identity ? creditIdentity(value.identity) : creditIdentity(value),
+    // An explicit artist-picker selection. It never changes the credit's
+    // wording and is independent of the name.
+    link: value.link && typeof value.link === "object" ? value.link : null,
   };
+}
+
+// A credit still carrying its MusicBrainz-prefill or earlier identity: the
+// picker is not offered for it, and no link is sent with it.
+function hasActiveIdentity(artist) {
+  return Boolean(artist.identity) && artist.identity.name === artist.name.trim();
 }
 
 function sourceRow(value = {}) {
@@ -77,8 +89,9 @@ function trackRow(value = {}, index = 0) {
 function createDraft(initialValue) {
   const source = initialValue?.suggestion || initialValue || {};
   const metadata = source.proposedMetadata || {};
+  const storedLinks = linksFromSubmission(source);
   const artists = Array.isArray(metadata.artistCredits) && metadata.artistCredits.length
-    ? metadata.artistCredits.map(artistRow)
+    ? metadata.artistCredits.map((credit, index) => artistRow(storedLinks[index] ? { ...credit, link: storedLinks[index] } : credit))
     : [artistRow()];
   const sources = Array.isArray(source.supportingSources) && source.supportingSources.length
     ? source.supportingSources.map(sourceRow)
@@ -236,18 +249,19 @@ function validateDraft(draft) {
   return errors;
 }
 
-function buildPayload(draft) {
+function buildPayload(draft, artistLinking = false) {
   const metadata = draft.proposedMetadata;
+  const links = metadata.artistCredits.map((artist) => (artistLinking && artist.link && !hasActiveIdentity(artist) ? artist.link : null));
   const releaseDate = metadata.releaseDate.trim();
   const parsedDate = releaseDate ? dateParts(releaseDate) : null;
   const releaseYear = parsedDate?.year || Number(metadata.releaseYear);
   const proposedMetadata = {
     title: metadata.title.trim(),
     artistDisplayName: metadata.artistDisplayName.trim(),
-    artistCredits: metadata.artistCredits.map((artist) => creditPayload(
+    artistCredits: metadata.artistCredits.map((artist, index) => creditPayload(
       artist.name.trim(),
       artist.role.trim() || "main",
-      artist.identity,
+      links[index] ? null : artist.identity,
     )),
     releaseType: metadata.releaseType,
     releaseDate,
@@ -276,6 +290,7 @@ function buildPayload(draft) {
   return {
     ...(proposedGenres ? { proposedGenres } : {}),
     proposedMetadata,
+    ...artistRequestFields(links),
     ...(draft.editionProposal?.previewId ? { editionPreviewId: draft.editionProposal.previewId } : {}),
     supportingSources: draft.supportingSources.map((source) => ({
       type: source.type,
@@ -352,6 +367,15 @@ export function SuggestionForm({
   useDraftAutosave(draftKey, draft, draftFingerprint(draft) === initialFingerprint);
   const [validationErrors, setValidationErrors] = useState([]);
   const [editionBusy, setEditionBusy] = useState(false);
+  const linkingState = useArtistLinkingState(getToken);
+  const artistLinking = linkingState === "enabled";
+  // Links stored on the suggestion being revised (not just a local draft).
+  // While linking is off the server refuses to revise such a suggestion, so
+  // the form never offers to drop them.
+  const [hasStoredLinks] = useState(() => {
+    const stored = (initialValue?.suggestion || initialValue)?.artistSelections;
+    return Array.isArray(stored) && stored.length > 0;
+  });
   const validationSummaryRef = useRef(null);
   const serverErrorRef = useRef(null);
   const controlsDisabled = disabled || isSubmitting || editionBusy;
@@ -465,13 +489,27 @@ export function SuggestionForm({
     if (draft.proposedGenres?.note?.trim() && !draft.proposedGenres?.add?.length) {
       errors.push("Choose a genre for your moderator note, or clear the note to submit without genres.");
     }
+    // Links are sent only after the server confirms linking is on. Otherwise
+    // submitting would drop them (a revision without links clears its stored
+    // links), so the form refuses instead. Removing a link is always an
+    // explicit action on the credit.
+    const hasLinks = draft.proposedMetadata.artistCredits.some((artist) => artist.link && !hasActiveIdentity(artist));
+    if (hasStoredLinks && linkingState === "disabled") {
+      errors.push("This suggestion has artist links, and artist linking is turned off right now. Revise it when linking is back on, or withdraw it.");
+    } else if (hasLinks && linkingState === "loading") {
+      errors.push("Still checking whether artist linking is available. Try again in a moment so your artist links are kept.");
+    } else if (hasLinks && linkingState === "unavailable") {
+      errors.push("Could not check whether artist linking is available, so your artist links cannot be sent. Reload the page to try again, or remove the links.");
+    } else if (hasLinks && linkingState === "disabled") {
+      errors.push("Artist linking is turned off right now. Remove the artist links you added (Remove artist link on each credit) to send this suggestion without them.");
+    }
     setValidationErrors(errors);
 
     if (errors.length || controlsDisabled || typeof onSubmit !== "function") {
       return;
     }
 
-    await onSubmit(buildPayload(draft));
+    await onSubmit(buildPayload(draft, artistLinking));
   }
 
   const metadata = draft.proposedMetadata;
@@ -684,6 +722,43 @@ export function SuggestionForm({
                     onChange={(event) => updateArtist(artist.key, "role", event.target.value)}
                   />
                 </label>
+                {artistLinking && !hasActiveIdentity(artist) ? (
+                  <div className="suggestion-form-field suggestion-form-artist-link">
+                    <span className="suggestion-form-label">Artist link <span className="suggestion-form-optional">optional</span></span>
+                    <ArtistPicker
+                      key={artist.key}
+                      label={`Artist ${String(index + 1).padStart(2, "0")}`}
+                      creditName={artist.name.trim()}
+                      value={artist.link}
+                      onChange={(link) => updateArtist(artist.key, "link", link)}
+                      disabled={controlsDisabled}
+                    />
+                  </div>
+                ) : null}
+                {!artistLinking && artist.link && !hasActiveIdentity(artist) ? (
+                  <span className="suggestion-form-hint suggestion-form-artist-link-note">
+                    {linkingState === "loading"
+                      ? "Checking whether artist linking is available. This credit’s artist link is kept."
+                      : linkingState === "unavailable"
+                        ? "Artist linking could not be checked, so this credit’s artist link cannot be sent until you reload."
+                        : hasStoredLinks
+                          ? "Artist linking is turned off right now. This credit’s artist link is kept, and the suggestion can be revised when linking is back on."
+                          : "Artist linking is turned off right now, so this credit’s artist link cannot be sent."}
+                    {linkingState === "disabled" && !hasStoredLinks ? (
+                      <>
+                        {" "}
+                        <button
+                          type="button"
+                          className="suggestion-form-remove"
+                          onClick={() => updateArtist(artist.key, "link", null)}
+                          disabled={controlsDisabled}
+                        >
+                          Remove artist link
+                        </button>
+                      </>
+                    ) : null}
+                  </span>
+                ) : null}
                 <button
                   className="suggestion-form-remove"
                   type="button"

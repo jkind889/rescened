@@ -112,6 +112,7 @@ async function transactionalApprovalTest() {
   const result = await approveAlbumSubmission({
     submissionId: submission.submissionId,
     actorUserId: "moderator-user",
+    expectedRevision: 1,
     confirmPossibleDuplicate: true,
     reason: "Verified integration evidence",
     coverResolver: null,
@@ -134,8 +135,8 @@ async function transactionalApprovalTest() {
 async function concurrentApprovalTest() {
   const submission = await createSubmission("Concurrent Album");
   const results = await Promise.all([
-    approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "moderator-a", confirmPossibleDuplicate: true, coverResolver: null }),
-    approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "moderator-b", confirmPossibleDuplicate: true, coverResolver: null }),
+    approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "moderator-a", expectedRevision: 1, confirmPossibleDuplicate: true, coverResolver: null }),
+    approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "moderator-b", expectedRevision: 1, confirmPossibleDuplicate: true, coverResolver: null }),
   ]);
   assert.equal(results[0].album.albumId, results[1].album.albumId);
   assert.equal(await AlbumCatalog.countDocuments({ title: "Concurrent Album" }), 1);
@@ -180,6 +181,7 @@ async function automaticCoverApprovalTest() {
   const first = await approveAlbumSubmission({
     submissionId: submission.submissionId,
     actorUserId: "moderator-user",
+    expectedRevision: 1,
     confirmPossibleDuplicate: true,
     coverResolver: resolver.resolve,
   });
@@ -194,6 +196,7 @@ async function automaticCoverApprovalTest() {
   const retry = await approveAlbumSubmission({
     submissionId: submission.submissionId,
     actorUserId: "moderator-user",
+    expectedRevision: 1,
     coverResolver: async () => { throw new Error("idempotent retries must not resolve artwork"); },
   });
   assert.equal(retry.idempotent, true);
@@ -282,7 +285,7 @@ async function bulkConcurrentWithSingleTest() {
   const submission = await createSubmission("Bulk Concurrent Album");
   const [bulk, single] = await Promise.all([
     bulkApprove({ items: [bulkItem(submission)], actorUserId: "moderator-a", approve: approveWithoutArtwork }),
-    approveWithoutArtwork({ submissionId: submission.submissionId, actorUserId: "moderator-b" }),
+    approveWithoutArtwork({ submissionId: submission.submissionId, actorUserId: "moderator-b", expectedRevision: submission.currentRevision }),
   ]);
   assert.equal(bulk.results[0].ok, true, JSON.stringify(bulk.results[0]));
   assert.equal(bulk.results[0].albumId, single.album.albumId);
@@ -300,7 +303,7 @@ async function rollbackTest() {
   };
   try {
     await assert.rejects(
-      approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "moderator-user", confirmPossibleDuplicate: true, coverResolver: null }),
+      approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "moderator-user", expectedRevision: 1, confirmPossibleDuplicate: true, coverResolver: null }),
       /forced approval failure/,
     );
   } finally {
@@ -353,6 +356,7 @@ async function correctionApprovalTest() {
   const result = await approveAlbumSubmission({
     submissionId: submission.submissionId,
     actorUserId: "integration-moderator",
+    expectedRevision: 1,
     applyFields: ["title"],
     reason: "Verified the title against the cited source",
   });
@@ -377,7 +381,7 @@ async function ambiguousCorrectionRetryTest() {
     artistDisplayName: "Retry Artist", catalogSource: "manual", catalogRevision: 1,
   });
   const submission = await createCorrection(target, { title: "Reviewed correction" });
-  const command = { submissionId: submission.submissionId, actorUserId: "first-moderator", applyFields: ["title"], reason: "Reviewed" };
+  const command = { submissionId: submission.submissionId, actorUserId: "first-moderator", expectedRevision: 1, applyFields: ["title"], reason: "Reviewed" };
   await approveAlbumSubmission(command); // Commit succeeded; deliberately discard its response.
   const snapshot = async () => ({
     album: await AlbumCatalog.findById(target._id).lean(),
@@ -401,7 +405,7 @@ async function ambiguousCorrectionRetryTest() {
   }
   // An old retry must not overwrite a later, separately approved correction.
   const next = await createCorrection(await AlbumCatalog.findById(target._id), { title: "Later correction" });
-  await approveAlbumSubmission({ submissionId: next.submissionId, actorUserId: "later-moderator", applyFields: ["title"] });
+  await approveAlbumSubmission({ submissionId: next.submissionId, actorUserId: "later-moderator", expectedRevision: 1, applyFields: ["title"] });
   const later = await snapshot();
   assert.equal(later.album.catalogRevision, 3);
   assert.equal(later.album.title, "Later correction");
@@ -430,7 +434,7 @@ async function staleCorrectionTest() {
   const submission = await createCorrection(target, { title: "Stale proposal" });
   await AlbumCatalog.updateOne({ _id: target._id }, { $set: { label: "Intervening edit" }, $inc: { catalogRevision: 1 } });
   await assert.rejects(
-    approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "integration-moderator", applyFields: ["title"] }),
+    approveAlbumSubmission({ submissionId: submission.submissionId, actorUserId: "integration-moderator", expectedRevision: 1, applyFields: ["title"] }),
     (error) => error.code === "CATALOG_CHANGED",
   );
   const persisted = await AlbumSubmission.findOne({ submissionId: submission.submissionId }).lean();
@@ -462,6 +466,7 @@ async function legacyRevisionCorrectionTest() {
   await approveAlbumSubmission({
     submissionId: submission.submissionId,
     actorUserId: "integration-moderator",
+    expectedRevision: 1,
     applyFields: ["releaseType"],
     reason: "Verified the release type",
   });

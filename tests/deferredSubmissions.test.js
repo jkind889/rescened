@@ -271,6 +271,7 @@ test("correction approval patches selected fields once and records the applicati
   const result = await approveAlbumSubmission({
     submissionId: submission.submissionId,
     actorUserId: "moderator",
+    expectedRevision: 1,
     applyFields: ["label", "title"],
     reason: "Verified against the cited source",
   });

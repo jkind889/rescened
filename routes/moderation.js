@@ -8,6 +8,7 @@ const { applyModerationCommand } = require("./utils/moderationCommands");
 const { genreReview } = require("../lib/genres/review");
 const Artist = require("../models/Artist");
 const { artistRegistryContext } = require("../lib/artists/identity");
+const { proposalRegistryContext } = require("./utils/artistSuggestions");
 const {
   ModerationConflictError,
   ModerationValidationError,
@@ -179,12 +180,22 @@ function moderatorSummary(submission) {
 // targets and its captured baseline, then each revision.
 function submissionCreditLists(suggestion) {
   const revisions = Array.isArray(suggestion?.revisions) ? suggestion.revisions : [];
+  const linkedArtists = (selections) => (Array.isArray(selections) ? selections : [])
+    .filter((selection) => selection?.kind === "existing")
+    .map((selection) => ({ artistId: selection.artistId }));
   return [
     suggestion?.proposedMetadata?.artistCredits,
+    linkedArtists(suggestion?.artistSelections),
+    linkedArtists(suggestion?.proposedChanges?.artistLinks?.artistSelections),
     suggestion?.proposedChanges?.artists?.artistCredits,
     suggestion?.targetAlbum?.artistCredits,
     suggestion?.baseValues?.artists?.artistCredits,
-    ...revisions.flatMap((revision) => [revision?.proposedMetadata?.artistCredits, revision?.proposedChanges?.artists?.artistCredits]),
+    ...revisions.flatMap((revision) => [
+      revision?.proposedMetadata?.artistCredits,
+      linkedArtists(revision?.artistSelections),
+      revision?.proposedChanges?.artists?.artistCredits,
+      linkedArtists(revision?.proposedChanges?.artistLinks?.artistSelections),
+    ]),
   ];
 }
 
@@ -199,13 +210,28 @@ async function registryContextFor(suggestion) {
   }
 }
 
+// Which proposed MusicBrainz MBIDs approval would reuse. Advisory, like the
+// registry context: a failed read leaves it out.
+async function proposalRegistryFor(suggestion) {
+  try {
+    return await proposalRegistryContext(suggestion);
+  } catch (error) {
+    console.error("Failed to load artist proposal registry context for moderation", error?.message || error);
+    return null;
+  }
+}
+
 async function moderatorDetail(submission) {
   const suggestion = serializeSubmission(submission, { detail: true, moderator: true });
-  const [candidates, registry] = await Promise.all([
+  const [candidates, registry, proposalRegistry] = await Promise.all([
     duplicateCandidates(submission),
     registryContextFor(suggestion),
+    suggestion.artistProposals?.length || suggestion.proposedChanges?.artistLinks?.artistProposals?.length
+      ? proposalRegistryFor(suggestion)
+      : Promise.resolve(undefined),
   ]);
   const detail = { suggestion, duplicateCandidates: candidates, artistRegistry: registry.artists };
+  if (proposalRegistry !== undefined) detail.artistProposalRegistry = proposalRegistry;
   if (registry.unchecked.length) detail.artistRegistryUnchecked = registry.unchecked;
   if (asPlain(submission)?.submissionType === "genre_suggestion") detail.genreReview = await genreReview(submission);
   return detail;

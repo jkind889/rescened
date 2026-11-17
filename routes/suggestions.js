@@ -21,6 +21,7 @@ const {
   isSubmissionsEnabled,
   assertCreditIdentities,
   normalizeCorrectionPayload,
+  normalizeSubmissionPayload,
   correctionSnapshot,
   plain,
   serializeApprovedFeedItem,
@@ -44,6 +45,21 @@ const {
 } = require("../lib/genres/suggestions");
 const { normalizeAlbumGenreProposal } = require("../lib/genres/albumSuggestions");
 const { buildSearchPattern } = require("./utils/catalogSearch");
+const {
+  ArtistSuggestionError,
+  artistWorkFields,
+  assertArtistSuggestionsEnabled,
+  assertExistingSelections,
+  correctionArtistLinks,
+  creationDigest,
+  isArtistBearing,
+  normalizeArtistWork,
+  normalizeRequestKey,
+  prepareStoredProposals,
+  splitArtistRequest,
+} = require("./utils/artistSuggestions");
+const { createWithRequestKey, requestKeyFields } = require("./utils/requestKeys");
+const { ArtistProposalValidationError } = require("../lib/artists/proposals");
 
 const router = express.Router();
 
@@ -70,6 +86,17 @@ function submissionsEnabled(req, res, next) {
 }
 
 function sendRouteError(res, error, fallback) {
+  if (error instanceof ArtistProposalValidationError) {
+    return res.status(400).json({ error: error.message, code: error.code, details: error.details });
+  }
+  if (error instanceof ArtistSuggestionError) {
+    if (Number.isInteger(error.retryAfterSeconds)) res.set("Retry-After", String(error.retryAfterSeconds));
+    return res.status(error.status).json({
+      error: error.message,
+      code: error.code,
+      ...(Number.isInteger(error.retryAfterSeconds) ? { retryAfterSeconds: error.retryAfterSeconds } : {}),
+    });
+  }
   if (error instanceof SubmissionValidationError || error?.code === "INVALID_CURSOR") {
     const body = { error: error.message, code: error.code || "INVALID_SUBMISSION" };
     if (error.details?.length) body.details = error.details;
@@ -128,6 +155,8 @@ async function findSubmission(query) {
 function submissionUpdate(payload, duplicate, revision, status) {
   return {
     proposedMetadata: payload.proposedMetadata,
+    artistProposals: payload.artistProposals || [],
+    artistSelections: payload.artistSelections || [],
     genreChanges: payload.genreChanges || null,
     editionProposal: payload.editionProposal || null,
     supportingSources: payload.supportingSources,
@@ -164,6 +193,25 @@ async function queryResult(query) {
   return query && typeof query.exec === "function" ? query.exec() : query;
 }
 
+// The target's credits exactly as stored, for an identity-only link baseline.
+async function rawArtistCredits(album) {
+  const id = plain(album)?._id;
+  if (!id || typeof AlbumCatalog.collection?.findOne !== "function") return plain(album)?.artistCredits || [];
+  const raw = await AlbumCatalog.collection.findOne({ _id: id }, { projection: { artistCredits: 1 } });
+  return raw?.artistCredits || [];
+}
+
+// Identity-only correction links: gated, existing artists checked, and
+// MusicBrainz proposals prepared (an MBID already observed on `previous`
+// keeps that observation). Mutates payload.proposedChanges.artistLinks.
+async function prepareCorrectionLinks(payload, previous = null) {
+  const links = payload.proposedChanges.artistLinks;
+  if (!links) return;
+  await assertExistingSelections(links.artistSelections);
+  const prior = plain(plain(previous)?.proposedChanges)?.artistLinks;
+  links.artistProposals = await prepareStoredProposals(links.artistProposals, { previous: prior ? { artistProposals: prior.artistProposals } : null });
+}
+
 async function createSubmission(data, session) {
   if (!session) return AlbumSubmission.create(data);
   const [submission] = await AlbumSubmission.create([data], { session });
@@ -188,22 +236,51 @@ router.post("/editions/preview", auth, submissionsEnabled, editionsEnabled, cont
   catch (error) { return sendRouteError(res, error, "Edition preview failed"); }
 });
 
+// Optional artist links (ARTIST_SUGGESTIONS_ENABLED): artistProposals and
+// artistSelections beside the ordinary body, plus a requestKey that makes an
+// ambiguous retry return the original suggestion instead of a duplicate. A
+// body without artist links keeps the existing contract.
 router.post("/", auth, submissionsEnabled, submissionCreateRateLimit, async (req, res) => {
   try {
-    const payload = await editions.normalize(req.body, req.userId);
-    await assertCreditIdentities(payload.proposedMetadata.artistCredits);
-    payload.genreChanges = await normalizeAlbumGenreProposal(payload.proposedGenres);
-    const duplicate = await findDuplicateSignals(payload);
-    const submittedAt = new Date();
-    const snapshot = snapshotForSubmission(payload, duplicate, submittedAt, 1);
-    const submission = await withNewGenreAllowance(req.userId, payload, (session) => createSubmission({
-      submittedByUserId: req.userId,
-      submissionType: "new_album",
-      ...submissionUpdate(payload, duplicate, 1, "pending"),
-      revisions: [snapshot],
-      moderationHistory: [{ actorUserId: req.userId, action: "submitted", reason: "", createdAt: submittedAt }],
-    }, session));
-    return res.status(201).json(serializeSubmission(submission, { detail: true }));
+    const { rest, artist, requestKey: rawRequestKey } = splitArtistRequest(req.body);
+    if (artist.present) assertArtistSuggestionsEnabled();
+    const requestKey = normalizeRequestKey(rawRequestKey, { required: artist.present });
+    // The request shape is validated without any database, preview, or
+    // provider read, and the request key is compared against that normalized
+    // client input, so a replay of a saved request is answered even after an
+    // edition preview expires or a referenced genre is renamed.
+    const { editionPreviewId, ...clientBody } = rest && typeof rest === "object" && !Array.isArray(rest) ? rest : {};
+    const clientPayload = normalizeSubmissionPayload(rest && typeof rest === "object" && !Array.isArray(rest) ? clientBody : rest);
+    const clientWork = normalizeArtistWork(artist, clientPayload.proposedMetadata.artistCredits);
+    const digest = requestKey ? creationDigest({ clientPayload, work: clientWork, editionPreviewId }) : "";
+    const { document: submission, idempotent } = await createWithRequestKey({
+      Model: AlbumSubmission,
+      userId: req.userId,
+      requestKey,
+      digest,
+      create: async () => {
+        // Everything below runs only for a new request, never for a replay.
+        const payload = await editions.normalize(rest, req.userId);
+        await assertCreditIdentities(payload.proposedMetadata.artistCredits);
+        payload.genreChanges = await normalizeAlbumGenreProposal(payload.proposedGenres);
+        const work = normalizeArtistWork(artist, payload.proposedMetadata.artistCredits);
+        if (work) await assertExistingSelections(work.selections);
+        if (work) Object.assign(payload, artistWorkFields(work, await prepareStoredProposals(work.proposals)));
+        const duplicate = await findDuplicateSignals(payload);
+        const submittedAt = new Date();
+        const snapshot = snapshotForSubmission(payload, duplicate, submittedAt, 1);
+        return withNewGenreAllowance(req.userId, payload, (session) => createSubmission({
+          submittedByUserId: req.userId,
+          submissionType: "new_album",
+          ...submissionUpdate(payload, duplicate, 1, "pending"),
+          ...requestKeyFields(requestKey, digest),
+          revisions: [snapshot],
+          moderationHistory: [{ actorUserId: req.userId, action: "submitted", reason: "", createdAt: submittedAt }],
+        }, session));
+      },
+    });
+    const body = serializeSubmission(submission, { detail: true });
+    return idempotent ? res.status(200).json({ ...body, idempotent: true }) : res.status(201).json(body);
   } catch (error) {
     return sendRouteError(res, error, "Failed to create suggestion");
   }
@@ -214,10 +291,13 @@ router.post("/corrections", auth, submissionsEnabled, correctionCreateRateLimit,
     const requestedAlbumId = typeof req.body?.albumId === "string" ? req.body.albumId.trim().toLowerCase() : "";
     const album = requestedAlbumId ? await queryResult(AlbumCatalog.findOne({ albumId: requestedAlbumId })) : null;
     if (!album) return res.status(404).json({ error: "Target catalog album not found", code: "CATALOG_TARGET_NOT_FOUND" });
-    const payload = normalizeCorrectionPayload(req.body, album);
+    const wantsLinks = req.body?.proposedChanges?.artistLinks !== undefined;
+    if (wantsLinks) assertArtistSuggestionsEnabled();
+    const payload = normalizeCorrectionPayload(req.body, album, wantsLinks ? { rawArtistCredits: await rawArtistCredits(album) } : {});
     if (payload.proposedChanges.artists) {
       await assertCreditIdentities(payload.proposedChanges.artists.artistCredits, "proposedChanges.artists.artistCredits");
     }
+    await prepareCorrectionLinks(payload);
     const submittedAt = new Date();
     const snapshot = correctionSnapshot(payload, submittedAt, 1);
     const submission = await AlbumSubmission.create({
@@ -409,10 +489,20 @@ router.post("/:submissionId/revise", auth, submissionsEnabled, submissionMutatio
       const target = await queryResult(AlbumCatalog.findOne({ _id: targetId }));
       if (!target) return res.status(409).json({ error: "The correction target album is no longer available", code: "CATALOG_TARGET_MISSING" });
       const body = { ...(req.body || {}), albumId: req.body?.albumId || plain(target).albumId };
-      const payload = normalizeCorrectionPayload(body, target);
+      const wantsLinks = body.proposedChanges?.artistLinks !== undefined;
+      // Fail closed like album suggestions: with linking off, a correction
+      // that has artist links cannot be revised, so its links are never
+      // dropped implicitly.
+      if (wantsLinks || correctionArtistLinks(current)) {
+        assertArtistSuggestionsEnabled(correctionArtistLinks(current) && !wantsLinks
+          ? "This correction has artist links, and artist linking is turned off right now. Revise it when linking is back on, or withdraw it."
+          : undefined);
+      }
+      const payload = normalizeCorrectionPayload(body, target, wantsLinks ? { rawArtistCredits: await rawArtistCredits(target) } : {});
       if (payload.proposedChanges.artists) {
         await assertCreditIdentities(payload.proposedChanges.artists.artistCredits, "proposedChanges.artists.artistCredits");
       }
+      await prepareCorrectionLinks(payload, current);
       update = {
         $set: correctionUpdate(payload, revision, "pending"),
         $push: {
@@ -421,9 +511,24 @@ router.post("/:submissionId/revise", auth, submissionsEnabled, submissionMutatio
         },
       };
     } else {
-      const payload = await editions.normalize(req.body, req.userId, current);
+      const { rest, artist, requestKey } = splitArtistRequest(req.body);
+      if (requestKey !== undefined) throw new SubmissionValidationError("requestKey is only accepted when creating a suggestion");
+      // Fail closed: while artist linking is off, a suggestion that already
+      // has artist links cannot be revised at all, so a revision can never
+      // drop its stored links just because the feature is off.
+      if (artist.present || isArtistBearing(current)) {
+        assertArtistSuggestionsEnabled(isArtistBearing(current) && !artist.present
+          ? "This suggestion has artist links, and artist linking is turned off right now. Revise it when linking is back on, or withdraw it."
+          : undefined);
+      }
+      const payload = await editions.normalize(rest, req.userId, current);
       await assertCreditIdentities(payload.proposedMetadata.artistCredits);
       payload.genreChanges = await normalizeAlbumGenreProposal(payload.proposedGenres);
+      const work = normalizeArtistWork(artist, payload.proposedMetadata.artistCredits);
+      if (work) {
+        await assertExistingSelections(work.selections);
+        Object.assign(payload, artistWorkFields(work, await prepareStoredProposals(work.proposals, { previous: current })));
+      }
       genreAllowancePayload = payload;
       const duplicate = await findDuplicateSignals(payload, { excludeSubmissionId: current._id });
       const snapshot = snapshotForSubmission(payload, duplicate, submittedAt, revision);

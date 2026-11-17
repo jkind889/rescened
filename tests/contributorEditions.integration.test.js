@@ -59,7 +59,7 @@ test('provider proposal is durable revision evidence but neither preview nor sub
  assert.equal(await Models.Head.countDocuments({}),0); assert.equal(await Models.Candidate.countDocuments({}),0);assert.equal(await Models.Baseline.countDocuments({}),0);
  await baselines.previewProposal('submissions',submission.submissionId,{expectedTargetRevision:1});
  assert.equal(await Models.Candidate.countDocuments({targetId:submission.submissionId}),1);assert.equal(await Models.Head.countDocuments({}),0);
- const approved=await approveAlbumSubmission({submissionId:submission.submissionId,actorUserId:'moderator',confirmPossibleDuplicate:true,reason:'Metadata reviewed; baseline deferred',coverResolver:null});
+ const approved=await approveAlbumSubmission({submissionId:submission.submissionId,actorUserId:'moderator',expectedRevision:1,confirmPossibleDuplicate:true,reason:'Metadata reviewed; baseline deferred',coverResolver:null});
  const album=await AlbumCatalog.findOne({albumId:approved.album.albumId});
  assert.equal(album.tracks.length,1);assert.equal(await baselines.baselineForAlbum(album),null);
 });
@@ -70,7 +70,7 @@ test('explicit moderator confirmation publishes the preserved candidate atomical
  const result=await command(submission,'confirm',value,0,1,requestId);
  assert.equal(result.status,'reviewed');
  assert.equal((await command(submission,'confirm',value,0,1,requestId)).revision,1);
- const approved=await approveAlbumSubmission({submissionId:submission.submissionId,actorUserId:'moderator',confirmPossibleDuplicate:true,reason:'Metadata and edition reviewed',coverResolver:null});
+ const approved=await approveAlbumSubmission({submissionId:submission.submissionId,actorUserId:'moderator',expectedRevision:1,confirmPossibleDuplicate:true,reason:'Metadata and edition reviewed',coverResolver:null});
  const album=await AlbumCatalog.findOne({albumId:approved.album.albumId});
  const baseline=await baselines.baselineForAlbum(album);
  assert.equal(baseline.tracklistHash,value.tracklistHash);assert.equal(await Models.Baseline.countDocuments({albumId:album.albumId}),1);

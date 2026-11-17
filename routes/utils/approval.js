@@ -3,6 +3,8 @@ const AlbumCatalog = require("../../models/AlbumCatalog");
 const AlbumSubmission = require("../../models/AlbumSubmission");
 const Artist = require("../../models/Artist");
 const { ArtistIdentityError, resolveCreditIdentities } = require("../../lib/artists/identity");
+const { resolveArtistSelections } = require("../../lib/artists/proposals");
+const { assertArtistSuggestionsEnabled, isArtistBearing } = require("./artistSuggestions");
 const {
   createCatalogAlbum,
   normalizeCatalogAlbum,
@@ -462,9 +464,61 @@ function approvalResult(result) {
   };
 }
 
+// The revision an approved suggestion was approved at. Approved suggestions
+// cannot be revised, so legacy approvals without a receipt use the current
+// revision.
+function approvedRevision(source) {
+  const revision = Number(source?.approvalReceipt?.revision);
+  return Number.isSafeInteger(revision) && revision > 0 ? revision : source?.currentRevision;
+}
+
+function approvedCorrectionFields(source) {
+  if (Array.isArray(source?.approvalReceipt?.appliedFields)) return source.approvalReceipt.appliedFields;
+  const event = [...(source?.moderationHistory || [])].reverse().find((item) => item?.action === "approved");
+  return Array.isArray(event?.application?.appliedFields) ? event.application.appliedFields : null;
+}
+
+function sameFieldSet(left, right) {
+  const a = [...new Set(left || [])].sort();
+  const b = [...new Set(right || [])].sort();
+  return a.length === b.length && a.every((field, index) => field === b[index]);
+}
+
+// An exact retry of an approval returns the original result. A retry that
+// asserts a different reviewed revision, target album, or correction field
+// selection conflicts: reporting success would claim the moderator approved
+// something they did not. Values the retry omits are not asserted.
+function assertRetryMatchesApproval(source, { expectedRevision, albumId, applyFields, album } = {}) {
+  if (expectedRevision !== undefined && approvedRevision(source) !== expectedRevision) {
+    throw new ModerationConflictError("Suggestion was approved at a different revision", "APPROVAL_CONFLICT");
+  }
+  if (albumId && plain(album)?.albumId !== albumId) {
+    throw new ModerationConflictError("Suggestion was already approved for another album", "APPROVAL_CONFLICT");
+  }
+  if (source?.submissionType === "catalog_correction" && applyFields !== undefined) {
+    const fields = approvedCorrectionFields(source);
+    if (fields && !sameFieldSet(fields, applyFields)) {
+      throw new ModerationConflictError("Correction was already approved with a different field selection", "APPROVAL_CONFLICT");
+    }
+  }
+}
+
+function approvalReceipt({ revision, publicationType, album, appliedFields = [], artistResolutions = [], approvedAt }) {
+  return {
+    revision,
+    publicationType,
+    targetAlbumId: plain(album).albumId,
+    appliedFields: [...appliedFields],
+    artistResolutions: artistResolutions.map((resolution) => ({ ...resolution })),
+    approvedAt,
+  };
+}
+
 async function approveCatalogCorrection({ preliminary, submissionId, actorUserId, applyFields, reason }) {
   const preliminaryRevision = preliminary.currentRevision;
   const selectedFields = correctionApprovalFields(preliminary, applyFields);
+  // Artists are registered only when the links are actually applied.
+  if (selectedFields.appliedFields.includes("artistLinks")) assertArtistSuggestionsEnabled();
   let session;
   let result = null;
   try {
@@ -477,6 +531,7 @@ async function approveCatalogCorrection({ preliminary, submissionId, actorUserId
       if (current.status === "approved") {
         const approvedAlbum = await findCatalogByInternalId(current.approvedAlbumCatalogId, session);
         if (!approvedAlbum) throw new ModerationConflictError("Approved suggestion has no usable catalog album", "APPROVAL_INCONSISTENT");
+        assertRetryMatchesApproval(current, { expectedRevision: preliminaryRevision, applyFields, album: approvedAlbum });
         result = { submission: { ...current, approvedAlbumCatalogId: approvedAlbum }, album: approvedAlbum, idempotent: true };
         return;
       }
@@ -513,17 +568,42 @@ async function approveCatalogCorrection({ preliminary, submissionId, actorUserId
       const resolvedArtistCredits = applied.appliedFields.includes("artists")
         ? await resolveApprovalCredits(changes.artists?.artistCredits, current, actorUserId, approvedAt, session)
         : null;
+      // Identity-only links: the stored credits must still be byte-for-byte
+      // the reviewed baseline (a backfill or another write changes them or
+      // the revision), and only identities are added.
+      let linked = null;
+      if (applied.appliedFields.includes("artistLinks")) {
+        const raw = await AlbumCatalog.collection.findOne({ _id: plain(target)._id }, { session });
+        if (!raw || JSON.stringify(raw.artistCredits || []) !== JSON.stringify(current.baseValues?.artistLinks?.artistCredits || [])) {
+          throw new ModerationConflictError("The album's credits changed after this correction was submitted", "CATALOG_CHANGED");
+        }
+        linked = await resolveCorrectionLinks(current, raw.artistCredits || [], actorUserId, approvedAt, session);
+      }
       const patch = correctionPatch(current, target, applied.appliedFields, actorUserId, approvedAt, resolvedArtistCredits);
+      if (linked) {
+        // Identity provenance only: whoever owns the credit wording still
+        // owns it, so fieldProvenance.artistCredits is left unchanged.
+        patch.fieldProvenance.artistIdentity = {
+          ...correctionProvenance(current, actorUserId, approvedAt),
+          method: "artist-link-correction",
+          positions: linked.resolutions.map((resolution) => resolution.position),
+        };
+      }
       const candidate = {
         ...plain(target),
         ...patch,
+        ...(linked ? { artistCredits: linked.credits } : {}),
         catalogRevision: baselineRevision + 1,
       };
       validateCatalogDocument(candidate, { existingId: plain(target)._id });
+      if (linked) {
+        const invalid = new AlbumCatalog({ artistCredits: linked.credits }).validateSync(["artistCredits"]);
+        if (invalid) throw new ModerationConflictError(`Linked credits fail catalog validation: ${invalid.message}`, "CATALOG_CHANGED");
+      }
       // Albums written before revisions were tracked have no stored field and
       // count as revision 1, so match that shape and set the next revision
       // explicitly; $inc on a missing field would leave it at 1.
-      const updatedAlbum = await AlbumCatalog.findOneAndUpdate(
+      let updatedAlbum = await AlbumCatalog.findOneAndUpdate(
         {
           _id: plain(target)._id,
           albumId: plain(target).albumId,
@@ -533,6 +613,17 @@ async function approveCatalogCorrection({ preliminary, submissionId, actorUserId
         { returnDocument: "after", runValidators: true, session },
       );
       if (!updatedAlbum) throw new ModerationConflictError("Catalog album changed while the correction was being applied", "CATALOG_CHANGED");
+      if (linked) {
+        // Written through the raw collection, like the identity backfill, so
+        // schema casting cannot trim or re-key the stored credit wording.
+        const written = await AlbumCatalog.collection.updateOne(
+          { _id: plain(target)._id, catalogRevision: baselineRevision + 1 },
+          { $set: { artistCredits: linked.credits } },
+          { session },
+        );
+        if (Number(written?.matchedCount) !== 1) throw new ModerationConflictError("Catalog album changed while the correction was being applied", "CATALOG_CHANGED");
+        updatedAlbum = await readQuery(AlbumCatalog.findOne({ _id: plain(target)._id }), session);
+      }
       await baselineService().invalidateAlbumBaseline(updatedAlbum, {
         session,
         actorUserId,
@@ -548,6 +639,14 @@ async function approveCatalogCorrection({ preliminary, submissionId, actorUserId
             duplicateOfSubmissionId: null,
             approvedAt,
             approvalPublicationType: "catalog_corrected",
+            approvalReceipt: approvalReceipt({
+              revision: preliminaryRevision,
+              publicationType: "catalog_corrected",
+              album: updatedAlbum,
+              appliedFields: applied.appliedFields,
+              artistResolutions: linked?.resolutions || [],
+              approvedAt,
+            }),
           },
           $push: {
             moderationHistory: {
@@ -617,6 +716,48 @@ async function resolveApprovalCredits(credits, submission, actorUserId, approved
   }
 }
 
+// Resolves a suggestion's reviewed artist links inside the approval
+// transaction: existing artists are linked, exact MusicBrainz MBIDs reuse
+// their registered artist, and other proposals register artists from the
+// reviewed revision (MusicBrainz observation or community name). Credit
+// wording, roles and order are unchanged. Nothing calls a provider.
+async function resolveArtistLinks(submission, actorUserId, approvedAt, session) {
+  try {
+    return await resolveArtistSelections({
+      credits: submission.proposedMetadata?.artistCredits,
+      proposals: submission.artistProposals || [],
+      selections: submission.artistSelections || [],
+    }, {
+      Artist,
+      session,
+      provenance: {
+        source: "community",
+        submissionId: submission.submissionId,
+        revision: submission.currentRevision,
+        approvedByUserId: actorUserId,
+        approvedAt,
+      },
+    });
+  } catch (error) {
+    if (error instanceof ArtistIdentityError) {
+      throw new ModerationConflictError(error.message, "ARTIST_IDENTITY_CONFLICT", error.details);
+    }
+    throw error;
+  }
+}
+
+// A correction's identity-only links, resolved against the album's stored
+// credits inside the approval transaction.
+async function resolveCorrectionLinks(submission, storedCredits, actorUserId, approvedAt, session) {
+  const links = submission.proposedChanges?.artistLinks || {};
+  return resolveArtistLinks({
+    ...submission,
+    proposedMetadata: { artistCredits: storedCredits },
+    artistProposals: links.artistProposals || [],
+    artistSelections: links.artistSelections || [],
+  }, actorUserId, approvedAt, session);
+}
+
 function appliedFieldsChanged(left, right) {
   return JSON.stringify(left?.appliedFields || []) !== JSON.stringify(right?.appliedFields || []);
 }
@@ -642,11 +783,25 @@ async function approveAlbumSubmission({
     throw new ModerationConflictError("Suggestion not found", "SUGGESTION_NOT_FOUND");
   }
   const preliminary = plain(preliminarySubmission);
+  // An album suggestion or catalog correction is approved only as the
+  // revision the moderator reviewed: the detail page and bulk approval both
+  // send it, and a missing value is refused rather than defaulting to
+  // whatever is current. Genre approvals keep the optional guard.
+  if (["new_album", "catalog_correction"].includes(preliminary.submissionType || "new_album") && expectedRevision === undefined) {
+    throw new ModerationValidationError(
+      "expectedRevision is required to approve an album suggestion or catalog correction; approve the revision you reviewed",
+      "EXPECTED_REVISION_REQUIRED",
+    );
+  }
   // Bulk approval passes the revision the moderator saw. Every branch below
   // conditions its write on this preliminary revision, so a later revision
   // can't be approved in its place.
   if (expectedRevision !== undefined && preliminary.status === "pending" && preliminary.currentRevision !== expectedRevision) {
     throw new ModerationConflictError("The suggestion was revised after the queue was loaded", "STATE_CONFLICT");
+  }
+  // A retry of an approved suggestion must name the revision that was approved.
+  if (expectedRevision !== undefined && preliminary.status === "approved" && approvedRevision(preliminary) !== expectedRevision) {
+    throw new ModerationConflictError("Suggestion was approved at a different revision", "APPROVAL_CONFLICT");
   }
   // Genre suggestions have their own approval, including the idempotent
   // retry, so they never reach the album publication logic below.
@@ -662,9 +817,7 @@ async function approveAlbumSubmission({
   if (preliminary.status === "approved") {
     const approvedAlbum = await findCatalogByInternalId(preliminary.approvedAlbumCatalogId);
     if (!approvedAlbum) throw new ModerationConflictError("Approved suggestion has no usable catalog album", "APPROVAL_INCONSISTENT");
-    if (albumId && plain(approvedAlbum).albumId !== albumId) {
-      throw new ModerationConflictError("Suggestion was already approved for another album", "APPROVAL_CONFLICT");
-    }
+    assertRetryMatchesApproval(preliminary, { expectedRevision, albumId, applyFields, album: approvedAlbum });
     return approvalResult({
       submission: { ...preliminary, approvedAlbumCatalogId: approvedAlbum },
       album: approvedAlbum,
@@ -684,6 +837,19 @@ async function approveAlbumSubmission({
 
   if (applyFields !== undefined) {
     throw new ModerationValidationError("applyFields is only valid for catalog correction approvals");
+  }
+  // Artist links create or reuse artists for a new album's credits. Linking
+  // the suggestion to an existing album would drop that work, so it is
+  // refused; use mark-duplicate, reject, or request changes instead.
+  const artistBearing = isArtistBearing(preliminary);
+  if (artistBearing) {
+    if (albumId) {
+      throw new ModerationValidationError(
+        "A suggestion with artist links cannot be linked to an existing album; mark it as a duplicate, reject it, or request changes",
+        "ARTIST_LINKS_REQUIRE_NEW_ALBUM",
+      );
+    }
+    assertArtistSuggestionsEnabled();
   }
 
   // Resolve before opening Mongo's transaction. The transaction re-reads the
@@ -715,9 +881,7 @@ async function approveAlbumSubmission({
       if (current.status === "approved") {
         const approvedAlbum = await findCatalogByInternalId(current.approvedAlbumCatalogId, session);
         if (!approvedAlbum) throw new ModerationConflictError("Approved suggestion has no usable catalog album", "APPROVAL_INCONSISTENT");
-        if (albumId && plain(approvedAlbum).albumId !== albumId) {
-          throw new ModerationConflictError("Suggestion was already approved for another album", "APPROVAL_CONFLICT");
-        }
+        assertRetryMatchesApproval(current, { expectedRevision: preliminaryRevision, albumId, album: approvedAlbum });
         result = {
           submission: { ...current, approvedAlbumCatalogId: approvedAlbum },
           album: approvedAlbum,
@@ -729,7 +893,8 @@ async function approveAlbumSubmission({
         throw new ModerationConflictError("Only pending suggestions can be approved", "INVALID_SUBMISSION_STATE");
       }
       if (current.currentRevision !== preliminaryRevision
-        || (preliminaryUpdatedAt !== null && current.updatedAt && new Date(current.updatedAt).getTime() !== preliminaryUpdatedAt)) {
+        || (preliminaryUpdatedAt !== null && current.updatedAt && new Date(current.updatedAt).getTime() !== preliminaryUpdatedAt)
+        || isArtistBearing(current) !== artistBearing) {
         throw new ModerationConflictError("Suggestion changed while artwork was being resolved", "STATE_CONFLICT");
       }
 
@@ -763,12 +928,19 @@ async function approveAlbumSubmission({
 
       const approvedAt = new Date();
       let album;
+      let artistResolutions = [];
       if (albumId) {
         album = await findCatalogByPublicId(albumId, session);
         if (!album) throw new ModerationConflictError("Catalog album not found", "CATALOG_ALBUM_NOT_FOUND");
       } else {
+        let credits = current.proposedMetadata?.artistCredits;
+        if (artistBearing) {
+          const linked = await resolveArtistLinks(current, actorUserId, approvedAt, session);
+          credits = linked.credits;
+          artistResolutions = linked.resolutions;
+        }
         const resolvedArtistCredits = await resolveApprovalCredits(
-          current.proposedMetadata?.artistCredits,
+          credits,
           current,
           actorUserId,
           approvedAt,
@@ -797,6 +969,13 @@ async function approveAlbumSubmission({
             duplicateOfSubmissionId: null,
             approvedAt,
             approvalPublicationType: albumId ? "catalog_linked" : "catalog_created",
+            approvalReceipt: approvalReceipt({
+              revision: current.currentRevision,
+              publicationType: albumId ? "catalog_linked" : "catalog_created",
+              album,
+              artistResolutions,
+              approvedAt,
+            }),
             ...(linkedGenreSubmissionId ? { linkedGenreSubmissionId } : {}),
           },
           $push: {
@@ -836,7 +1015,9 @@ async function approveAlbumSubmission({
 }
 
 module.exports = {
+  approvalReceipt,
   approveAlbumSubmission,
+  assertRetryMatchesApproval,
   buildCatalogInput,
   resolveSuggestedCover,
 };

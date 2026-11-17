@@ -185,6 +185,58 @@ The `/artists` routes are public reads. See [artist identity](ARTIST_IDENTITY.md
 | `ARTIST_DISCOGRAPHY_NOT_AVAILABLE` | `404` | The registry artist has no MusicBrainz artist identity to browse. |
 | `EXTERNAL_DISCOGRAPHY_UNAVAILABLE` | `502` | MusicBrainz failed, was busy, timed out, or returned data that could not be normalized or exceeded the response-size limit. Adds `category`, `upstreamStatus`, and `requestId` as for external search. Local artist content is unaffected. |
 
+### Artist picker discovery
+
+`GET /artist-discovery/local` and `GET /artist-discovery/musicbrainz` require Clerk sign-in and `ARTIST_SUGGESTIONS_ENABLED`; they do not depend on `ARTIST_PAGES_ENABLED`. See [artist identity](ARTIST_IDENTITY.md#artist-picker-discovery).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `UNAUTHORIZED` | `401` | No signed-in user. |
+| `ARTIST_SUGGESTIONS_DISABLED` | `503` | `ARTIST_SUGGESTIONS_ENABLED` is off. |
+| `INVALID_ARTIST_DISCOVERY` | `400` | An unsupported query field, a missing or blank `q` for MusicBrainz, a `q` longer than 200 characters, or a local `limit` outside 1–12. |
+| `ARTIST_DISCOVERY_THROTTLED` | `503` | MusicBrainz asked Rescened to slow down (an upstream 429 or 503 starts a cooldown of its `Retry-After`, 10 seconds by default, at most 120), or too many artist lookups are already waiting. Sends `Retry-After`, `retryAfterSeconds`, and `requestId`. Local discovery is unaffected. |
+| `ARTIST_DISCOVERY_UNAVAILABLE` | `502` | MusicBrainz failed, timed out, or returned data that could not be normalized or exceeded the size limit. Adds `category`, `upstreamStatus`, and `requestId` as for external search. |
+| `RATE_LIMITED` | `429` | The per-user picker budget (60 local or 15 MusicBrainz searches a minute) is spent. |
+
+### Artist links on album suggestions
+
+See [artist identity](ARTIST_IDENTITY.md#artist-links-on-album-suggestions).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `ARTIST_SUGGESTIONS_DISABLED` | `503` | While `ARTIST_SUGGESTIONS_ENABLED` is off: a create or revision carries artist links, a suggestion or correction that already has artist links is revised (with or without links), an artist-linked suggestion is approved, or a correction's `artistLinks` group is applied. |
+| `INVALID_REQUEST_KEY` | `400` | A create with artist links has no `requestKey`, or the key is not a UUID v4. |
+| `REQUEST_KEY_CONFLICT` | `409` | The contributor already used this `requestKey` for a different suggestion body. |
+| `INVALID_ARTIST_PROPOSAL`, `DUPLICATE_ARTIST_PROPOSAL`, `UNKNOWN_ARTIST_PROPOSAL`, `UNATTACHED_ARTIST_PROPOSAL`, `DUPLICATE_ARTIST_SELECTION`, `ARTIST_SELECTION_OUT_OF_RANGE` | `400` | The proposals or selections break the strict contract; `details` names the field. |
+| `CREDIT_ALREADY_LINKED` | `400` | A selected credit also carries an `artistId` or `artistMbid`. |
+| `ARTIST_NOT_FOUND` | `400` | An existing-artist selection names an `artistId` the registry does not have. |
+| `ARTIST_MBID_NOT_FOUND`, `ARTIST_MBID_REDIRECTED`, `ARTIST_OBSERVATION_INVALID` | `400` | MusicBrainz has no artist for the selected MBID, serves it under a different MBID (merged upstream; choose the current artist), or returned no usable name. |
+| `ARTIST_LOOKUP_UNAVAILABLE` | `503` | MusicBrainz could not confirm a selected MBID; nothing was saved. Sends `Retry-After` and `retryAfterSeconds`. |
+| `EXPECTED_REVISION_REQUIRED` | `400` | A new-album or catalog-correction approval did not name the reviewed revision. |
+| `ARTIST_LINKS_REQUIRE_NEW_ALBUM` | `400` | An artist-linked suggestion was approved with `albumId`. |
+| `ARTIST_IDENTITY_CONFLICT` | `409` | At approval, a linked artist is missing or a registration raced; nothing was published. |
+
+### Standalone artist suggestions
+
+`/artist-suggestions` and `/moderation/artist-suggestions`. See [artist identity](ARTIST_IDENTITY.md#standalone-artist-suggestions).
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `UNAUTHORIZED` / `MODERATOR_REQUIRED` | `401` / `403` | Not signed in, or not an allowlisted moderator on a moderator route. |
+| `ARTIST_SUGGESTION_NOT_FOUND` | `404` | No such suggestion, or another contributor's suggestion. |
+| `SUBMISSIONS_DISABLED`, `MODERATION_DISABLED`, `ARTIST_SUGGESTIONS_DISABLED` | `503` | A mutation while the matching flag is off. Reads still work. |
+| `INVALID_ARTIST_SUGGESTION`, `INVALID_ARTIST_PROPOSAL`, `INVALID_REQUEST_KEY` | `400` | The body or query breaks the strict contract, or a create has no `requestKey`. |
+| `INVALID_CURSOR` | `400` | `GET /artist-suggestions/mine` got a malformed `cursor`. |
+| `EXPECTED_REVISION_REQUIRED` | `400` | A revision, withdrawal, or moderator command did not name the reviewed revision. |
+| `REVISION_CONFLICT`, `STATE_CONFLICT` | `409` | The suggestion changed since it was loaded. |
+| `INVALID_SUBMISSION_STATE` | `409` | The command is not allowed in the current state. |
+| `ARTIST_ALREADY_EXISTS` | `409` | The MusicBrainz MBID is already a Rescened artist; `existingArtist` names it. |
+| `INVALID_DUPLICATE_TARGET` | `409` | `duplicateOfArtistId` is not an artist on Rescened. |
+| `APPROVAL_CONFLICT` | `409` | A retry names a revision other than the approved one. |
+| `ARTIST_IDENTITY_CONFLICT` | `409` | Another approval registered the same MBID at the same moment; retrying reuses it. |
+| `ARTIST_LOOKUP_UNAVAILABLE` | `503` | MusicBrainz could not confirm the MBID; nothing was saved. |
+| `ARTIST_SUGGESTION_UNAVAILABLE` | `503` | MongoDB transactions are unavailable. |
+
 ### Artist biographies
 
 See [artist biographies](ARTIST_BIOGRAPHIES.md).

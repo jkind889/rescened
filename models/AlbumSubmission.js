@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const { ARTIST_ID_PATTERN, MBID_PATTERN } = require("../lib/artists/identity");
 
 const candidateSchema = require("./schemas/providerEdition");
+const { artistProposalsField, artistSelectionsField } = require("./schemas/artistProposal");
 const editionProposalSchema = new mongoose.Schema({
   previewId: { type: String, required: true, match: /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i },
   candidate: { type: candidateSchema, required: true },
@@ -38,7 +39,7 @@ const MODERATION_ACTIONS = [
 ];
 const SUBMISSION_TYPES = ["new_album", "catalog_correction", "genre_suggestion"];
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const CORRECTION_FIELDS = ["title", "artists", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"];
+const CORRECTION_FIELDS = ["title", "artists", "artistLinks", "releaseType", "releaseDate", "label", "cover", "tracks", "externalReferences"];
 
 function isHttpsUrl(value) {
   if (!value) return true;
@@ -200,6 +201,18 @@ const correctionChangesSchema = new mongoose.Schema(
         },
       }, { _id: false, strict: "throw" }),
     },
+    // Identity-only links for the target album's existing credits, by
+    // position. Never carries credit wording; see lib/artists/proposals.js.
+    artistLinks: {
+      type: new mongoose.Schema({
+        artistProposals: artistProposalsField,
+        artistSelections: {
+          ...artistSelectionsField,
+          required: true,
+          validate: { validator: (value) => Array.isArray(value) && value.length >= 1 && value.length <= 20, message: "One to twenty artist links are required." },
+        },
+      }, { _id: false, strict: "throw" }),
+    },
     releaseType: { type: String, enum: RELEASE_TYPES },
     releaseDate: { type: correctionDateSchema },
     label: { type: String, trim: true, maxlength: 200 },
@@ -230,6 +243,34 @@ const correctionApplicationSchema = new mongoose.Schema(
     unappliedFields: { type: [String], required: true },
     baseCatalogRevision: { type: Number, required: true, min: 1 },
     resultCatalogRevision: { type: Number, required: true, min: 1 },
+  },
+  { _id: false, strict: "throw" },
+);
+
+// Server-authored record of what an approval did, written once in the same
+// transaction as the approval. A retry that asserts a different revision,
+// target, or field selection conflicts instead of reporting success for work
+// the moderator did not review. Internal: not part of serialized responses.
+const artistResolutionSchema = new mongoose.Schema(
+  {
+    position: { type: Number, required: true, min: 0 },
+    kind: { type: String, enum: ["existing", "musicbrainz", "community"], required: true },
+    proposalKey: { type: String, default: "", maxlength: 40 },
+    artistId: { type: String, required: true, lowercase: true, match: ARTIST_ID_PATTERN },
+    artistMbid: { type: String, default: "", lowercase: true, validate: { validator: (value) => !value || MBID_PATTERN.test(value), message: "artistMbid must be an MBID." } },
+    outcome: { type: String, enum: ["linked", "created", "reused"], required: true },
+  },
+  { _id: false, strict: "throw" },
+);
+
+const approvalReceiptSchema = new mongoose.Schema(
+  {
+    revision: { type: Number, required: true, min: 1 },
+    publicationType: { type: String, enum: ["catalog_created", "catalog_linked", "catalog_corrected"], required: true },
+    targetAlbumId: { type: String, required: true, lowercase: true, match: UUID_V4 },
+    appliedFields: { type: [String], default: [] },
+    artistResolutions: { type: [artistResolutionSchema], default: [] },
+    approvedAt: { type: Date, required: true },
   },
   { _id: false, strict: "throw" },
 );
@@ -376,6 +417,10 @@ const revisionSchema = new mongoose.Schema(
     proposedChanges: { type: correctionChangesSchema, default: null },
     genreBaseline: { type: genreBaselineSchema, default: null },
     genreChanges: { type: genreChangesSchema, default: null },
+    // Private artist proposals for this revision's credits, as prepared by
+    // the server (MusicBrainz observations included). New-album only.
+    artistProposals: artistProposalsField,
+    artistSelections: artistSelectionsField,
   },
   { _id: false, strict: "throw" },
 );
@@ -428,6 +473,9 @@ const albumSubmissionSchema = new mongoose.Schema(
     proposedChanges: { type: correctionChangesSchema, default: null },
     genreBaseline: { type: genreBaselineSchema, default: null },
     genreChanges: { type: genreChangesSchema, default: null },
+    // The current revision's private artist proposals and credit links.
+    artistProposals: artistProposalsField,
+    artistSelections: artistSelectionsField,
     // Public, server-authored links between an album proposal and its later
     // genre review. Both are private submission records, not catalog fields.
     linkedGenreSubmissionId: { type: String, default: null, match: /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i },
@@ -457,6 +505,12 @@ const albumSubmissionSchema = new mongoose.Schema(
     },
     approvedAt: { type: Date, default: null },
     approvalPublicationType: { type: String, enum: ["catalog_created", "catalog_linked", "catalog_corrected", "genres_updated"], default: null },
+    approvalReceipt: { type: approvalReceiptSchema, default: undefined },
+    // Optional client-generated key for an ambiguous create retry, scoped to
+    // the contributor. The digest covers the normalized client payload so a
+    // retry with different content conflicts instead of returning this record.
+    creationRequestKey: { type: String, default: undefined, immutable: true, lowercase: true, match: UUID_V4 },
+    creationPayloadDigest: { type: String, default: undefined, immutable: true, match: /^[0-9a-f]{64}$/ },
     currentRevision: { type: Number, required: true, min: 1, default: 1 },
     revisions: { type: [revisionSchema], default: [] },
     moderationHistory: { type: [moderationEventSchema], default: [] },
@@ -492,6 +546,12 @@ albumSubmissionSchema.pre("validate", function validateSubmissionInvariants() {
   }
   if (this.status === "duplicate" && !this.duplicateOfSubmissionId) {
     this.invalidate("duplicateOfSubmissionId", "Duplicate submissions must reference another submission.");
+  }
+  if (this.approvalReceipt && this.status !== "approved") {
+    this.invalidate("approvalReceipt", "Only approved submissions can carry an approval receipt.");
+  }
+  if (Boolean(this.creationRequestKey) !== Boolean(this.creationPayloadDigest)) {
+    this.invalidate("creationRequestKey", "A creation request key and its payload digest are stored together.");
   }
   if (Array.isArray(this.revisions) && this.revisions.length > 0 && this.currentRevision !== this.revisions.length) {
     this.invalidate("currentRevision", "Current revision must match the number of stored revisions.");
@@ -536,6 +596,12 @@ albumSubmissionSchema.pre(["findOneAndUpdate", "updateOne"], function validateSu
   if (status === "approved" && set.duplicateOfSubmissionId && set.duplicateOfSubmissionId !== null) {
     throw invariantValidationError("duplicateOfSubmissionId", "Approved submissions cannot reference a duplicate submission.");
   }
+  if (set.approvalReceipt !== undefined && status !== "approved") {
+    throw invariantValidationError("approvalReceipt", "An approval receipt is written only with the approval itself.");
+  }
+  if (update.$unset?.approvalReceipt !== undefined) {
+    throw invariantValidationError("approvalReceipt", "An approval receipt cannot be removed.");
+  }
   if (status === "duplicate" && set.approvedAlbumCatalogId && set.approvedAlbumCatalogId !== null) {
     throw invariantValidationError("approvedAlbumCatalogId", "Duplicate submissions cannot reference an approved album.");
   }
@@ -544,6 +610,10 @@ albumSubmissionSchema.pre(["findOneAndUpdate", "updateOne"], function validateSu
 albumSubmissionSchema.index({ submittedByUserId: 1, createdAt: -1, _id: -1 });
 albumSubmissionSchema.index({ submittedByUserId: 1, status: 1, approvedAt: -1, submissionId: -1 });
 albumSubmissionSchema.index({ openGenreSuggestionKey: 1 }, { unique: true, sparse: true });
+albumSubmissionSchema.index(
+  { submittedByUserId: 1, creationRequestKey: 1 },
+  { unique: true, partialFilterExpression: { creationRequestKey: { $type: "string" } } },
+);
 albumSubmissionSchema.index({ status: 1, updatedAt: -1, _id: -1 });
 albumSubmissionSchema.index({ status: 1, approvedAt: -1, _id: -1 });
 albumSubmissionSchema.index({ normalizedFingerprint: 1, status: 1 });

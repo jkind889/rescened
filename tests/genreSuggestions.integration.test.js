@@ -261,7 +261,7 @@ integration("album genres stay private until separate moderation, with one atomi
   assert.equal(await AlbumCatalog.countDocuments(), albumsBefore);
   assert.equal(await Genre.countDocuments(), genresBefore);
   assert.equal((await call("GET", `/suggestions/${created.body.submissionId}`, "not-owner")).status, 404);
-  const approve = () => call("POST", `/moderation/album-suggestions/${created.body.submissionId}/approve`, MODERATOR, {});
+  const approve = () => call("POST", `/moderation/album-suggestions/${created.body.submissionId}/approve`, MODERATOR, { expectedRevision: 1 });
   const results = await Promise.all([approve(), approve()]);
   assert.ok(results.every((result) => result.status === 200), JSON.stringify(results));
   const approved = results[0].body;
@@ -324,7 +324,7 @@ integration("failed album approval rolls back the queued genre review and catalo
     if (query.submissionId === created.body.submissionId) return Promise.resolve(null);
     return original.call(this, query, ...args);
   });
-  const failed = await call("POST", `/moderation/album-suggestions/${created.body.submissionId}/approve`, MODERATOR, {});
+  const failed = await call("POST", `/moderation/album-suggestions/${created.body.submissionId}/approve`, MODERATOR, { expectedRevision: 1 });
   mock.mock.restore();
   assert.equal(failed.status, 409, JSON.stringify(failed.body));
   assert.equal(failed.body.code, "STATE_CONFLICT");
@@ -338,7 +338,7 @@ integration("linking to an existing album never overwrites an open genre review"
   const open = await suggest("inline-link", album, { add: [{ genreId: genres.jazz.genreId }] });
   assert.equal(open.status, 201);
   const created = await call("POST", "/suggestions", "inline-link", albumProposal({ add: [{ genreId: genres.soul.genreId }] }));
-  const result = await call("POST", `/moderation/album-suggestions/${created.body.submissionId}/approve`, MODERATOR, { albumId: album.albumId });
+  const result = await call("POST", `/moderation/album-suggestions/${created.body.submissionId}/approve`, MODERATOR, { albumId: album.albumId, expectedRevision: 1 });
   assert.equal(result.status, 409, JSON.stringify(result.body));
   assert.equal(result.body.code, "GENRE_SUGGESTION_EXISTS");
   assert.equal(await AlbumSubmission.countDocuments({ sourceAlbumSubmissionId: created.body.submissionId }), 0);
@@ -365,7 +365,7 @@ integration("inline and standalone proposals share the open new-name allowance",
 integration("linking an inline proposal queues its review against current catalog genres", async () => {
   const album = await newAlbum(["hip-hop"]);
   const created = await call("POST", "/suggestions", "inline-link-success", albumProposal({ add: [{ genreId: genres.soul.genreId }] }));
-  const approved = await call("POST", `/moderation/album-suggestions/${created.body.submissionId}/approve`, MODERATOR, { albumId: album.albumId });
+  const approved = await call("POST", `/moderation/album-suggestions/${created.body.submissionId}/approve`, MODERATOR, { albumId: album.albumId, expectedRevision: 1 });
   assert.equal(approved.status, 200, JSON.stringify(approved.body));
   assert.equal(approved.body.suggestion.publicationType, "catalog_linked");
   const child = await AlbumSubmission.findOne({ submissionId: approved.body.suggestion.linkedGenreSubmissionId }).lean();

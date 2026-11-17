@@ -35,6 +35,26 @@ const RATE_LIMITS = {
     duration: 60,
     message: "Too many artist link checks. Please try again soon.",
   },
+  // Artist picker discovery, per signed-in user. Local registry searches are
+  // cheap; MusicBrainz searches share the provider's 1 req/s budget.
+  artistDiscoveryLocal: {
+    keyPrefix: "rescened:artist-discovery-local",
+    points: 60,
+    duration: 60,
+    message: "Too many artist searches. Please try again soon.",
+  },
+  artistSuggestionCreate: {
+    keyPrefix: "rescened:artist-suggestion-create",
+    points: 10,
+    duration: 10 * 60,
+    message: "Too many artist suggestions. Please try again soon.",
+  },
+  artistDiscoveryProvider: {
+    keyPrefix: "rescened:artist-discovery-provider",
+    points: 15,
+    duration: 60,
+    message: "Too many MusicBrainz artist searches. Please try again soon.",
+  },
   contributorEditions: {
     keyPrefix: "rescened:contributor-editions", points: 10, duration: 60,
     message: "Too many edition requests. Please try again soon.",
@@ -295,6 +315,9 @@ const sharePreviewLimiter = createRateLimiter(RATE_LIMITS.sharePreview);
 const searchLimiter = createRateLimiter(RATE_LIMITS.search);
 const artistLinksLimiter = createRateLimiter(RATE_LIMITS.artistLinks);
 const externalSearchLimiter = createRateLimiter(RATE_LIMITS.externalSearch);
+const artistDiscoveryLocalLimiter = createRateLimiter(RATE_LIMITS.artistDiscoveryLocal);
+const artistDiscoveryProviderLimiter = createRateLimiter(RATE_LIMITS.artistDiscoveryProvider);
+const artistSuggestionCreateLimiter = createRateLimiter(RATE_LIMITS.artistSuggestionCreate);
 const albumSaveLimiter = createRateLimiter(RATE_LIMITS.albumSave);
 const reviewCreateLimiter = createRateLimiter(RATE_LIMITS.reviewCreate);
 const diaryMutationLimiter = createRateLimiter(RATE_LIMITS.diaryMutation);
@@ -430,6 +453,18 @@ module.exports = {
   searchRateLimit: createRateLimitMiddleware(searchLimiter, {
     keyGenerator: getIpRateLimitKey,
     message: RATE_LIMITS.search.message,
+  }),
+  artistDiscoveryLocalRateLimit: createRateLimitMiddleware(artistDiscoveryLocalLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.artistDiscoveryLocal.message,
+  }),
+  artistDiscoveryProviderRateLimit: createRateLimitMiddleware(artistDiscoveryProviderLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.artistDiscoveryProvider.message,
+  }),
+  artistSuggestionCreateRateLimit: createRateLimitMiddleware(artistSuggestionCreateLimiter, {
+    keyGenerator: getAuthenticatedUserRateLimitKey,
+    message: RATE_LIMITS.artistSuggestionCreate.message,
   }),
   artistLinksRateLimit: createRateLimitMiddleware(artistLinksLimiter, {
     keyGenerator: getIpRateLimitKey,

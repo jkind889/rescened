@@ -35,6 +35,7 @@ const EMPTY_REASONS = {
 const CORRECTION_FIELD_ORDER = [
   "title",
   "artists",
+  "artistLinks",
   "releaseType",
   "releaseDate",
   "label",
@@ -46,6 +47,7 @@ const CORRECTION_FIELD_ORDER = [
 const CORRECTION_FIELD_LABELS = {
   title: "Title",
   artists: "Artists and credits",
+  artistLinks: "Artist links (identity only)",
   releaseType: "Release type",
   releaseDate: "Release date",
   label: "Label",
@@ -145,6 +147,14 @@ export function ModeratorDecision({
   const isExactMatchError = error?.code === "EXACT_CATALOG_MATCH";
   const needsDuplicateConfirmation = error?.code === "POSSIBLE_DUPLICATE_CONFIRMATION_REQUIRED";
   const isCorrection = submission?.submissionType === "catalog_correction";
+  // The revision shown on this page. Approval names it so the server refuses
+  // to publish any other revision; it is never re-read when the button is used.
+  const reviewedRevision = Number.isSafeInteger(submission?.currentRevision) && submission.currentRevision > 0
+    ? submission.currentRevision
+    : null;
+  // Artist links create or reuse artists for a new album, so the suggestion
+  // cannot be linked to an existing catalog album.
+  const hasArtistLinks = !isCorrection && Array.isArray(submission?.artistSelections) && submission.artistSelections.length > 0;
   const correctionFields = correctionFieldsFor(submission);
   const correctionDiffByField = new Map(
     (Array.isArray(submission?.correctionDiff) ? submission.correctionDiff : [])
@@ -195,15 +205,24 @@ export function ModeratorDecision({
           setClientError("Select at least one proposed field before approving the correction.");
           return;
         }
+        if (!reviewedRevision) {
+          setClientError("Reload this correction before approving it.");
+          return;
+        }
         onCommand("approve", {
           applyFields,
+          expectedRevision: reviewedRevision,
           ...(trimmedReason ? { reason: trimmedReason } : {}),
         });
         return;
       }
 
-      const body = {};
-      const selectedAlbumId = albumId.trim();
+      if (!reviewedRevision) {
+        setClientError("Reload this suggestion before approving it.");
+        return;
+      }
+      const body = { expectedRevision: reviewedRevision };
+      const selectedAlbumId = hasArtistLinks ? "" : albumId.trim();
 
       if (selectedAlbumId) {
         body.albumId = selectedAlbumId;
@@ -326,7 +345,18 @@ export function ModeratorDecision({
                 </div>
               ) : null}
 
-              {!isCorrection && displayedCatalogCandidates.length > 0 ? (
+              {hasArtistLinks ? (
+                <div className="moderation-resolution moderation-resolution-warning">
+                  <p className="community-eyebrow">Artist links</p>
+                  <h3>This suggestion can only be approved as a new album.</h3>
+                  <p>
+                    Approving registers or reuses the linked artists for its credits. If the album already exists,
+                    mark the suggestion as a duplicate, reject it, or request changes instead.
+                  </p>
+                </div>
+              ) : null}
+
+              {!isCorrection && !hasArtistLinks && displayedCatalogCandidates.length > 0 ? (
                 <fieldset className="moderation-candidate-choices">
                   <legend>Catalog candidates</legend>
                   {displayedCatalogCandidates.map((candidate) => (
@@ -359,7 +389,7 @@ export function ModeratorDecision({
                 </fieldset>
               ) : null}
 
-              {!isCorrection ? <div className="community-field">
+              {!isCorrection && !hasArtistLinks ? <div className="community-field">
                 <label htmlFor={albumIdInputId}>Existing catalog album ID <span>optional</span></label>
                 <input
                   autoComplete="off"
@@ -380,7 +410,7 @@ export function ModeratorDecision({
               {!isCorrection ? <label className={`moderation-confirmation${needsDuplicateConfirmation ? " moderation-confirmation-required" : ""}`} htmlFor={confirmationId}>
                 <input
                   checked={confirmPossibleDuplicate}
-                  disabled={isSubmitting || Boolean(albumId.trim())}
+                  disabled={isSubmitting || (!hasArtistLinks && Boolean(albumId.trim()))}
                   id={confirmationId}
                   onChange={(event) => {
                     setConfirmPossibleDuplicate(event.target.checked);

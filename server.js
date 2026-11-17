@@ -1,4 +1,8 @@
-require("dotenv").config();
+// Quiet like every other entry point: dotenv 17 otherwise prints a banner to
+// stdout, which also corrupted node:test's serialized child-process output
+// for tests that load this module (tests/sharePreview.test.js flaked with
+// "Unable to deserialize cloned data" under parallel load).
+require("dotenv").config({ quiet: true });
 
 const express = require("express");
 const app = express();
@@ -66,6 +70,8 @@ app.use("/likes", likeRoutes)
 app.use("/track-rankings", require("./routes/trackRankings"));
 app.use("/genres", require("./routes/genres"));
 app.use("/artists", require("./routes/artists"));
+app.use("/artist-discovery", require("./routes/artistDiscovery"));
+app.use("/artist-suggestions", require("./routes/artistSuggestions"));
 app.use("/notifications", notificationRoutes)
 app.use("/suggestions", suggestionRoutes)
 app.use("/moderation/album-suggestions", moderationRoutes)
@@ -75,6 +81,7 @@ app.use("/moderation/album-baselines", require("./routes/albumBaselines"));
 app.use("/moderation/review-effort", require("./routes/reviewEffort"));
 app.use("/moderation/genres", require("./routes/genreModeration"));
 app.use("/moderation/artist-biographies", require("./routes/artistBiographyModeration"));
+app.use("/moderation/artist-suggestions", require("./routes/artistSuggestionModeration"));
 app.use("/moderation/comment-reports", require("./routes/commentModeration"));
 
 async function startServer({

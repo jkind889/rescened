@@ -42,6 +42,7 @@ const BULK_REVIEW_LABELS = {
   unmatched_genre_name: "New genre name",
   stale_baseline_selection: "Baseline changed",
   no_proposed_fields: "No proposed fields",
+  artist_links: "Artist links",
 };
 const EMPTY_BULK_STATE = {
   pending: false,
@@ -484,6 +485,7 @@ export function ModerationSuggestions() {
               genreReview: data.genreReview || currentDetail.data?.genreReview || null,
               artistRegistry: data.artistRegistry || currentDetail.data?.artistRegistry || null,
               artistRegistryUnchecked: data.artistRegistry ? data.artistRegistryUnchecked || null : currentDetail.data?.artistRegistryUnchecked || null,
+              artistProposalRegistry: data.artistProposalRegistry || currentDetail.data?.artistProposalRegistry || null,
             },
           };
         });
@@ -547,6 +549,7 @@ export function ModerationSuggestions() {
         <SubmissionDetails
           artistRegistry={activeDetailState.data?.artistRegistry || null}
           artistRegistryUnchecked={activeDetailState.data?.artistRegistryUnchecked || null}
+          artistProposalRegistry={activeDetailState.data?.artistProposalRegistry || null}
           duplicateCandidates={selectedDuplicateCandidates}
           genreReview={activeDetailState.data?.genreReview || null}
           headingLevel={2}

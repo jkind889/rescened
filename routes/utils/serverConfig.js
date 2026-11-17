@@ -36,6 +36,12 @@ function isArtistPagesEnabled(env = process.env) {
   return String(env.ARTIST_PAGES_ENABLED || "").trim().toLowerCase() === "true";
 }
 
+// Artist suggestions (picker discovery now; proposals in later milestones).
+// Independent of ARTIST_PAGES_ENABLED. Default off.
+function isArtistSuggestionsEnabled(env = process.env) {
+  return String(env.ARTIST_SUGGESTIONS_ENABLED || "").trim().toLowerCase() === "true";
+}
+
 function isDataExportEnabled(env = process.env) {
   return String(env.DATA_EXPORT_ENABLED || "").trim().toLowerCase() === "true";
 }
@@ -146,6 +152,7 @@ module.exports = {
   isArtistBiographiesEnabled,
   isArtistDiscographyEnabled,
   isArtistPagesEnabled,
+  isArtistSuggestionsEnabled,
   isDataExportEnabled,
   isExternalAlbumSearchEnabled,
   isExternalSearchProviderPagingEnabled,

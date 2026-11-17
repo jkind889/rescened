@@ -97,6 +97,7 @@ export function formatCommunityAction(action) {
 export function formatCommunityValue(value) {
   const labels = {
     ep: "EP",
+    artistLinks: "Artist links",
     musicbrainz: "MusicBrainz",
     spotify: "Spotify",
   };
@@ -128,6 +129,9 @@ export async function parseCommunityApiError(response, fallback = "Request faile
 
   if (retryAfterSeconds) {
     parsed.retryAfterSeconds = retryAfterSeconds;
+  }
+  if (typeof data.existingArtist?.artistId === "string") {
+    parsed.existingArtist = { artistId: data.existingArtist.artistId, name: typeof data.existingArtist.name === "string" ? data.existingArtist.name : "" };
   }
 
   return parsed;
@@ -177,5 +181,6 @@ export function communityErrorFrom(error, fallback = "Request failed") {
       ? error.retryAfterSeconds
       : undefined,
     status: Number(error?.status) || 0,
+    ...(error?.existingArtist ? { existingArtist: error.existingArtist } : {}),
   };
 }

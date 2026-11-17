@@ -31,7 +31,9 @@ test("album form drafts and payloads preserve genres together with an unedited p
   const functions = form.slice(form.indexOf("const MAX_ARTISTS"), form.indexOf("function FormError"));
   const creditSource = fs.readFileSync(path.join(__dirname, "../frontend/src/features/community/artistCredits.js"), "utf8");
   const { creditIdentity, creditPayload } = await import(`data:text/javascript;base64,${Buffer.from(creditSource).toString("base64")}`);
-  const context = vm.createContext({ RELEASE_TYPE_OPTIONS: [], SOURCE_TYPE_OPTIONS: [], buildAlbumGenreProposal, creditIdentity, creditPayload });
+  const linkSource = fs.readFileSync(path.join(__dirname, "../frontend/src/features/artists/artistLinkPayload.js"), "utf8");
+  const { artistRequestFields, linksFromSubmission } = await import(`data:text/javascript;base64,${Buffer.from(linkSource).toString("base64")}`);
+  const context = vm.createContext({ RELEASE_TYPE_OPTIONS: [], SOURCE_TYPE_OPTIONS: [], buildAlbumGenreProposal, creditIdentity, creditPayload, artistRequestFields, linksFromSubmission });
   const { createDraft, buildPayload } = vm.runInContext(`${functions}\n({ createDraft, buildPayload })`, context);
   const initial = {
     proposedMetadata: {
