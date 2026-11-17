@@ -74,6 +74,7 @@ window.fetch = async (input, init = {}) => {
     const held = next;
     await new Promise(resolveHold => { window.__holds = { ...(window.__holds || {}), [held.hold]: resolveHold }; });
     next = held.response;
+    window.__completedHolds = [...(window.__completedHolds || []), held.hold];
   }
   return next ? json(next[0], next[1]) : json(404, { error: 'not stubbed', code: 'NOT_FOUND' });
 };
@@ -264,6 +265,53 @@ window.__mount = (entry) => root.render(<MemoryRouter initialEntries={[entry]}><
         await page.getByRole('button', { name: 'Send revision' }).waitFor();
       });
     });
+
+    await t.test('moderator queue appends pages, deduplicates rows, and retries without losing the cursor', async () => {
+      await fixture({ entry: '/moderation/artist-suggestions', routes: {
+        'GET /moderation/artist-suggestions': [
+          [200, { suggestions: [suggestion()], nextCursor: 'next/+=' }],
+          [503, { error: 'Page temporarily unavailable' }],
+          [200, { suggestions: [suggestion(), other], nextCursor: null }],
+        ],
+      } }, async page => {
+        await page.getByRole('button', { name: 'Load more', exact: true }).click();
+        await page.getByText('Page temporarily unavailable').waitFor();
+        assert.equal(await page.getByRole('link', { name: 'Brand New Band' }).count(), 1);
+        await page.getByRole('button', { name: 'Retry loading suggestions' }).click();
+        await page.getByRole('link', { name: 'Other Band' }).waitFor();
+        assert.equal(await page.getByRole('link', { name: 'Brand New Band' }).count(), 1);
+        assert.equal(await page.getByRole('button', { name: 'Load more', exact: true }).count(), 0);
+        const queries = await page.evaluate(() => window.__requests.filter(r => r.path === '/moderation/artist-suggestions').map(r => r.search));
+        assert.deepEqual(queries, ['?status=pending', '?status=pending&cursor=next%2F%2B%3D', '?status=pending&cursor=next%2F%2B%3D']);
+      });
+    });
+
+    for (const response of [[200, { suggestions: [other], nextCursor: 'stale-cursor' }], [503, { error: 'Stale page error' }]]) {
+      await t.test(`filter changes ignore delayed page ${response[0]} and reset the cursor`, async () => {
+        await fixture({ entry: '/moderation/artist-suggestions', routes: {
+          'GET /moderation/artist-suggestions': [
+            [200, { suggestions: [suggestion()], nextCursor: 'pending-next' }],
+            { hold: 'page', response },
+            [200, { suggestions: [], nextCursor: null }],
+          ],
+        } }, async page => {
+          await page.getByRole('button', { name: 'Load more', exact: true }).click();
+          await page.waitForFunction(() => Boolean(window.__holds?.page));
+          assert.equal(await page.getByRole('button', { name: 'Load more', exact: true }).isDisabled(), true);
+          await page.getByRole('combobox').selectOption('approved');
+          await page.getByText('No artist suggestions here.').waitFor();
+          await page.evaluate(() => window.__release('page'));
+          await page.waitForFunction(() => window.__completedHolds?.includes('page'));
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          assert.equal(await page.getByRole('link', { name: 'Other Band' }).count(), 0);
+          assert.equal(await page.getByRole('link', { name: 'Brand New Band' }).count(), 0);
+          assert.equal(await page.getByText('Stale page error').count(), 0);
+          assert.equal(await page.getByRole('button', { name: 'Load more', exact: true }).count(), 0);
+          const queries = await page.evaluate(() => window.__requests.filter(r => r.path === '/moderation/artist-suggestions').map(r => r.search));
+          assert.deepEqual(queries, ['?status=pending', '?status=pending&cursor=pending-next', '?status=approved']);
+        });
+      });
+    }
 
     await t.test('a delayed moderator decision never lands on another suggestion', async () => {
       const pending = suggestion({ currentRevision: 2 });
