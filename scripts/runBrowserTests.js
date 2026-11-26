@@ -5,7 +5,7 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { environment, integrationComplete } = require('./verify');
 const root = path.resolve(__dirname, '..');
-const files = ['artistCoverCycle', 'artistDiscography', 'artistBiographyModeration', 'baselineProposal', 'coreFlows', 'correctionCredits', 'artistPicker', 'artistSuggestionForm', 'artistSubmissions'].map(name => `tests/${name}.browser.test.js`);
+const files = ['artistCoverCycle', 'artistDiscography', 'artistBiographyModeration', 'baselineProposal', 'coreFlows', 'correctionCredits', 'artistPicker', 'artistSuggestionForm', 'artistSubmissions', 'suggestionSignInReturn'].map(name => `tests/${name}.browser.test.js`);
 function prerequisites(cwd, executable) {
   for (const dir of ['.', 'frontend']) {
     if (!fs.existsSync(path.join(cwd, dir, 'node_modules'))) throw new Error(`Install locked ${dir} dependencies first.`);
