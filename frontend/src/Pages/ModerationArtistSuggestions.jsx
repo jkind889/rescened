@@ -21,21 +21,12 @@ function ModerationPanel() {
   const { getToken } = useAuth();
   const { submissionId } = useParams();
   const [status, setStatus] = useState("pending");
-  const [queue, setQueue] = useState({ state: "loading", rows: [], error: null });
   const [queueRefresh, setQueueRefresh] = useState(0);
 
   const request = useCallback(async (path, options = {}) => {
     const token = await getToken();
     return requestCommunityJson(`${BASE}${path}`, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) } }, "The moderation request failed.");
   }, [getToken]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    request(`?status=${encodeURIComponent(status)}`, { signal: controller.signal })
-      .then((data) => { if (!controller.signal.aborted) setQueue({ state: "ready", rows: data.suggestions || [], error: null }); })
-      .catch((error) => { if (!controller.signal.aborted) setQueue({ state: "error", rows: [], error: communityErrorFrom(error) }); });
-    return () => controller.abort();
-  }, [request, status, queueRefresh]);
 
   const refreshQueue = useCallback(() => setQueueRefresh((value) => value + 1), []);
 
@@ -50,8 +41,64 @@ function ModerationPanel() {
           ))}
         </select>
       </label>
-      {queue.state === "error" ? <p className="community-message community-message-error" role="alert">{queue.error?.message}</p> : null}
-      {queue.state === "ready" && !queue.rows.length ? <p className="community-message">No artist suggestions here.</p> : null}
+      <SuggestionQueue key={`${status}:${queueRefresh}`} status={status} request={request} />
+      {/* Keyed by route: every visit to a suggestion (including returning to
+          one) is a new instance, so a decision sent from an earlier visit can
+          never update, fail into, or leave pending a later one. */}
+      {submissionId ? <SuggestionReview key={submissionId} submissionId={submissionId} request={request} onQueueChanged={refreshQueue} /> : null}
+    </section>
+  );
+}
+
+// A filter change or moderation refresh starts a new queue instance. Its
+// aborted requests cannot append old pages or clear the new queue's state.
+function SuggestionQueue({ status, request }) {
+  const [queue, setQueue] = useState({ rows: [], nextCursor: null, loading: true, error: null });
+  const controller = useRef(null);
+  const pending = useRef(false);
+
+  const load = useCallback(async (cursor = null) => {
+    if (pending.current) return;
+    pending.current = true;
+    const current = new AbortController();
+    controller.current = current;
+    setQueue((value) => ({ ...value, loading: true, error: null }));
+    try {
+      const query = new URLSearchParams({ status });
+      if (cursor) query.set("cursor", cursor);
+      const data = await request(`?${query}`, { signal: current.signal });
+      if (current.signal.aborted) return;
+      setQueue((value) => {
+        const rows = cursor ? [...value.rows] : [];
+        const seen = new Set(rows.map((row) => row.submissionId));
+        for (const row of data.suggestions || []) {
+          if (!seen.has(row.submissionId)) {
+            seen.add(row.submissionId);
+            rows.push(row);
+          }
+        }
+        return { rows, nextCursor: data.nextCursor || null, loading: false, error: null };
+      });
+    } catch (error) {
+      if (!current.signal.aborted) setQueue((value) => ({ ...value, loading: false, error: communityErrorFrom(error) }));
+    } finally {
+      if (controller.current === current) pending.current = false;
+    }
+  }, [request, status]);
+
+  useEffect(() => {
+    load();
+    return () => {
+      controller.current?.abort();
+      pending.current = false;
+    };
+  }, [load]);
+
+  return (
+    <>
+      {queue.error ? <p className="community-message community-message-error" role="alert">{queue.error.message}</p> : null}
+      {queue.loading ? <p role="status">Loading suggestions…</p> : null}
+      {!queue.loading && !queue.error && !queue.rows.length ? <p className="community-message">No artist suggestions here.</p> : null}
       <ul className="artist-suggestion-list">
         {queue.rows.map((row) => (
           <li key={row.submissionId}>
@@ -60,11 +107,12 @@ function ModerationPanel() {
           </li>
         ))}
       </ul>
-      {/* Keyed by route: every visit to a suggestion (including returning to
-          one) is a new instance, so a decision sent from an earlier visit can
-          never update, fail into, or leave pending a later one. */}
-      {submissionId ? <SuggestionReview key={submissionId} submissionId={submissionId} request={request} onQueueChanged={refreshQueue} /> : null}
-    </section>
+      {queue.nextCursor || queue.error ? (
+        <button type="button" className="community-button" disabled={queue.loading} onClick={() => load(queue.nextCursor)}>
+          {queue.error ? "Retry loading suggestions" : "Load more"}
+        </button>
+      ) : null}
+    </>
   );
 }
 

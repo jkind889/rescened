@@ -3,6 +3,11 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import SearchBar from './Searchbar'
 import {
+  buildSuggestionSignInRedirectProps,
+  buildSuggestionSignUpRedirectProps,
+  getSupportedSuggestionReturnPath,
+} from '../features/community/suggestionReturn'
+import {
   Show,
   SignInButton,
   SignUpButton,
@@ -27,6 +32,7 @@ function Navbar()
 {
     const { getToken, isLoaded, isSignedIn } = useAuth()
     const location = useLocation()
+    const suggestionReturnPath = getSupportedSuggestionReturnPath(location)
     const [unreadCount, setUnreadCount] = useState(0)
     // Bumped when the tab becomes visible again so the badge catches up.
     const [unreadRefreshKey, setUnreadRefreshKey] = useState(0)
@@ -198,12 +204,12 @@ function Navbar()
                                 {theme === "dark" ? "Light" : "Dark"}
                             </button>
                             <Show when="signed-out">
-                                <SignInButton mode="modal">
+                                <SignInButton mode="modal" {...buildSuggestionSignInRedirectProps(suggestionReturnPath)}>
                                     <button type="button" className="nav-auth-button nav-auth-button-secondary">
                                         Sign in
                                     </button>
                                 </SignInButton>
-                                <SignUpButton mode="modal">
+                                <SignUpButton mode="modal" {...buildSuggestionSignUpRedirectProps(suggestionReturnPath)}>
                                     <button type="button" className="nav-auth-button">
                                         Sign up
                                     </button>
