@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { buildSuggestionCreatePath } from "../features/community/suggestionReturn";
+import { Link, useLocation } from "react-router-dom";
+import { buildSuggestionCreatePath, getSupportedSearchBackPath } from "../features/community/suggestionReturn";
 
 function ExternalAlbumCover({ candidate }) {
   const [imageFailed, setImageFailed] = useState(false);
@@ -29,11 +29,15 @@ function ExternalAlbumCover({ candidate }) {
 // showSuggest: false hides "Suggest this album" where its prefill lookup is
 // unavailable (EXTERNAL_ALBUM_SEARCH_ENABLED off), leaving the source link.
 export function ExternalAlbumCard({ candidate, showSuggest = true }) {
+  const location = useLocation();
   const title = candidate.title || "Untitled release";
   const artist = candidate.artistDisplayName || "Artist unknown";
   const releaseType = candidate.releaseType || "Release";
   const releaseYear = candidate.releaseYear || "Year unknown";
   const suggestionUrl = buildSuggestionCreatePath(candidate.externalId);
+  const suggestionState = location.pathname === "/search"
+    ? { backToSearch: getSupportedSearchBackPath(location) }
+    : undefined;
 
   return (
     <article className="external-album-card">
@@ -48,7 +52,7 @@ export function ExternalAlbumCard({ candidate, showSuggest = true }) {
         <p className="external-album-year">{releaseYear}</p>
         <div className="external-album-actions">
           {showSuggest ? (
-            <Link className="external-album-suggest" to={suggestionUrl}>
+            <Link className="external-album-suggest" to={suggestionUrl} state={suggestionState}>
               Suggest this album
             </Link>
           ) : null}

@@ -11,6 +11,7 @@ const createPath = '/suggestions/new';
 const A = '83096042-3785-481e-8843-dee69f1aad12';
 const B = 'ae115ca1-d7c5-45b6-a1b6-ff6d9c031824';
 const suggestion = (mbid) => `${createPath}?mbid=${mbid}`;
+const searchWithFilters = '/search?q=album&view=list';
 const protectedPaths = [
   '/notifications', '/viewreviews', '/suggestions', '/suggestions/123/revise',
   '/moderation/album-suggestions', '/account/edit',
@@ -22,7 +23,8 @@ import React, { cloneElement, useSyncExternalStore } from 'react';
 const getToken = async () => 'fixture-token';
 const listeners = new Set();
 let auth = { isLoaded: false, isSignedIn: undefined, userId: undefined, getToken };
-let modal = null;
+const closedModals = { 'sign-in': null, 'sign-up': null };
+let modals = closedModals;
 const record = (action, props) => {
   const { pathname, search, hash } = window.location;
   window.fixture.authEvents.push({ action, props, path: pathname + search + hash });
@@ -30,7 +32,7 @@ const record = (action, props) => {
 const notify = () => listeners.forEach((listener) => listener());
 function setAuth(isSignedIn) {
   auth = { isLoaded: true, isSignedIn, userId: isSignedIn ? 'fixture-user' : null, getToken };
-  modal = null;
+  modals = closedModals;
   notify();
 }
 window.fixture = { load: setAuth, authEvents: [] };
@@ -45,13 +47,13 @@ export function Show({ when, children }) {
 }
 function open(kind, props) {
   record('open-' + kind, props);
-  modal = { kind, props };
+  modals = { ...modals, [kind]: props };
   notify();
 }
 function close(kind) {
   record('close-' + kind);
-  if (modal?.kind === kind) {
-    modal = null;
+  if (modals[kind]) {
+    modals = { ...modals, [kind]: null };
     notify();
   }
 }
@@ -72,10 +74,12 @@ export function SignUpButton({ children, mode, ...props }) {
 }
 export function UserButton() { return <button type="button">Fixture account</button>; }
 
-export function AuthModal() {
-  const current = useSyncExternalStore(subscribe, () => modal);
-  if (!current) return null;
-  const { kind, props } = current;
+export function AuthModals() {
+  const openModals = useSyncExternalStore(subscribe, () => modals);
+  return Object.entries(openModals).map(([kind, props]) => props && <AuthModal key={kind} kind={kind} props={props} />);
+}
+
+function AuthModal({ kind, props }) {
   function finish(outcome, callback = false) {
     const sameFlow = kind === outcome;
     const prefix = outcome === 'sign-in' ? 'signIn' : 'signUp';
@@ -108,7 +112,7 @@ function fixtureEntry(frontend) {
 import React, { StrictMode, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { AuthModal } from './auth.jsx';
+import { AuthModals } from './auth.jsx';
 import ExternalAlbumCard from ${fromApp('Components/ExternalAlbumCard.jsx')};
 import ProtectedRoute from ${fromApp('Components/ProtectedRoute.jsx')};
 import Navbar from ${fromApp('Components/Navbar.jsx')};
@@ -171,7 +175,7 @@ function Shell() {
         )}
       </Routes>
     </main>
-    <AuthModal />
+    <AuthModals />
   </div>;
 }
 
@@ -181,7 +185,8 @@ if (window.location.pathname === '/fixture-auth-callback') {
   window.location.replace(redirect);
 } else {
   if (sessionStorage.getItem('fixture-callback')) fixture.load(true);
-  createRoot(document.getElementById('root')).render(<StrictMode><BrowserRouter><Shell /></BrowserRouter></StrictMode>);
+  const app = <BrowserRouter><Shell /></BrowserRouter>;
+  createRoot(document.getElementById('root')).render(window.fixtureStrictMode === false ? app : <StrictMode>{app}</StrictMode>);
 }
 `;
 }
@@ -377,7 +382,7 @@ test('suggestion sign-in returns to the selected release group', {
 
   await t.test('browser Back closes the modal and the search link works at 390px', async (t) => {
     const page = await newPage(t, { width: 390, height: 844 });
-    await visit(page, '/search', false);
+    await visit(page, searchWithFilters, false);
     await searchCard(page, 'Release group A').click();
     await expectModal(page, suggestion(A));
     const eventCount = await page.evaluate(() => window.fixture.authEvents.length);
@@ -392,8 +397,51 @@ test('suggestion sign-in returns to the selected release group', {
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
     await page.getByRole('link', { name: 'Back to search' }).click();
     await page.getByRole('heading', { name: 'Fixture search' }).waitFor();
-    assert.equal(page.url(), base + '/search');
+    assert.equal(page.url(), base + searchWithFilters);
     assert.equal((await opens(page)).length, 2);
+  });
+
+  for (const strict of [true, false]) {
+    await t.test(`browser Forward replaces the previous auth modal ${strict ? 'with' : 'without'} StrictMode`, async (t) => {
+      const page = await newPage(t);
+      if (!strict) await page.addInitScript(() => { window.fixtureStrictMode = false; });
+      await visit(page, searchWithFilters, false);
+      await searchCard(page, 'Release group A').click();
+      await expectModal(page, suggestion(A));
+
+      await page.goBack();
+      await page.waitForURL(base + searchWithFilters);
+      await page.getByRole('dialog').waitFor({ state: 'hidden' });
+      await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Sign up', exact: true }).click();
+      await page.getByRole('dialog', { name: 'Fixture sign-up' }).waitFor();
+      assert.deepEqual((await opens(page)).at(-1), { action: 'open-sign-up', path: searchWithFilters, props: {} });
+
+      await page.goForward();
+      await expectModal(page, suggestion(A), 'sign-in', 3);
+      assert.equal(await page.getByRole('dialog', { name: 'Fixture sign-up' }).count(), 0);
+      assert.equal(await page.getByRole('dialog').count(), 1);
+    });
+  }
+
+  await t.test('the back link retains search state when the suggestion URL is canonicalized', async (t) => {
+    const page = await newPage(t);
+    await visit(page, searchWithFilters, false);
+    await page.evaluate(({ target, from }) => {
+      window.fixture.navigate(target, { state: { backToSearch: from } });
+    }, { target: `${suggestion(A)}&next=/unrelated#extra`, from: searchWithFilters });
+    const modal = await expectModal(page, suggestion(A));
+    await modal.getByRole('button', { name: 'Dismiss' }).click();
+    await page.getByRole('link', { name: 'Back to search' }).click();
+    await page.waitForURL(base + searchWithFilters);
+  });
+
+  await t.test('the back link from a direct suggestion visit opens Search', async (t) => {
+    const page = await newPage(t);
+    await visit(page, suggestion(A), false);
+    const modal = await expectModal(page, suggestion(A));
+    await modal.getByRole('button', { name: 'Dismiss' }).click();
+    await page.getByRole('link', { name: 'Back to search' }).click();
+    await page.waitForURL(base + '/search');
   });
 
   await t.test('switching release groups aborts obsolete prefill and ignores its late response', async (t) => {

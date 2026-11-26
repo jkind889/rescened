@@ -4,16 +4,18 @@ import { Show, SignInButton, SignUpButton, useAuth, useClerk } from '@clerk/reac
 import {
     buildSuggestionSignInRedirectProps,
     buildSuggestionSignUpRedirectProps,
+    getSupportedSearchBackPath,
     getSupportedSuggestionReturnPath,
 } from '../features/community/suggestionReturn';
 
-function SuggestionSignInGate({ returnPath, needsCanonicalUrl, suppressAutoOpenRef }) {
+function SuggestionSignInGate({ returnPath, navigationState, needsCanonicalUrl, suppressAutoOpenRef }) {
     const clerk = useClerk();
     const navigate = useNavigate();
+    const backToSearch = getSupportedSearchBackPath(navigationState?.backToSearch);
 
     useEffect(() => {
-        if (needsCanonicalUrl) navigate(returnPath, { replace: true });
-    }, [navigate, needsCanonicalUrl, returnPath]);
+        if (needsCanonicalUrl) navigate(returnPath, { replace: true, state: navigationState });
+    }, [navigate, navigationState, needsCanonicalUrl, returnPath]);
 
     useEffect(() => {
         // Clerk can read redirect parameters from the URL. Open only after
@@ -22,6 +24,9 @@ function SuggestionSignInGate({ returnPath, needsCanonicalUrl, suppressAutoOpenR
 
         // Defer the modal so StrictMode's setup/cleanup probe can cancel it.
         const timer = suppressAutoOpenRef.current ? undefined : setTimeout(() => {
+            // Forward can bring the user here while an earlier auth modal is open.
+            clerk.closeSignUp?.();
+            clerk.closeSignIn?.();
             clerk.openSignIn(buildSuggestionSignInRedirectProps(returnPath));
         }, 0);
 
@@ -38,7 +43,7 @@ function SuggestionSignInGate({ returnPath, needsCanonicalUrl, suppressAutoOpenR
         <section className="community-page community-editor-page">
             <div className="community-page-frame community-editor-frame">
                 <nav className="community-breadcrumb" aria-label="Suggestions breadcrumb">
-                    <Link className="community-back-link" to="/search">← Back to search</Link>
+                    <Link className="community-back-link" to={backToSearch}>← Back to search</Link>
                 </nav>
                 <div className="suggestion-editor-blocked">
                     <h1 className="suggestion-editor-blocked-title">Sign in to suggest an album</h1>
@@ -77,6 +82,7 @@ function SuggestionProtectedRoute({ children }) {
                 {returnPath ? (
                     <SuggestionSignInGate
                         returnPath={returnPath}
+                        navigationState={location.state}
                         needsCanonicalUrl={needsCanonicalUrl}
                         suppressAutoOpenRef={seenSignedInRef}
                     />

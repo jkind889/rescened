@@ -52,6 +52,36 @@ test('only the exact suggestion creation pathname is eligible', async () => {
   }
 });
 
+test('the search back link keeps the query only for the exact search route', async () => {
+  const { getSupportedSearchBackPath } = await helpers;
+  const search = '?q=album&view=list';
+  for (const source of [
+    '/search' + search,
+    { pathname: '/search', search },
+    { pathname: '/search', search, hash: '' },
+  ]) {
+    assert.equal(getSupportedSearchBackPath(source), '/search' + search);
+  }
+  assert.equal(getSupportedSearchBackPath('/search?q=Rock+%26+Roll%23live&extra=a?b'), '/search?q=Rock+%26+Roll%23live&extra=a?b');
+
+  for (const source of [
+    '/search', '/search?', '/search/#extra', '/search#extra', '/search' + search + '#extra',
+    '/search/' + search, '/searching' + search, '/other/../search' + search,
+    '/other/%2e%2e/search' + search, '/%73earch' + search,
+    '//evil.com/search' + search, 'https://evil.com/search' + search, 'search' + search,
+    '/suggestions/new' + search, '/notifications' + search,
+    null, undefined, 123, ['/search' + search], {},
+    { pathname: '/search', search: ['?q=album'] },
+    { pathname: '/search', search: 'q=album' },
+    { pathname: '/search', search, hash: '#extra' },
+    { pathname: '/search', search: search + '#extra' },
+    { pathname: '/search/', search },
+    { pathname: 'https://evil.com/search', search },
+  ]) {
+    assert.equal(getSupportedSearchBackPath(source), '/search', JSON.stringify(source));
+  }
+});
+
 test('Clerk redirect props use the canonical destination for both auth outcomes', async () => {
   const { buildSuggestionSignInRedirectProps, buildSuggestionSignUpRedirectProps } = await helpers;
   for (const target of [createPath, albumPath]) {
@@ -68,6 +98,7 @@ test('Clerk redirect props use the canonical destination for both auth outcomes'
     null, undefined, {}, ...otherPaths, `${createPath}?`, `${createPath}#x`,
     `${createPath}?mbid=${mbid.toUpperCase()}`, `${createPath}?mbid=invalid`,
     `${albumPath}&mbid=${mbid}`, `${albumPath}&next=//evil.com`, `${albumPath}?mbid=${mbid}`,
+    `${albumPath}&backToSearch=%2Fsearch%3Fq%3Dalbum`, '/search?q=album&view=list',
   ]) {
     assert.deepEqual(buildSuggestionSignInRedirectProps(target), {}, String(target));
     assert.deepEqual(buildSuggestionSignUpRedirectProps(target), {}, String(target));
@@ -80,5 +111,5 @@ test('only the new-suggestion route opts in and external cards use ordinary link
   assert.equal(app.match(/\bpreserveSuggestionReturn\b/g)?.length, 1);
   assert.match(app, /<Route path="\/suggestions\/new" element=\{\s*<ProtectedRoute preserveSuggestionReturn>/);
   assert.doesNotMatch(card, /@clerk\/react/);
-  assert.match(card, /<Link className="external-album-suggest" to=\{suggestionUrl\}>\s*Suggest this album/);
+  assert.match(card, /<Link className="external-album-suggest" to=\{suggestionUrl\} state=\{suggestionState\}>\s*Suggest this album/);
 });
