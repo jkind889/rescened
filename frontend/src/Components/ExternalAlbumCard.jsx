@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { buildSuggestionCreatePath } from "../features/community/suggestionReturn";
 
 function ExternalAlbumCover({ candidate }) {
   const [imageFailed, setImageFailed] = useState(false);
@@ -32,9 +33,7 @@ export function ExternalAlbumCard({ candidate, showSuggest = true }) {
   const artist = candidate.artistDisplayName || "Artist unknown";
   const releaseType = candidate.releaseType || "Release";
   const releaseYear = candidate.releaseYear || "Year unknown";
-  const suggestionUrl = candidate.externalId
-    ? `/suggestions/new?mbid=${encodeURIComponent(candidate.externalId)}`
-    : "/suggestions/new";
+  const suggestionUrl = buildSuggestionCreatePath(candidate.externalId);
 
   return (
     <article className="external-album-card">

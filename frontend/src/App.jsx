@@ -74,7 +74,7 @@ export function App() {
                 <Suggestions />
               </ProtectedRoute>} />
             <Route path="/suggestions/new" element={
-              <ProtectedRoute>
+              <ProtectedRoute preserveSuggestionReturn>
                 <SuggestionEditor />
               </ProtectedRoute>} />
             <Route path="/suggestions/corrections/:albumId" element={
