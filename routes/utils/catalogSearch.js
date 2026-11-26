@@ -7,16 +7,39 @@ const SEARCH_FIELDS = [
   "label",
 ];
 const APOSTROPHE_PATTERN = "['’]";
-// Canonical Latin accent variants only: no transliteration or punctuation removal.
-const LATIN_VARIANTS = new Map();
-for (let code = 0x00c0; code <= 0x024f; code += 1) {
-  const character = String.fromCodePoint(code).toLowerCase();
-  const base = character.normalize("NFD").replace(/\p{M}/gu, "");
-  if (/^[a-z]$/.test(base) && character !== base) {
-    if (!LATIN_VARIANTS.has(base)) LATIN_VARIANTS.set(base, new Set([base]));
-    LATIN_VARIANTS.get(base).add(character);
+function latinBase(character) {
+  return character.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+}
+
+function compressCharacterClass(codes) {
+  const sorted = [...codes].sort((a, b) => a - b);
+  let characters = "";
+  for (let start = 0; start < sorted.length;) {
+    let end = start;
+    while (sorted[end + 1] === sorted[end] + 1) end += 1;
+    if (end - start >= 2) {
+      characters += `${String.fromCodePoint(sorted[start])}-${String.fromCodePoint(sorted[end])}`;
+    } else {
+      characters += String.fromCodePoint(...sorted.slice(start, end + 1));
+    }
+    start = end + 1;
+  }
+  return characters;
+}
+
+// Keep canonical Latin variants compact so long queries fit MongoDB's regex budget.
+const latinVariants = new Map();
+for (const [first, last] of [[0x00c0, 0x024f], [0x1e00, 0x1eff]]) {
+  for (let code = first; code <= last; code += 1) {
+    const base = latinBase(String.fromCodePoint(code));
+    if (!/^[a-z]$/.test(base)) continue;
+    if (!latinVariants.has(base)) latinVariants.set(base, new Set([base.codePointAt(0)]));
+    latinVariants.get(base).add(code);
   }
 }
+const LATIN_PATTERNS = new Map([...latinVariants].map(([base, codes]) => [
+  base, `[${compressCharacterClass(codes)}][\u0300-\u036f]*`,
+]));
 
 function normalizeQuery(value) {
   return String(value ?? "").normalize("NFC").replace(/\s+/gu, " ").trim();
@@ -37,11 +60,7 @@ function buildSearchPattern(value) {
 function buildRankedSearchPattern(value) {
   return [...normalizeQuery(value)].map((character) => {
     if (character === "'" || character === "’") return APOSTROPHE_PATTERN;
-    const base = character.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
-    const variants = LATIN_VARIANTS.get(base);
-    // Also accept decomposed Latin accents in existing catalog records.
-    if (variants) return `[${[...variants].join("")}][\u0300-\u036f]*`;
-    return escapeRegex(character);
+    return LATIN_PATTERNS.get(latinBase(character)) ?? escapeRegex(character);
   }).join("");
 }
 

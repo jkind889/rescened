@@ -48,6 +48,10 @@ function reusableCandidate(data) {
   return data?.selection || data?.activeBaseline?.candidate || null;
 }
 
+function recommendationGroup(item) {
+  return item?.releaseGroupMbid || item?.candidate?.releaseGroupMbid || "";
+}
+
 function CandidateTracks({ candidate }) {
   if (!Array.isArray(candidate?.tracks) || candidate.tracks.length === 0) {
     return <p className="baseline-muted">No complete tracklist is available for this release.</p>;
@@ -149,7 +153,9 @@ function CandidateSummary({ candidate, rationale, incomplete, coverage, ambiguou
 // onStateChange fires only after recorded decisions. Provider lookups change no review state, and
 // parents that refresh on it may remount this panel and discard the unsaved recommendation.
 export default function BaselineReviewPanel({ kind, id, target = null, compact = false, onStateChange, onBusyChange }) {
-  const { getToken, isLoaded, isSignedIn } = useAuth();
+  const { getToken, isLoaded, isSignedIn, sessionId = "", userId = "" } = useAuth();
+  const authSession = isLoaded && isSignedIn ? `${userId || ""}:${sessionId || ""}` : "";
+  const [displayedSession, setDisplayedSession] = useState(authSession);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState(null);
@@ -160,24 +166,31 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
   const [groupQuery, setGroupQuery] = useState("");
   const [groupResults, setGroupResults] = useState([]);
   const [groupLoading, setGroupLoading] = useState(false);
-  const [selectedGroup, setSelectedGroup] = useState(target?.releaseGroupMbid || "");
+  const [chosenGroup, setSelectedGroup] = useState("");
   const [releaseInput, setReleaseInput] = useState("");
   const [reason, setReason] = useState("");
   const [command, setCommand] = useState({ pending: false, error: null, success: "" });
-  const [candidateOffset, setCandidateOffset] = useState("");
+  const lifecycleSequence = useRef(0);
   const requestSequence = useRef(0);
+  const detailController = useRef(null);
   const providerController = useRef(null);
+  const providerGroupRef = useRef("");
+  const commandController = useRef(null);
+  const targetReleaseGroupRef = useRef(target?.releaseGroupMbid || "");
   // Embedded in mapping review, the mapping page times the whole review instead.
   const effort = useReviewTimer({ kind: "baseline", targetKind: kind, targetId: compact ? "" : id });
 
   const targetKey = `${kind}:${id || ""}`;
+  useEffect(() => { targetReleaseGroupRef.current = target?.releaseGroupMbid || ""; }, [target?.releaseGroupMbid]);
   useEffect(() => {
     onBusyChange?.(candidateLoading || command.pending);
     // An unmounted panel must not leave its parent blocked on a lookup it can no longer finish.
     return () => onBusyChange?.(false);
   }, [candidateLoading, command.pending, onBusyChange]);
   const runRequest = useCallback(async (url, options, fallback) => {
+    if (options?.signal?.aborted) throw Object.assign(new Error("Request cancelled."), { name: "AbortError" });
     const token = await getToken();
+    if (options?.signal?.aborted) throw Object.assign(new Error("Request cancelled."), { name: "AbortError" });
     if (!token) throw Object.assign(new Error("Your session could not be verified."), { status: 401, code: "UNAUTHORIZED" });
     return requestCommunityJson(url, {
       ...options,
@@ -185,48 +198,62 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
     }, fallback);
   }, [getToken]);
 
-  const loadDetail = useCallback(async (signal) => {
-    if (!id || !isLoaded || !isSignedIn) return;
-    const sequence = requestSequence.current + 1;
-    requestSequence.current = sequence;
+  const loadDetail = useCallback(async () => {
+    detailController.current?.abort();
+    if (!id || !authSession) return;
+    const controller = new AbortController();
+    detailController.current = controller;
+    const life = lifecycleSequence.current;
+    const sequence = ++requestSequence.current;
+    const isCurrent = () => !controller.signal.aborted && life === lifecycleSequence.current && sequence === requestSequence.current;
     setDetailLoading(true);
     setDetailError(null);
     try {
-      const data = await runRequest(`${API_BASE_URL}${BASE_PATH}/${kind}/${encodeURIComponent(id)}`, { signal }, "This baseline review could not be loaded.");
-      if (signal.aborted || sequence !== requestSequence.current) return;
+      const data = await runRequest(`${API_BASE_URL}${BASE_PATH}/${kind}/${encodeURIComponent(id)}`, { signal: controller.signal }, "This baseline review could not be loaded.");
+      if (!isCurrent()) return;
       setDetail(data);
-      setSelectedGroup(data?.target?.releaseGroupMbid || target?.releaseGroupMbid || "");
+      setSelectedGroup((current) => ((data?.target?.releaseGroupMbid || targetReleaseGroupRef.current) ? "" : current));
       setSelectedCandidate(reusableCandidate(data));
     } catch (error) {
-      if (signal.aborted || error?.name === "AbortError") return;
+      if (!isCurrent() || error?.name === "AbortError") return;
       setDetailError(displayError(error, "This baseline review could not be loaded."));
     } finally {
-      if (!signal.aborted && sequence === requestSequence.current) setDetailLoading(false);
+      if (isCurrent()) setDetailLoading(false);
+      if (detailController.current === controller) detailController.current = null;
     }
-  }, [id, isLoaded, isSignedIn, kind, runRequest, target?.releaseGroupMbid]);
+  }, [authSession, id, kind, runRequest]);
 
   useEffect(() => {
-    const controller = new AbortController();
+    lifecycleSequence.current += 1;
+    setDisplayedSession(authSession);
     setDetail(null);
+    setSelectedGroup("");
+    setDetailLoading(false);
+    setDetailError(null);
     setRecommendation(null);
+    setSelectedCandidate(null);
     setCandidateError(null);
-    setCandidateOffset("");
     // Aborted provider requests skip their own loading reset, so clear it here.
     setCandidateLoading(false);
     setGroupLoading(false);
-    loadDetail(controller.signal);
+    setCommand({ pending: false, error: null, success: "" });
+    loadDetail();
     return () => {
-      controller.abort();
+      lifecycleSequence.current += 1;
+      detailController.current?.abort();
       providerController.current?.abort();
+      providerGroupRef.current = "";
+      commandController.current?.abort();
     };
-  }, [loadDetail, targetKey]);
+  }, [authSession, loadDetail, targetKey]);
 
-  // Parents reuse one panel across targets; a reason written for one must not submit for another.
+  // Drafts belong to one target and Clerk session.
   useEffect(() => {
     setReason("");
     setReleaseInput("");
     setGroupResults([]);
-  }, [targetKey]);
+    setGroupQuery("");
+  }, [authSession, targetKey]);
 
   const flags = detail?.flags || {};
   const hasBaseline = Boolean(detail?.activeBaseline);
@@ -234,10 +261,14 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
   const isReviewed = detail?.status === "reviewed";
   const canRevoke = Boolean(isReviewed || hasBaseline || detail?.status === "stale");
   const knownGroup = detail?.target?.releaseGroupMbid || target?.releaseGroupMbid || "";
+  const selectedGroup = knownGroup || chosenGroup;
+  const activeCandidate = selectedCandidate && (!knownGroup || selectedCandidate.releaseGroupMbid === knownGroup) ? selectedCandidate : null;
+  const activeRecommendation = recommendation && (!knownGroup || !recommendationGroup(recommendation) || recommendationGroup(recommendation) === knownGroup) ? recommendation : null;
+  const candidateOffset = activeRecommendation?.nextOffset ?? "";
   const canDiscover = flags.discovery !== false;
   const canModerate = flags.moderation !== false;
-  const hasReviewEvidence = Boolean(selectedCandidate?.sourceUrl && Array.isArray(selectedCandidate?.tracks) && selectedCandidate.tracks.length);
-  const isRecommended = Boolean(selectedCandidate?.releaseMbid && selectedCandidate.releaseMbid === recommendation?.candidate?.releaseMbid);
+  const hasReviewEvidence = Boolean(activeCandidate?.sourceUrl && Array.isArray(activeCandidate?.tracks) && activeCandidate.tracks.length);
+  const isRecommended = Boolean(activeCandidate?.releaseMbid && activeCandidate.releaseMbid === activeRecommendation?.candidate?.releaseMbid);
   // A release group alone is not confirmable; the command needs a previewed release snapshot.
   const confirmHint = !canModerate
     ? "Baseline moderation is disabled on this server."
@@ -246,101 +277,141 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
       : !hasReviewEvidence && !candidateLoading
         ? canDiscover ? "Select “Suggest a release” or preview a release before confirming." : "A previewed release is required, but MusicBrainz discovery is disabled."
         : "";
-  const candidates = useMemo(() => Array.isArray(recommendation?.items) ? recommendation.items : [], [recommendation]);
 
-  async function searchGroups(event) {
-    event?.preventDefault();
-    if (groupQuery.trim().length < 2) return;
-    setGroupLoading(true);
+  // Authoritative bound release-group metadata supersedes any earlier manual choice without resetting pending commands.
+  useEffect(() => {
+    if (!knownGroup) return;
+    setSelectedGroup((current) => (current && current !== knownGroup ? "" : current));
+    setGroupResults([]);
+    setSelectedCandidate((current) => (current && current.releaseGroupMbid !== knownGroup ? null : current));
+    setRecommendation((current) => {
+      const group = recommendationGroup(current);
+      return group && group !== knownGroup ? null : current;
+    });
     setCandidateError(null);
+    if (providerController.current && providerGroupRef.current !== knownGroup) {
+      providerController.current.abort();
+      providerController.current = null;
+      providerGroupRef.current = "";
+      setCandidateLoading(false);
+      setGroupLoading(false);
+    }
+  }, [knownGroup]);
+
+  const candidates = useMemo(() => Array.isArray(activeRecommendation?.items) ? activeRecommendation.items : [], [activeRecommendation]);
+
+  function beginProviderRequest(group = "") {
+    const life = lifecycleSequence.current;
     providerController.current?.abort();
     const controller = new AbortController();
     providerController.current = controller;
+    providerGroupRef.current = group;
+    return { controller, isCurrent: () => !controller.signal.aborted && life === lifecycleSequence.current };
+  }
+
+  async function searchGroups(event) {
+    event?.preventDefault();
+    if (!authSession || groupQuery.trim().length < 2) return;
+    setGroupLoading(true);
+    setCandidateError(null);
+    const { controller, isCurrent } = beginProviderRequest("");
     try {
       const data = await runRequest(`${API_BASE_URL}${BASE_PATH}/groups?q=${encodeURIComponent(groupQuery.trim())}`, { signal: controller.signal }, "MusicBrainz release-group search failed.");
-      if (controller.signal.aborted) return;
+      if (!isCurrent()) return;
       setGroupResults(Array.isArray(data?.items) ? data.items : []);
     } catch (error) {
-      if (!controller.signal.aborted) setCandidateError(displayError(error, "MusicBrainz release-group search failed."));
+      if (isCurrent()) setCandidateError(displayError(error, "MusicBrainz release-group search failed."));
     } finally {
-      if (providerController.current === controller) providerController.current = null;
-      if (!controller.signal.aborted) setGroupLoading(false);
+      if (providerController.current === controller) { providerController.current = null; providerGroupRef.current = ""; }
+      if (isCurrent()) setGroupLoading(false);
     }
   }
 
   async function loadCandidates(offset = 0, group = selectedGroup) {
-    if (!group || !canDiscover) return;
+    if (!authSession || !group || !canDiscover) return;
     setCandidateLoading(true);
     setCandidateError(null);
-    providerController.current?.abort();
-    const controller = new AbortController();
-    providerController.current = controller;
+    const { controller, isCurrent } = beginProviderRequest(group);
     try {
       const data = await runRequest(`${API_BASE_URL}${BASE_PATH}/${kind}/${encodeURIComponent(id)}/candidates`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ releaseGroupMbid: group, ...(offset ? { offset, recommendationRunId: recommendation?.recommendationRunId || "" } : {}) }),
+        body: JSON.stringify({ releaseGroupMbid: group, ...(offset ? { offset, recommendationRunId: activeRecommendation?.recommendationRunId || "" } : {}) }),
         signal: controller.signal,
       }, "MusicBrainz release recommendations are unavailable.");
-      if (controller.signal.aborted) return;
-      setRecommendation((current) => offset ? mergeBrowsePage(current, data) : { ...data, recommendationPageIds: [] });
+      if (!isCurrent()) return;
+      setRecommendation((current) => (
+        offset
+          ? { ...mergeBrowsePage(current, data), releaseGroupMbid: group, nextOffset: data?.nextOffset ?? "" }
+          : { ...data, releaseGroupMbid: group, nextOffset: data?.nextOffset ?? "", recommendationPageIds: [] }
+      ));
       if (data?.candidate) setSelectedCandidate(data.candidate);
-      setCandidateOffset(data?.nextOffset ?? "");
     } catch (error) {
-      if (!controller.signal.aborted) setCandidateError(displayError(error, "MusicBrainz release recommendations are unavailable."));
+      if (isCurrent()) setCandidateError(displayError(error, "MusicBrainz release recommendations are unavailable."));
     } finally {
-      if (providerController.current === controller) providerController.current = null;
-      if (!controller.signal.aborted) setCandidateLoading(false);
+      if (providerController.current === controller) { providerController.current = null; providerGroupRef.current = ""; }
+      if (isCurrent()) setCandidateLoading(false);
     }
   }
 
   async function previewRelease(event, valueOverride = "") {
     event.preventDefault();
     const input = valueOverride || releaseInput;
-    if (!input.trim() || !selectedGroup) return;
+    const group = selectedGroup;
+    if (!authSession || !input.trim() || !group) return;
     setCandidateLoading(true);
     setCandidateError(null);
-    providerController.current?.abort();
-    const controller = new AbortController();
-    providerController.current = controller;
+    const { controller, isCurrent } = beginProviderRequest(group);
     try {
       const data = await runRequest(`${API_BASE_URL}${BASE_PATH}/${kind}/${encodeURIComponent(id)}/preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ releaseMbid: input.trim(), releaseGroupMbid: selectedGroup }),
+        body: JSON.stringify({ releaseMbid: input.trim(), releaseGroupMbid: group }),
         signal: controller.signal,
       }, "The selected MusicBrainz release could not be previewed.");
-      if (controller.signal.aborted) return;
+      if (!isCurrent()) return;
       setSelectedCandidate(data?.candidate || null);
     } catch (error) {
-      if (!controller.signal.aborted) setCandidateError(displayError(error, "The selected MusicBrainz release could not be previewed."));
+      if (isCurrent()) setCandidateError(displayError(error, "The selected MusicBrainz release could not be previewed."));
     } finally {
-      if (providerController.current === controller) providerController.current = null;
-      if (!controller.signal.aborted) setCandidateLoading(false);
+      if (providerController.current === controller) { providerController.current = null; providerGroupRef.current = ""; }
+      if (isCurrent()) setCandidateLoading(false);
     }
   }
 
   async function previewProposal() {
-    setCandidateLoading(true); setCandidateError(null);
-    providerController.current?.abort();
-    const controller = new AbortController(); providerController.current = controller;
+    if (!authSession) return;
+    setCandidateLoading(true);
+    setCandidateError(null);
+    const { controller, isCurrent } = beginProviderRequest(knownGroup || detail?.proposal?.releaseGroupMbid || "");
     try {
       const data = await runRequest(`${API_BASE_URL}${BASE_PATH}/${kind}/${encodeURIComponent(id)}/proposal`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ expectedTargetRevision: detail.target.submissionRevision }), signal: controller.signal,
       }, "The contributor edition could not be loaded.");
-      if (!controller.signal.aborted) { setSelectedCandidate(data.candidate); setSelectedGroup(data.candidate.releaseGroupMbid); }
-    } catch (error) { if (!controller.signal.aborted) setCandidateError(displayError(error, "The contributor edition could not be loaded.")); }
-    finally { if (providerController.current === controller) providerController.current = null; if (!controller.signal.aborted) setCandidateLoading(false); }
+      if (!isCurrent()) return;
+      setSelectedCandidate(data.candidate);
+      setSelectedGroup(data.candidate.releaseGroupMbid);
+    } catch (error) {
+      if (isCurrent()) setCandidateError(displayError(error, "The contributor edition could not be loaded."));
+    } finally {
+      if (providerController.current === controller) { providerController.current = null; providerGroupRef.current = ""; }
+      if (isCurrent()) setCandidateLoading(false);
+    }
   }
 
   async function applyAction(action) {
-    if (!canModerate || command.pending) return;
+    if (!authSession || !canModerate || command.pending) return;
     const trimmedReason = reason.trim();
     if (["confirm", "replace"].includes(action) && !hasReviewEvidence) {
       setCommand({ pending: false, error: { message: "Select and preview a complete MusicBrainz release first.", code: "CANDIDATE_REQUIRED" }, success: "" });
       return;
     }
+    const life = lifecycleSequence.current;
+    commandController.current?.abort();
+    const controller = new AbortController();
+    commandController.current = controller;
+    const isCurrent = () => !controller.signal.aborted && life === lifecycleSequence.current;
     setCommand({ pending: true, error: null, success: "" });
     try {
       const body = {
@@ -350,39 +421,47 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
         requestId: requestId(),
       };
       if (["confirm", "replace"].includes(action)) {
-        body.candidateHash = selectedCandidate.tracklistHash;
-        body.releaseMbid = selectedCandidate.releaseMbid;
-        body.releaseGroupMbid = selectedCandidate.releaseGroupMbid;
+        body.candidateHash = activeCandidate.tracklistHash;
+        body.releaseMbid = activeCandidate.releaseMbid;
+        body.releaseGroupMbid = activeCandidate.releaseGroupMbid;
       }
-      if (recommendation?.recommendationRunId) {
-        body.recommendationRunId = recommendation.recommendationRunId;
-        body.recommendationPageIds = recommendation.recommendationPageIds || [];
+      if (activeRecommendation?.recommendationRunId) {
+        body.recommendationRunId = activeRecommendation.recommendationRunId;
+        body.recommendationPageIds = activeRecommendation.recommendationPageIds || [];
       }
       const data = await runRequest(`${API_BASE_URL}${BASE_PATH}/${kind}/${encodeURIComponent(id)}/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        signal: controller.signal,
       }, "The baseline decision could not be recorded.");
+      if (!isCurrent()) return;
       setDetail(data);
-      setSelectedCandidate(data?.status === "stale" ? null : reusableCandidate(data) || selectedCandidate);
+      const nextGroup = data?.target?.releaseGroupMbid || targetReleaseGroupRef.current || "";
+      setSelectedCandidate((current) => {
+        if (data?.status === "stale") return null;
+        const next = reusableCandidate(data) || current;
+        if (!next) return null;
+        return nextGroup && next.releaseGroupMbid !== nextGroup ? null : next;
+      });
       effort.finish(id, body.expectedTargetRevision);
       setCommand({ pending: false, error: null, success: `Baseline ${action} recorded.` });
       setReason("");
       onStateChange?.(data);
     } catch (error) {
+      if (!isCurrent()) return;
       const parsed = displayError(error, "The baseline decision could not be recorded.");
       setCommand({ pending: false, error: parsed, success: "" });
-      if (parsed.status === 409) {
-        const controller = new AbortController();
-        loadDetail(controller.signal);
-      }
+      if (parsed.status === 409) loadDetail();
+    } finally {
+      if (commandController.current === controller) commandController.current = null;
     }
   }
 
   if (!id) return null;
-  if (!isLoaded || detailLoading) return <section className={`baseline-review-panel community-panel${compact ? " baseline-review-panel-compact" : ""}`}><div className="community-loading" role="status">Loading baseline review…</div></section>;
+  if (!isLoaded || displayedSession !== authSession || detailLoading) return <section className={`baseline-review-panel community-panel${compact ? " baseline-review-panel-compact" : ""}`}><div className="community-loading" role="status">Loading baseline review…</div></section>;
   if (!isSignedIn) return <section className="baseline-review-panel community-panel"><p className="baseline-muted">Sign in to review a MusicBrainz baseline.</p></section>;
-  if (detailError) return <section className="baseline-review-panel community-panel" role="alert"><div className="community-message community-message-error"><strong>{detailError.message}</strong>{detailError.code ? <code>{detailError.code}</code> : null}<button className="community-text-button" onClick={() => loadDetail(new AbortController().signal)} type="button">Try again</button></div></section>;
+  if (detailError) return <section className="baseline-review-panel community-panel" role="alert"><div className="community-message community-message-error"><strong>{detailError.message}</strong>{detailError.code ? <code>{detailError.code}</code> : null}<button className="community-text-button" onClick={loadDetail} type="button">Try again</button></div></section>;
 
   return (
     <section className={`baseline-review-panel community-panel${compact ? " baseline-review-panel-compact" : ""}`} aria-labelledby="baseline-review-title">
@@ -411,11 +490,11 @@ export default function BaselineReviewPanel({ kind, id, target = null, compact =
         <div className="baseline-group-selected"><span>Release group</span><code>{selectedGroup}</code><button className="community-text-button" disabled={Boolean(knownGroup)} onClick={() => { setSelectedGroup(""); setSelectedCandidate(null); setRecommendation(null); }} title={knownGroup ? "The release group is bound to this catalog identity." : "Choose another release group"} type="button">Change</button></div>
       )}
 
-      {selectedGroup && canDiscover ? <section className="baseline-discovery"><div className="baseline-section-heading"><div><h3>Recommended standard release</h3><p className="baseline-muted">The recommendation uses official status, exact title, edition markers, date, and MBID. Track count never decides identity.</p></div><button className="community-secondary-button" disabled={candidateLoading} onClick={() => loadCandidates(0)} type="button">{candidateLoading ? "Loading…" : "Suggest a release"}</button></div>{candidateError ? <div className="community-message community-message-error" role="alert"><strong>{candidateError.message}</strong>{candidateError.code ? <code>{candidateError.code}</code> : null}</div> : null}<ReleaseComparisons comparisons={recommendation?.comparisons} onPreview={(releaseMbid) => { setReleaseInput(releaseMbid); previewRelease({ preventDefault() {} }, releaseMbid); }} />{candidates.length ? <div className="baseline-alternative-list"><h4>Alternative releases</h4>{candidates.map((item) => <button className={`baseline-choice${selectedCandidate?.releaseMbid === item.releaseMbid ? " baseline-choice-selected" : ""}`} key={item.releaseMbid} onClick={() => { setReleaseInput(item.releaseMbid); previewRelease({ preventDefault() {} }, item.releaseMbid); }} type="button"><strong>{candidateLabel(item)}</strong><small>{item.date || "Date unavailable"} · {item.status || "Status unavailable"}{item.disambiguation ? ` · ${item.disambiguation}` : ""}</small></button>)}{candidateOffset ? <button className="community-secondary-button" disabled={candidateLoading} onClick={() => loadCandidates(Number(candidateOffset))} type="button">Load more releases</button> : null}</div> : null}<form className="baseline-direct-preview" onSubmit={previewRelease}><label htmlFor="baseline-release-input">Preview an alternative release ID or MusicBrainz URL</label><div className="baseline-inline-form"><input id="baseline-release-input" onChange={(event) => setReleaseInput(event.target.value)} placeholder="Release UUID or https://musicbrainz.org/release/…" value={releaseInput} /><button className="community-secondary-button" disabled={candidateLoading || !releaseInput.trim()} type="submit">{candidateLoading ? "Loading…" : "Preview alternative"}</button></div></form></section> : null}
+      {selectedGroup && canDiscover ? <section className="baseline-discovery"><div className="baseline-section-heading"><div><h3>Recommended standard release</h3><p className="baseline-muted">The recommendation uses official status, exact title, edition markers, date, and MBID. Track count never decides identity.</p></div><button className="community-secondary-button" disabled={candidateLoading} onClick={() => loadCandidates(0)} type="button">{candidateLoading ? "Loading…" : "Suggest a release"}</button></div>{candidateError ? <div className="community-message community-message-error" role="alert"><strong>{candidateError.message}</strong>{candidateError.code ? <code>{candidateError.code}</code> : null}</div> : null}<ReleaseComparisons comparisons={activeRecommendation?.comparisons} onPreview={(releaseMbid) => { setReleaseInput(releaseMbid); previewRelease({ preventDefault() {} }, releaseMbid); }} />{candidates.length ? <div className="baseline-alternative-list"><h4>Alternative releases</h4>{candidates.map((item) => <button className={`baseline-choice${activeCandidate?.releaseMbid === item.releaseMbid ? " baseline-choice-selected" : ""}`} key={item.releaseMbid} onClick={() => { setReleaseInput(item.releaseMbid); previewRelease({ preventDefault() {} }, item.releaseMbid); }} type="button"><strong>{candidateLabel(item)}</strong><small>{item.date || "Date unavailable"} · {item.status || "Status unavailable"}{item.disambiguation ? ` · ${item.disambiguation}` : ""}</small></button>)}{candidateOffset ? <button className="community-secondary-button" disabled={candidateLoading} onClick={() => loadCandidates(Number(candidateOffset))} type="button">Load more releases</button> : null}</div> : null}<form className="baseline-direct-preview" onSubmit={previewRelease}><label htmlFor="baseline-release-input">Preview an alternative release ID or MusicBrainz URL</label><div className="baseline-inline-form"><input id="baseline-release-input" onChange={(event) => setReleaseInput(event.target.value)} placeholder="Release UUID or https://musicbrainz.org/release/…" value={releaseInput} /><button className="community-secondary-button" disabled={candidateLoading || !releaseInput.trim()} type="submit">{candidateLoading ? "Loading…" : "Preview alternative"}</button></div></form></section> : null}
       {candidateError && (!selectedGroup || !canDiscover) ? <div className="community-message community-message-error" role="alert"><strong>{candidateError.message}</strong>{candidateError.code ? <code>{candidateError.code}</code> : null}</div> : null}
       {!canDiscover ? <p className="baseline-muted">MusicBrainz discovery is disabled. Existing catalog or submission moderation remains available.</p> : null}
 
-      <CandidateSummary ambiguous={isRecommended && recommendation?.ambiguous} candidate={selectedCandidate} coverage={recommendation?.coverage} incomplete={recommendation?.incomplete} manual={Boolean(selectedCandidate && recommendation && !isRecommended)} rationale={isRecommended ? recommendation?.rationale : ""} />
+      <CandidateSummary ambiguous={isRecommended && activeRecommendation?.ambiguous} candidate={activeCandidate} coverage={activeRecommendation?.coverage} incomplete={activeRecommendation?.incomplete} manual={Boolean(activeCandidate && activeRecommendation && !isRecommended)} rationale={isRecommended ? activeRecommendation?.rationale : ""} />
 
       <section className="baseline-decision"><h3>Record baseline decision</h3><p className="baseline-muted">A reviewed baseline enables later listening comparison. It does not create diary entries. Catalog track correction remains a separate workflow.</p><label htmlFor="baseline-decision-reason">Reason <span>optional</span><textarea id="baseline-decision-reason" maxLength={1000} onChange={(event) => setReason(event.target.value)} placeholder="Optional. Leave blank to record a standard note." rows="3" value={reason} /></label>{command.error ? <div className="community-message community-message-error" role="alert"><strong>{command.error.message}</strong>{command.error.code ? <code>{command.error.code}</code> : null}</div> : null}{command.success ? <div className="community-message community-message-success" role="status">{command.success}</div> : null}<div className="baseline-actions"><button className="community-primary-button" disabled={!canModerate || command.pending || candidateLoading || !hasReviewEvidence} onClick={() => applyAction(isReviewed ? "replace" : "confirm")} type="button">{command.pending ? "Saving…" : isReviewed ? "Replace baseline" : "Confirm baseline"}</button>{isReviewed ? null : <button className="community-secondary-button" disabled={!canModerate || command.pending || candidateLoading} onClick={() => applyAction("defer")} type="button">Defer</button>}{canRevoke ? <button className="community-text-button" disabled={!canModerate || command.pending || candidateLoading} onClick={() => applyAction("revoke")} type="button">Revoke baseline</button> : null}</div>{confirmHint ? <p className="baseline-muted">{confirmHint}</p> : null}</section>
     </section>

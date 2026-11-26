@@ -13,6 +13,16 @@ import BaselineReviewPanel from "../Components/Community/BaselineReviewPanel.jsx
 import { useReviewTimer } from "../Components/Community/ReviewTimer.jsx";
 import { mappingActions } from "../features/lastfm/mappingActions.js";
 import { candidateCoverageWarning } from "../features/lastfm/mappingCoverage.js";
+import {
+  appendUniqueMappingCases,
+  buildMappingQueueParams,
+  createMappingQueueRequestGate,
+  isMappingQueueSearchTooLong,
+  mappingQueueStatusLabel,
+  MAPPING_QUEUE_SEARCH_DEBOUNCE_MS,
+  MAX_MAPPING_QUEUE_SEARCH_LENGTH,
+  normalizeMappingQueueSearch,
+} from "../features/lastfm/mappingQueueSearch.js";
 
 const STATUS_OPTIONS = [
   { value: "pending", label: "Pending" },
@@ -86,12 +96,15 @@ function Evidence({ evidence }) {
 }
 
 export default function AlbumMappings() {
-  const { getToken, isLoaded, isSignedIn } = useAuth();
+  const { getToken, isLoaded, isSignedIn, sessionId = "", userId = "" } = useAuth();
+  const authSession = isLoaded && isSignedIn ? `${userId || ""}:${sessionId || ""}` : "";
   const { caseId = "" } = useParams();
   const navigate = useNavigate();
+  const [displayedSession, setDisplayedSession] = useState(authSession);
   const [status, setStatus] = useState("pending");
   const [priorityOnly, setPriorityOnly] = useState(false);
   const [staleOnly, setStaleOnly] = useState(false);
+  const [queueQuery, setQueueQuery] = useState("");
   const [items, setItems] = useState([]);
   const [nextCursor, setNextCursor] = useState("");
   const [queueLoading, setQueueLoading] = useState(true);
@@ -109,52 +122,130 @@ export default function AlbumMappings() {
   const [command, setCommand] = useState({ pending: false, error: null, success: "" });
   const [baselineBusy, setBaselineBusy] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
+  const queueSearchInput = useRef(null);
+  const queueTimer = useRef(null);
+  const queuePending = useRef(false);
+  const queueView = useRef(null);
+  const queueGate = useMemo(() => createMappingQueueRequestGate(), []);
+  const queueFilters = useMemo(() => ({ status, priorityOnly, staleOnly }), [status, priorityOnly, staleOnly]);
+  const normalizedQueueQuery = normalizeMappingQueueSearch(queueQuery);
+  const queueSearchTooLong = isMappingQueueSearchTooLong(queueQuery);
   const detailSequence = useRef(0);
   const detailController = useRef(null);
   const reviewedDetail = useRef(null);
   const effort = useReviewTimer({ kind: "mapping", targetKind: "cases", targetId: caseId });
 
-  const loadQueue = useCallback(async ({ cursor = "", append = false } = {}) => {
-    if (!isLoaded || !isSignedIn) {
-      setQueueLoading(false);
-      return;
-    }
-    if (append) setQueueLoadingMore(true); else setQueueLoading(true);
+  const resetQueue = useCallback(() => {
+    queuePending.current = true;
+    setItems([]);
+    setNextCursor("");
+    setQueueLoadingMore(false);
     setQueueError(null);
+    setQueueLoading(true);
+  }, []);
+
+  const loadQueue = useCallback(async ({ cursor = "", append = false } = {}) => {
+    if (!authSession || queueSearchTooLong || (append && (queuePending.current || !cursor))) return;
+    clearTimeout(queueTimer.current);
+    queueTimer.current = null;
+    const ticket = queueGate.begin();
+    if (append) {
+      queuePending.current = true;
+      setQueueLoadingMore(true);
+      setQueueError(null);
+    } else {
+      resetQueue();
+    }
+
     try {
       const token = await getToken();
+      if (!queueGate.isCurrent(ticket)) return;
       const data = await requestLastfmJson(
-        lastfmUrl(ALBUM_MAPPING_PATH, { status, cursor, priority: priorityOnly ? "high" : "", stale: staleOnly ? "true" : "" }),
-        { headers: { Authorization: `Bearer ${token}` } },
+        lastfmUrl(ALBUM_MAPPING_PATH, buildMappingQueueParams({ ...queueFilters, query: normalizedQueueQuery, cursor })),
+        { headers: { Authorization: `Bearer ${token}` }, signal: ticket.signal },
         "The album mapping queue could not be loaded.",
       );
+      if (!queueGate.isCurrent(ticket)) return;
       const incoming = Array.isArray(data?.items) ? data.items : [];
-      setItems((current) => append ? [...current, ...incoming] : incoming);
+      setItems((current) => append ? appendUniqueMappingCases(current, incoming) : incoming);
       setNextCursor(data?.nextCursor || "");
     } catch (error) {
+      if (!queueGate.isCurrent(ticket)) return;
       const parsed = errorState(error, "The album mapping queue could not be loaded.");
       setQueueError(parsed);
       if (parsed.status === 403 || parsed.code === "MODERATOR_REQUIRED") setAccessDenied(true);
     } finally {
-      setQueueLoading(false);
-      setQueueLoadingMore(false);
+      if (queueGate.isCurrent(ticket)) {
+        queuePending.current = false;
+        setQueueLoading(false);
+        setQueueLoadingMore(false);
+      }
     }
-  }, [getToken, isLoaded, isSignedIn, priorityOnly, staleOnly, status]);
+  }, [authSession, getToken, normalizedQueueQuery, queueSearchTooLong, queueFilters, queueGate, resetQueue]);
 
   useEffect(() => {
-    loadQueue();
-  }, [loadQueue]);
+    const previous = queueView.current;
+    const enabled = Boolean(authSession);
+    const sessionChanged = Boolean(previous && previous.authSession !== authSession);
+    const accountSwitched = Boolean(previous?.authSession && previous.authSession !== authSession);
+    const clearSearch = accountSwitched && Boolean(normalizedQueueQuery || queueSearchTooLong);
+    queueView.current = {
+      authSession, enabled, filters: queueFilters, query: normalizedQueueQuery,
+      reload: enabled && !queueSearchTooLong && !clearSearch ? loadQueue : null,
+    };
+    if (sessionChanged) {
+      setAccessDenied(false);
+      setDisplayedSession(authSession);
+    }
+    if (accountSwitched) setQueueQuery("");
+    if (!enabled || queueSearchTooLong || clearSearch) {
+      queueGate.cancel();
+      resetQueue();
+      queuePending.current = false;
+      setQueueLoading(false);
+      if (enabled && !clearSearch) setQueueError({ message: "Album search must be 200 characters or fewer after normalization.", code: "INVALID_QUERY", status: 400 });
+    } else if (previous?.enabled && !sessionChanged && previous.filters === queueFilters && normalizedQueueQuery && previous.query !== normalizedQueueQuery) {
+      queueGate.cancel();
+      resetQueue();
+      queueTimer.current = setTimeout(loadQueue, MAPPING_QUEUE_SEARCH_DEBOUNCE_MS);
+    } else {
+      loadQueue();
+    }
+    return () => {
+      clearTimeout(queueTimer.current);
+      queueTimer.current = null;
+      queueGate.cancel();
+      queueView.current.reload = null;
+    };
+  }, [authSession, loadQueue, normalizedQueueQuery, queueSearchTooLong, queueFilters, queueGate, resetQueue]);
 
-  const loadDetail = useCallback(async () => {
-    if (!caseId || !isLoaded || !isSignedIn) return;
-    detailController.current?.abort();
-    const controller = new AbortController();
-    detailController.current = controller;
-    const sequence = ++detailSequence.current;
-    const current = () => !controller.signal.aborted && sequence === detailSequence.current;
+  function handleQueueSearchSubmit(event) {
+    event.preventDefault();
+    loadQueue();
+  }
+
+  function clearQueueSearch() {
+    setQueueQuery("");
+    queueSearchInput.current?.focus();
+  }
+
+  function loadMoreQueue() {
+    if (!queueLoading && !queueLoadingMore && nextCursor) return loadQueue({ cursor: nextCursor, append: true });
+  }
+
+  function retryQueue() {
+    return nextCursor && items.length > 0 ? loadMoreQueue() : loadQueue();
+  }
+
+  const queueStatus = mappingQueueStatusLabel({
+    itemsCount: items.length, hasMore: Boolean(nextCursor), query: normalizedQueueQuery,
+    loading: queueLoading, loadingMore: queueLoadingMore, error: queueError,
+  });
+
+  const clearDetail = useCallback(() => {
     reviewedDetail.current = null;
     setDetail(null);
-    setDetailLoading(true);
+    setDetailLoading(false);
     setDetailError(null);
     setAction("");
     setReason("");
@@ -163,6 +254,18 @@ export default function AlbumMappings() {
     setCatalogResults([]);
     setCatalogLoading(false);
     setCommand({ pending: false, error: null, success: "" });
+    setBaselineBusy(false);
+  }, []);
+
+  const loadDetail = useCallback(async () => {
+    detailController.current?.abort();
+    const sequence = ++detailSequence.current;
+    clearDetail();
+    if (!caseId || !authSession) return;
+    const controller = new AbortController();
+    detailController.current = controller;
+    const current = () => !controller.signal.aborted && sequence === detailSequence.current;
+    setDetailLoading(true);
     try {
       const token = await getToken();
       if (!current()) return;
@@ -184,7 +287,7 @@ export default function AlbumMappings() {
     } finally {
       if (current()) setDetailLoading(false);
     }
-  }, [caseId, getToken, isLoaded, isSignedIn]);
+  }, [authSession, caseId, clearDetail, getToken]);
 
   useEffect(() => {
     loadDetail();
@@ -202,8 +305,8 @@ export default function AlbumMappings() {
     // Only the callback belonging to the currently loaded review may reload it.
     if (!detail || detail !== reviewedDetail.current) return;
     loadDetail();
-    loadQueue();
-  }, [detail, loadDetail, loadQueue]);
+    queueView.current?.reload?.();
+  }, [detail, loadDetail]);
 
   const selectedCase = !detailLoading && !detailError && detail?.case?.caseId === caseId ? detail.case : null;
   const actionOptions = mappingActions(selectedCase ? detail : null);
@@ -215,18 +318,21 @@ export default function AlbumMappings() {
 
   async function searchCatalog(event, titleOnly = false) {
     event?.preventDefault();
+    if (!authSession) return;
     const searchQuery = titleOnly ? selectedCase?.album || "" : catalogQuery;
     if (searchQuery.trim().length < 2) {
       setCatalogResults([]);
       return;
     }
     const sequence = detailSequence.current;
+    const signal = detailController.current?.signal;
     setCatalogLoading(true);
     try {
       const token = await getToken();
+      if (sequence !== detailSequence.current) return;
       const data = await requestLastfmJson(
         lastfmUrl(`${ALBUM_MAPPING_PATH}/catalog-search`, { q: searchQuery.trim() }),
-        { headers: { Authorization: `Bearer ${token}` } },
+        { headers: { Authorization: `Bearer ${token}` }, signal },
         "Catalog search failed.",
       );
       if (sequence !== detailSequence.current) return;
@@ -241,7 +347,7 @@ export default function AlbumMappings() {
 
   async function applyAction(event) {
     event.preventDefault();
-    if (!selectedCase || command.pending || !action) return;
+    if (!authSession || !selectedCase || command.pending || !action) return;
     if (baselineBusy) {
       setCommand((current) => ({ ...current, error: { message: "Wait for the MusicBrainz release preview to finish before saving this mapping decision.", code: "BASELINE_REVIEW_IN_PROGRESS" } }));
       return;
@@ -255,6 +361,7 @@ export default function AlbumMappings() {
       return;
     }
     const sequence = detailSequence.current;
+    const signal = detailController.current?.signal;
     setCommand({ pending: true, error: null, success: "" });
     try {
       const token = await getToken();
@@ -267,6 +374,7 @@ export default function AlbumMappings() {
         lastfmUrl(`${ALBUM_MAPPING_PATH}/${encodeURIComponent(selectedCase.caseId || caseId)}/${action}`),
         {
           method: "POST",
+          signal,
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             expectedRevision: selectedCase.revision,
@@ -286,7 +394,8 @@ export default function AlbumMappings() {
       if (["approve", "reject", "no-catalog-match"].includes(action)) effort.finish(selectedCase.caseId || caseId, selectedCase.revision);
       setCommand({ pending: false, error: null, success: `${actionOptions.find((item) => item.value === action)?.label || "Decision"} recorded.` });
       setReason("");
-      await loadQueue();
+      // The moderator can change queue filters while the decision is saving.
+      await queueView.current?.reload?.();
     } catch (error) {
       if (sequence !== detailSequence.current) return;
       const parsed = errorState(error, "The mapping decision could not be applied.");
@@ -297,7 +406,7 @@ export default function AlbumMappings() {
     }
   }
 
-  if (!isLoaded) return <section className="community-page mapping-page"><div className="community-loading" role="status">Opening album mapping review…</div></section>;
+  if (!isLoaded || displayedSession !== authSession) return <section className="community-page mapping-page"><div className="community-loading" role="status">Opening album mapping review…</div></section>;
   if (!isSignedIn) return <section className="community-page mapping-page"><div className="community-empty-state"><h1>Sign in to open mapping review.</h1><p>Album-name evidence is restricted to moderators.</p></div></section>;
   if (accessDenied) return <section className="community-page mapping-page"><div className="community-empty-state" role="alert"><p className="community-eyebrow">Restricted desk · 403</p><h1>Moderator access required.</h1><p>This queue is separate from album submissions and is only available to the existing moderator allowlist.</p></div></section>;
 
@@ -313,22 +422,52 @@ export default function AlbumMappings() {
           <Link className="community-secondary-button" to="/moderation/album-suggestions">Album submissions</Link>
           <Link className="community-secondary-button" to="/moderation/album-baselines">Tracklist baselines</Link>
           <Link className="community-secondary-button" to="/suggestions/new">Submit a missing catalog album</Link>
-          <button className="community-secondary-button" disabled={queueLoading} onClick={() => loadQueue()} type="button">Refresh queue</button>
+          <button className="community-secondary-button" onClick={() => loadQueue()} type="button">Refresh queue</button>
         </div>
       </header>
 
       <div className="mapping-workspace">
         <aside className="mapping-queue-panel community-panel" aria-label="Album mapping queue">
+          <form className="mapping-queue-search" role="search" onSubmit={handleQueueSearchSubmit}>
+            <label htmlFor="mapping-queue-search">Search album name</label>
+            <div className="mapping-queue-search-controls">
+              <input ref={queueSearchInput} id="mapping-queue-search" type="search" value={queueQuery} onChange={(event) => setQueueQuery(event.target.value)} placeholder="Search album name across queue" maxLength={MAX_MAPPING_QUEUE_SEARCH_LENGTH} autoComplete="off" aria-controls="mapping-queue-results" aria-invalid={queueSearchTooLong} />
+              {queueQuery ? <button className="community-text-button" onClick={clearQueueSearch} type="button">Clear</button> : null}
+            </div>
+          </form>
           <div className="mapping-filter-row">
             <label>Review status<select value={status} onChange={(event) => setStatus(event.target.value)}>{STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
             <label className="mapping-checkbox"><input checked={priorityOnly} onChange={(event) => setPriorityOnly(event.target.checked)} type="checkbox" /> High encounter priority</label>
             <label className="mapping-checkbox"><input checked={staleOnly} onChange={(event) => setStaleOnly(event.target.checked)} type="checkbox" /> Album changed since review</label>
           </div>
-          {queueError ? <div className="community-message community-message-error" role="alert"><strong>{queueError.message}</strong>{queueError.code ? <code>{queueError.code}</code> : null}</div> : null}
-          {queueLoading && items.length === 0 ? <div className="community-loading" role="status">Loading mapping cases…</div> : null}
-          {!queueLoading && !queueError && items.length === 0 ? <div className="community-empty-state"><h2>No cases in this view.</h2><p>Unknown names appear here after the supervised worker gathers provider evidence.</p></div> : null}
-          {items.length > 0 ? <ol className="mapping-queue-list">{items.map((item) => <li key={item.caseId}><button className={`mapping-queue-card${item.caseId === caseId ? " mapping-queue-card-selected" : ""}`} onClick={() => navigate(`${ALBUM_MAPPING_PATH}/${encodeURIComponent(item.caseId)}`)} type="button"><span className="mapping-queue-topline"><span className="community-status">{formatMappingStatus(item.status)}</span>{item.mappingStale ? <span className="community-status mapping-stale-badge">Album changed</span> : null}<span>{formatCount(item.listenerCount, "listener")} · {formatCount(item.encounterCount, "encounter")}</span></span><strong>{item.album || "Unknown album"}</strong><span>{item.artist || "Unknown artist"}</span><small>Priority {item.priority ?? item.encounterCount ?? 0} · Rev. {item.revision || 1}</small></button></li>)}</ol> : null}
-          {nextCursor ? <button className="community-secondary-button mapping-load-more" disabled={queueLoadingMore} onClick={() => loadQueue({ cursor: nextCursor, append: true })} type="button">{queueLoadingMore ? "Loading…" : "Load more"}</button> : null}
+          <div id="mapping-queue-results" aria-busy={queueLoading || queueLoadingMore}>
+            {queueStatus ? <p className="mapping-queue-status" role="status">{queueStatus}</p> : null}
+            {queueError ? (
+              <div className="community-message community-message-error" role="alert">
+                <strong>{queueError.message}</strong>{queueError.code ? <code>{queueError.code}</code> : null}
+                {!queueSearchTooLong ? <button className="community-text-button" onClick={retryQueue} type="button">Retry queue</button> : null}
+              </div>
+            ) : null}
+            {queueLoading && items.length === 0 ? <div className="community-loading" role="status">Loading mapping cases…</div> : null}
+            {!queueLoading && !queueError && items.length === 0 ? (
+              <div className="community-empty-state">
+                {normalizedQueueQuery ? (
+                  <>
+                    <h2>No matching cases in this view.</h2>
+                    <p>No album names matched “{normalizedQueueQuery}” with the current filters.</p>
+                    <button className="community-text-button" onClick={clearQueueSearch} type="button">Clear search</button>
+                  </>
+                ) : (
+                  <>
+                    <h2>No cases in this view.</h2>
+                    <p>Unknown names appear here after the supervised worker gathers provider evidence.</p>
+                  </>
+                )}
+              </div>
+            ) : null}
+            {items.length > 0 ? <ol className="mapping-queue-list">{items.map((item) => <li key={item.caseId}><button className={`mapping-queue-card${item.caseId === caseId ? " mapping-queue-card-selected" : ""}`} onClick={() => navigate(`${ALBUM_MAPPING_PATH}/${encodeURIComponent(item.caseId)}`)} type="button"><span className="mapping-queue-topline"><span className="community-status">{formatMappingStatus(item.status)}</span>{item.mappingStale ? <span className="community-status mapping-stale-badge">Album changed</span> : null}<span>{formatCount(item.listenerCount, "listener")} · {formatCount(item.encounterCount, "encounter")}</span></span><strong>{item.album || "Unknown album"}</strong><span>{item.artist || "Unknown artist"}</span><small>Priority {item.priority ?? item.encounterCount ?? 0} · Rev. {item.revision || 1}</small></button></li>)}</ol> : null}
+            {nextCursor ? <button className="community-secondary-button mapping-load-more" disabled={queueLoading || queueLoadingMore} onClick={loadMoreQueue} type="button">{queueLoadingMore ? "Loading…" : "Load more"}</button> : null}
+          </div>
         </aside>
 
         <section className="mapping-detail-panel community-panel" aria-label="Selected album mapping">
@@ -344,7 +483,7 @@ export default function AlbumMappings() {
               <section className="mapping-detail-section"><h3>Search existing catalog</h3><p className="mapping-muted">Search by the observed album title independently of its artist credit. This helps review aliases such as LOONA and 이달의 소녀.</p><form className="mapping-catalog-search" onSubmit={searchCatalog}><input aria-label="Search existing catalog" onChange={(event) => setCatalogQuery(event.target.value)} placeholder="Album or artist" value={catalogQuery} /><button className="community-secondary-button" disabled={catalogLoading} type="submit">{catalogLoading ? "Searching…" : "Search"}</button><button className="community-text-button" disabled={catalogLoading} onClick={(event) => searchCatalog(event, true)} type="button">Search observed title</button></form>{catalogResults.length > 0 ? <div className="mapping-candidate-list">{catalogResults.map((candidate) => <button className="mapping-catalog-result" disabled={isApproved} key={candidate.albumId} onClick={() => setSelectedAlbumId(candidate.albumId)} type="button"><strong>{candidateLabel(candidate)}</strong><small>{candidate.albumId} · catalog rev. {candidate.catalogRevision || "?"}</small></button>)}</div> : null}</section>
               <section className="mapping-detail-section"><h3>Provider evidence</h3><Evidence evidence={selectedCase.evidence} /></section>
               {detail?.mapping ? <section className="mapping-detail-section"><h3>Current mapping</h3><p>{candidateLabel(detail.mapping)} · {formatMappingStatus(detail.mapping.status)}</p><p className="mapping-muted">Reviewed catalog revision {detail.mapping.catalogRevision || "unknown"}. Baseline tracklist availability is reviewed separately.</p>{detail.mapping.stale ? <p className="community-message community-message-error" role="status">{detail.mapping.currentCatalogRevision ? `The album changed since review (now catalog revision ${detail.mapping.currentCatalogRevision}), so this mapping resolves no listens. Review the album, then reconfirm it or revoke the mapping.` : "The mapped album is no longer in the catalog, so this mapping resolves no listens. Revoke the mapping."}</p> : null}</section> : null}
-              {reviewAlbumId ? <BaselineReviewPanel compact id={reviewAlbumId} kind="albums" onBusyChange={setBaselineBusy} onStateChange={handleBaselineStateChange} target={catalogResults.find((candidate) => candidate.albumId === reviewAlbumId) || candidates.find((candidate) => candidate.albumId === reviewAlbumId) || null} /> : null}
+              {reviewAlbumId ? <BaselineReviewPanel key={`${authSession}:${reviewAlbumId}`} compact id={reviewAlbumId} kind="albums" onBusyChange={setBaselineBusy} onStateChange={handleBaselineStateChange} target={catalogResults.find((candidate) => candidate.albumId === reviewAlbumId) || candidates.find((candidate) => candidate.albumId === reviewAlbumId) || null} /> : null}
               {effort.panel}<form className="mapping-decision-form" onSubmit={applyAction}><label>Decision<select value={action} onChange={(event) => setAction(event.target.value)}>{actionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Decision reason <span>optional</span><textarea maxLength={1000} onChange={(event) => setReason(event.target.value)} placeholder="Optional. Leave blank to record a standard note." rows="4" value={reason} /></label>{command.error ? <p className="community-message community-message-error" role="alert">{command.error.message}{command.error.code ? <code>{command.error.code}</code> : null}</p> : null}{command.success ? <p className="community-message community-message-success" role="status">{command.success}</p> : null}<button className="community-primary-button" disabled={command.pending || !action} type="submit">{command.pending ? "Saving decision…" : actionOptions.find((option) => option.value === action)?.label || "Save decision"}</button></form>
               {Array.isArray(detail?.history) && detail.history.length > 0 ? <section className="mapping-detail-section"><h3>Decision history</h3><div className="mapping-history">{detail.history.map((entry, index) => <article key={`${entry.revision || index}-${entry.action || "event"}`}><strong>{formatMappingStatus(entry.action)}</strong><span>{entry.reason || "No reason supplied"}</span><time>{formatLastfmDate(entry.createdAt || entry.at)}</time></article>)}</div></section> : null}
             </div>
