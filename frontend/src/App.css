@@ -10264,6 +10264,47 @@ label.moderation-candidate-choice {
   top: 76px;
 }
 
+.mapping-queue-search {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+}
+
+.mapping-queue-search label {
+  color: var(--app-muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.mapping-queue-search-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.mapping-queue-search-controls input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--app-line-strong);
+  border-radius: 0;
+  background: var(--app-bg);
+  color: var(--app-text);
+  font: inherit;
+}
+
+.mapping-queue-status {
+  margin: 0.85rem 0 0;
+  color: var(--app-muted);
+  font-size: 0.8rem;
+}
+
+#mapping-queue-results {
+  overflow-wrap: anywhere;
+}
+
 .mapping-filter-row,
 .mapping-detail-toolbar,
 .mapping-detail-heading,

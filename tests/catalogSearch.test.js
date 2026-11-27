@@ -94,6 +94,9 @@ test("ranked patterns fold Latin accents while preserving scripts and literal pu
     ["bjork", ["Björk", "Bjo\u0308rk"], ["Bjork Tribute!"]],
     ["Björk", ["bjork", "Björk"], ["Bjoerk"]],
     ["Cafe\u0301", ["Café", "Cafe\u0301", "Cafe"], ["Coffee"]],
+    ["É", ["É", "é", "E", "e"], ["A"]],
+    ["Viet", ["Việt", "VIỆT", "Vie\u0323\u0302t", "Vie\u0302\u0323t", "Viet"], ["Viat"]],
+    ["Việt", ["Việt", "VIỆT", "Vie\u0323\u0302t", "Vie\u0302\u0323t", "Viet"], ["Viat"]],
     ["Signals [Live]", ["Signals [Live]"], ["Signals Live"]],
     [".*", [".*"], ["anything"]],
     ["Daft Punk|Air", ["Daft Punk|Air"], ["Daft Punk", "Air"]],
@@ -103,6 +106,20 @@ test("ranked patterns fold Latin accents while preserving scripts and literal pu
     for (const value of matches) assert.ok(pattern.test(value), `${query} matches ${value}`);
     for (const value of misses) assert.ok(!pattern.test(value), `${query} excludes ${value}`);
   }
+});
+
+test("the Latin i pattern matches dotted Latin I without matching a mark on a Greek letter", () => {
+  const pattern = new RegExp(buildRankedSearchPattern("i"), "i");
+  assert.match("İstanbul", pattern);
+  assert.match("i\u0307stanbul", pattern);
+  assert.doesNotMatch("Σ\u0307", pattern);
+});
+
+test("compressed Latin variants keep 200-character patterns within 12,600 bytes", () => {
+  const byteLengths = [..."abcdefghijklmnopqrstuvwxyz"].map((character) =>
+    Buffer.byteLength(buildRankedSearchPattern(character), "utf8"));
+  assert.equal(Math.max(...byteLengths), 63);
+  assert.equal(Buffer.byteLength(buildRankedSearchPattern("o".repeat(200)), "utf8"), 12_600);
 });
 
 test("artist aliases normalize whole queries without expanding unrelated words", () => {
@@ -147,6 +164,22 @@ test("typographic apostrophe queries match ASCII apostrophes on both catalog end
 
     assert.equal(result.status, 200, endpoint.name);
     assert.deepEqual(endpoint.extract(result.body).map((album) => album.albumId), [ALBUM_ID], endpoint.name);
+  }
+});
+
+test("/search/search matches precomposed and decomposed Vietnamese album titles", async () => {
+  const titles = ["Việt", "Vie\u0323\u0302t"];
+  const albums = [...titles, "Viat"].map((title, index) => ({
+    ...albumWithArtist("Fixture artist"),
+    albumId: `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa${index}`,
+    title,
+  }));
+  installCatalogMock(albums);
+
+  for (const q of ["Việt", "Viet"]) {
+    const result = await callRoute(searchRouter, "get", "/search", { query: { q } });
+    assert.equal(result.status, 200, q);
+    assert.deepEqual(result.body.map((album) => album.title), titles, q);
   }
 });
 
