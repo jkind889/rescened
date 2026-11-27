@@ -40,13 +40,14 @@ function errorResponse(res, error) {
   return res.status(status).json({ error: code, code });
 }
 function parseListQuery(req) {
-  const allowed = new Set(["status", "priority", "stale", "cursor", "limit"]);
+  const allowed = new Set(["status", "priority", "stale", "cursor", "limit", "q"]);
   Object.keys(req.query || {}).forEach((key) => { if (!allowed.has(key)) { const error = new Error("INVALID_REQUEST"); error.code = "INVALID_REQUEST"; error.status = 400; throw error; } });
   for (const key of ["status", "priority", "stale", "cursor", "limit"]) {
     if (req.query?.[key] !== undefined && typeof req.query[key] !== "string") {
       const error = new Error("INVALID_REQUEST"); error.code = "INVALID_REQUEST"; error.status = 400; throw error;
     }
   }
+  if (req.query?.q !== undefined && typeof req.query.q !== "string") { const error = new Error("INVALID_QUERY"); error.code = "INVALID_QUERY"; error.status = 400; throw error; }
   const status = req.query?.status || undefined;
   const priority = req.query?.priority || undefined;
   const cursor = req.query?.cursor || undefined;
@@ -56,7 +57,7 @@ function parseListQuery(req) {
   if (req.query?.stale !== undefined && req.query.stale !== "true") { const error = new Error("INVALID_STALE"); error.code = "INVALID_STALE"; error.status = 400; throw error; }
   const stale = req.query?.stale === "true";
   const limit = req.query?.limit === undefined ? undefined : Number(req.query.limit);
-  return { status, priority, stale, cursor, limit };
+  return { status, priority, stale, cursor, limit, q: req.query?.q };
 }
 
 router.get("/", authenticate, moderatorOnly, async (req, res) => {

@@ -479,6 +479,8 @@ Reports never hide a comment on their own, and reporters are visible only to mod
 
 ## Album name mapping decisions
 
+In the album-name mapping queue, **Search album name** searches all cases that meet the current review status, encounter priority, and staleness filters. Typing starts a search after a short pause. Enter and **Refresh queue** search immediately, and **Clear** restores the queue with the same filters. Opening a case preserves the search and loaded pages. A count such as “20+ matching cases” means 20 cases are loaded and another page is available. **Retry queue** repeats a failed first page or continues from the failed page's cursor.
+
 The album-name mapping desk (`/moderation/album-mappings`) is a separate workflow from album submissions. Pending, rejected, and no-catalog-match cases offer **Approve mapping**. An approved, active mapping whose catalog album has changed offers **Reconfirm mapping** against the catalog revision displayed in the review. Current mappings do not offer reconfirmation; a missing catalog album can be revoked. Reconfirmation keeps the same mapped album. To select a different album, revoke the mapping and review an approval again.
 
 If a mapping decision conflicts, **Try again** fetches the selected case from the server and replaces its details. Decisions are blocked while this fetch is pending or has failed. Review the returned case and choose a decision again; recovery never automatically resubmits the previous command. Switching cases clears the draft reason, decision, and catalog selection. Obsolete detail and mutation responses cannot replace the current case. Baseline decisions also refresh the mapping details because they can advance the catalog revision.

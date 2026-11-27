@@ -362,8 +362,12 @@ test("an invalid manifest stops collection before any query", async () => {
 });
 
 function oidAt(date) {
-  const id = new mongoose.Types.ObjectId();
-  id.id.writeUInt32BE(Math.floor(new Date(date).getTime() / 1000), 0);
+  // BSON returns a copy from ObjectId.id; construct from the updated bytes.
+  const bytes = Buffer.from(new mongoose.Types.ObjectId().id);
+  const seconds = Math.floor(new Date(date).getTime() / 1000);
+  bytes.writeUInt32BE(seconds, 0);
+  const id = new mongoose.Types.ObjectId(bytes);
+  assert.equal(id.getTimestamp().getTime(), seconds * 1000);
   return id;
 }
 

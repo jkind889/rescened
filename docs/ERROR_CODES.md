@@ -60,9 +60,14 @@ Some older catalog and social endpoints still return only `{ "error": "..." }`. 
 
 | Code | Status | Meaning |
 | --- | --- | --- |
-| `INVALID_CURSOR` | `400` | An opaque contributor, approved-feed, or moderator pagination cursor could not be decoded or validated. |
+| `INVALID_CURSOR` | `400` | An opaque contributor, approved-feed, or moderator pagination cursor could not be decoded or validated. The album mapping queue also returns this code for a cursor from a different search. |
 | `INVALID_SUBMISSION` | `400` | A suggestion or correction payload, value, URL, date, count, or persisted submission fails validation. |
 | `INVALID_MODERATION_REQUEST` | `400` | A moderation body, filter, limit, public ID, reason, or `applyFields` selection is invalid. |
+| `INVALID_QUERY` | `400` | The album mapping queue requires a single text `q` of at most 200 UTF-16 code units both before and after normalization, with no NUL character. Each generated regex must fit within 16,000 UTF-8 bytes. The mapping desk's separate catalog search also uses this code for invalid search text. |
+| `INVALID_STATUS` | `400` | The album mapping queue received an unsupported review status. |
+| `INVALID_PRIORITY` | `400` | The album mapping queue received a non-empty priority value other than `high`. |
+| `INVALID_STALE` | `400` | The album mapping queue received a `stale` value other than `true`. |
+| `INVALID_LIMIT` | `400` | The album mapping queue received a limit outside the allowed integer range of 1 through 50. |
 | `INVALID_BOARD_ID` | `400` | A board mutation supplied a client-owned `boardId` or Mongo `_id`; board IDs are server-generated UUID-v4 values. |
 | `INVALID_BOARD_DESCRIPTION` | `400` | A board create or update supplied a description that is not text or is longer than 500 characters. |
 | `INVALID_REVIEW` | `400` | A review create or edit has an invalid rating (not a whole or half number from 1 to 5), missing or overlong text (over 300 characters), or, on edit, a field other than `rating` and `reviewText`. |
